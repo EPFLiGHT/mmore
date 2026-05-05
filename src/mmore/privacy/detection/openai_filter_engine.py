@@ -50,7 +50,7 @@ class OpenAIFilterEngine(DetectionEngine):
     """Detect PII spans with the token classification model
     ``openai/privacy-filter`` from HuggingFace.
 
-    Each instance carries its own ``entity_types`` and ``confidence_threshold``;
+    Each instance carries its own ``entity_types`` and ``confidence_threshold``,
     pipelines with the same ``model_name`` are shared via ``_pipeline_cache``.
     """
 
