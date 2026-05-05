@@ -145,6 +145,10 @@ privacy = [
     "mmore[llm]",
     "langgraph>=1.0",
     "langgraph-checkpoint-sqlite>=2.0",
+    "gliner",
+    "presidio-analyzer",
+    "presidio-anonymizer",
+    "spacy",
 ]
 
 # --- Composite + variant extras ---
