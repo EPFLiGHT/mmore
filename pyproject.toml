@@ -151,6 +151,12 @@ privacy = [
     "spacy",
 ]
 
+privacy-openai-filter = [
+    "mmore[privacy]",
+    "transformers>=5",
+    "peft>=0.18",
+]
+
 # --- Composite + variant extras ---
 
 tui = [
@@ -193,6 +199,16 @@ conflicts = [
   [
     { extra = "all" },
     { extra = "colvision" },
+  ],
+  [
+    # privacy-openai-filter needs transformers>=5 but has conflicts with
+    # marker-pdf in `process`/`all` (transformers<5)
+    { extra = "privacy-openai-filter" },
+    { extra = "process" },
+  ],
+  [
+    { extra = "privacy-openai-filter" },
+    { extra = "all" },
   ],
 ]
 
