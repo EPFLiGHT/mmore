@@ -9,10 +9,9 @@ from typing_extensions import Self
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
+from .defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_OPENAI_FILTER_MODEL
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MODEL = "openai/privacy-filter"
 
 
 def _load_openai_filter_pipeline(model_name: str) -> Any:
@@ -56,9 +55,9 @@ class OpenAIFilterEngine(DetectionEngine):
 
     def __init__(
         self,
-        model_name: str = _DEFAULT_MODEL,
+        model_name: str = DEFAULT_OPENAI_FILTER_MODEL,
         entity_types: Optional[Sequence[str]] = None,
-        confidence_threshold: float = 0.7,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
         self._model_name = model_name
         self._entity_types: Optional[List[str]] = (

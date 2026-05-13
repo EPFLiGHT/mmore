@@ -12,61 +12,30 @@ from typing_extensions import Self
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
+from .defaults import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_LANGUAGE,
+    PRESIDIO_CLINICAL_PATTERNS,
+)
 
 
 def _build_clinical_recognizers() -> List[Any]:
-    """Build the clinical-domain custom recognizers (MRN, hospital dates, insurance ID)."""
+    """Build the clinical-domain custom recognizers."""
     from presidio_analyzer import Pattern, PatternRecognizer
 
-    mrn = PatternRecognizer(
-        supported_entity="MRN",
-        patterns=[
-            Pattern(
-                name="mrn_with_prefix",
-                regex=r"\bMRN[\s:#]*\d{6,10}\b",
-                score=0.9,
-            ),
-            Pattern(
-                name="mrn_bare_8_digits",
-                regex=r"\b\d{8}\b",
-                score=0.4,
-            ),
-        ],
-        context=["mrn", "medical record", "record number", "patient id"],
-    )
-
-    hospital_date = PatternRecognizer(
-        supported_entity="HOSPITAL_DATE",
-        patterns=[
-            Pattern(
-                name="iso_date",
-                regex=r"\b\d{4}-\d{2}-\d{2}\b",
-                score=0.6,
-            ),
-            Pattern(
-                name="us_date",
-                regex=r"\b\d{1,2}/\d{1,2}/\d{4}\b",
-                score=0.6,
-            ),
-        ],
-        context=["admission", "discharge", "appointment", "hospital", "clinic"],
-    )
-
-    insurance_id = PatternRecognizer(
-        supported_entity="INSURANCE_ID",
-        patterns=[
-            Pattern(
-                name="insurance_alnum",
-                regex=r"\b[A-Z]{2,3}\d{6,12}\b",
-                score=0.7,
-            ),
-        ],
-        context=["insurance", "policy", "member id", "subscriber"],
-    )
-
-    # TODO: check how relevant these patterns are and add more
-    # TODO: check if we could register a tool to add new patterns
-    return [mrn, hospital_date, insurance_id]
+    recognizers: List[Any] = []
+    for spec in PRESIDIO_CLINICAL_PATTERNS:
+        recognizers.append(
+            PatternRecognizer(
+                supported_entity=spec["entity"],
+                patterns=[
+                    Pattern(name=name, regex=regex, score=score)
+                    for name, regex, score in spec["patterns"]
+                ],
+                context=list(spec["context"]),
+            )
+        )
+    return recognizers
 
 
 def _load_presidio_analyzer() -> Any:
@@ -110,8 +79,8 @@ class PresidioEngine(DetectionEngine):
     def __init__(
         self,
         entity_types: Optional[Sequence[str]] = None,
-        confidence_threshold: float = 0.7,
-        language: str = "en",
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+        language: str = DEFAULT_LANGUAGE,
     ):
         self._entity_types: Optional[List[str]] = (
             list(entity_types) if entity_types else None

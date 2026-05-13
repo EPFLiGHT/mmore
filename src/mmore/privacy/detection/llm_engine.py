@@ -13,20 +13,13 @@ from ...rag.llm import LLMConfig
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
+from .defaults import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_LABELS,
+    DEFAULT_LLM_CONFIG,
+)
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_LABELS = [
-    "PERSON",
-    "PHONE",
-    "EMAIL",
-    "MRN",
-    "DATE",
-    "LOCATION",
-    "SSN",
-    "INSURANCE_ID",
-]
-_DEFAULT_LLM = LLMConfig(llm_name="Qwen/Qwen2.5-3B-Instruct", max_new_tokens=512)
 
 _pipeline_cache: Dict[str, Any] = {}
 _pipeline_cache_lock = threading.Lock()
@@ -62,7 +55,7 @@ def _build_demos() -> List[Any]:
     return [
         dspy.Example(
             text="John Doe called from 555-1234 about his MRN 87654321.",
-            entity_types=list(_DEFAULT_LABELS),
+            entity_types=list(DEFAULT_LABELS),
             spans=[
                 _DetectedSpan(text="John Doe", label="PERSON", score=0.95),
                 _DetectedSpan(text="555-1234", label="PHONE", score=0.95),
@@ -71,7 +64,7 @@ def _build_demos() -> List[Any]:
         ).with_inputs("text", "entity_types"),
         dspy.Example(
             text="Patient at 123 Main St emailed jane@example.com on 2024-01-15.",
-            entity_types=list(_DEFAULT_LABELS),
+            entity_types=list(DEFAULT_LABELS),
             spans=[
                 _DetectedSpan(text="123 Main St", label="LOCATION", score=0.9),
                 _DetectedSpan(text="jane@example.com", label="EMAIL", score=0.95),
@@ -238,11 +231,11 @@ class LLMDetectionEngine(DetectionEngine):
         self,
         llm_config: LLMConfig,
         entity_types: Optional[Sequence[str]] = None,
-        confidence_threshold: float = 0.7,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
         self._llm_config = llm_config
         self._entity_types: List[str] = (
-            list(entity_types) if entity_types else list(_DEFAULT_LABELS)
+            list(entity_types) if entity_types else list(DEFAULT_LABELS)
         )
         self._confidence_threshold = confidence_threshold
 
@@ -305,4 +298,4 @@ def detect_pii_llm(text: str) -> List[PIISpan]:
         engine = LLMDetectionEngine.from_config(detection_cfg)
         register_tool("detect_pii_llm_custom", engine.detect)
     """
-    return LLMDetectionEngine(_DEFAULT_LLM).detect(text)
+    return LLMDetectionEngine(DEFAULT_LLM_CONFIG).detect(text)

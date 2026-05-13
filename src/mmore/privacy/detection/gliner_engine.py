@@ -9,20 +9,13 @@ from typing_extensions import Self
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
+from .defaults import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_GLINER_MODEL,
+    DEFAULT_LABELS,
+)
 
 logger = logging.getLogger(__name__)
-
-_DEFAULT_MODEL = "nvidia/gliner-PII"
-_DEFAULT_LABELS = [
-    "PERSON",
-    "PHONE",
-    "EMAIL",
-    "MRN",
-    "DATE",
-    "LOCATION",
-    "SSN",
-    "INSURANCE_ID",  # TODO: complete list later
-]
 
 _model_cache: Dict[str, Any] = {}
 _model_cache_lock = threading.Lock()
@@ -61,13 +54,13 @@ class GLiNEREngine(DetectionEngine):
 
     def __init__(
         self,
-        model_name: str = _DEFAULT_MODEL,
+        model_name: str = DEFAULT_GLINER_MODEL,
         entity_types: Optional[Sequence[str]] = None,
-        confidence_threshold: float = 0.7,
+        confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
         self._model_name = model_name
         self._entity_types: List[str] = (
-            list(entity_types) if entity_types else list(_DEFAULT_LABELS)
+            list(entity_types) if entity_types else list(DEFAULT_LABELS)
         )
         self._confidence_threshold = confidence_threshold
 
