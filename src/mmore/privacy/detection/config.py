@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from ...rag.llm import LLMConfig
+from .defaults import DEFAULT_CONFIDENCE_THRESHOLD
 
 
 @dataclass
@@ -12,5 +13,5 @@ class DetectionConfig:
 
     engine: str
     entity_types: List[str] = field(default_factory=list)
-    confidence_threshold: float = 0.7
+    confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     llm: Optional[LLMConfig] = None
