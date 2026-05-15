@@ -20,31 +20,43 @@ from .defaults import (
 
 logger = logging.getLogger(__name__)
 
+# --------------------------------------------------------------------------
+# Prompts
+# --------------------------------------------------------------------------
+
+PII_DETECTION_INSTRUCTION = (
+    "Find every PII occurrence in the input text. For each, return the\n"
+    "exact substring (not paraphrased), its entity label, and a confidence."
+)
+
+SPAN_TEXT_DESC = "exact substring of the input that is PII"
+SPAN_LABEL_DESC = "entity type label, e.g. PERSON, EMAIL, MRN"
+SPAN_SCORE_DESC = "confidence in [0, 1]; not calibrated, but constrained to the range"
+
+INPUT_TEXT_DESC = "text to scan for PII"
+INPUT_ENTITY_TYPES_DESC = "restrict detection to these entity type labels"
+OUTPUT_SPANS_DESC = (
+    "list of detected PII spans, each with the exact substring from the input"
+)
+
 
 class _DetectedSpan(BaseModel):
-    text: str = Field(description="exact substring of the input that is PII")
-    label: str = Field(description="entity type label, e.g. PERSON, EMAIL, MRN")
+    text: str = Field(description=SPAN_TEXT_DESC)
+    label: str = Field(description=SPAN_LABEL_DESC)
     score: float = Field(
         ge=0.0,
         le=1.0,
-        description="confidence in [0, 1]; not calibrated, but constrained to the range",
+        description=SPAN_SCORE_DESC,
     )
 
 
 def _build_signature() -> Any:
     class DetectPIISignature(dspy.Signature):
-        """Find every PII occurrence in the input text. For each, return the
-        exact substring (not paraphrased), its entity label, and a confidence."""
+        text: str = dspy.InputField(desc=INPUT_TEXT_DESC)
+        entity_types: List[str] = dspy.InputField(desc=INPUT_ENTITY_TYPES_DESC)
+        spans: List[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
 
-        text: str = dspy.InputField(desc="text to scan for PII")
-        entity_types: List[str] = dspy.InputField(
-            desc="restrict detection to these entity type labels"
-        )
-        spans: List[_DetectedSpan] = dspy.OutputField(
-            desc="list of detected PII spans, each with the exact substring from the input"
-        )
-
-    return DetectPIISignature
+    return DetectPIISignature.with_instructions(PII_DETECTION_INSTRUCTION)
 
 
 def _build_demos() -> List[Any]:
