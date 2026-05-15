@@ -14,7 +14,6 @@ from mmore.privacy.detection.gliner_engine import (
 )
 from mmore.privacy.detection.llm_engine import (
     LLMDetectionEngine,
-    clear_llm_engine_cache,
     detect_pii_llm,
 )
 from mmore.privacy.detection.openai_filter_engine import (
@@ -28,6 +27,7 @@ from mmore.privacy.detection.presidio_engine import (
     clear_presidio_cache,
     detect_pii_presidio,
 )
+from mmore.privacy.dspy_llm import clear_dspy_lm_cache
 from mmore.rag.llm import LLMConfig
 from mmore.utils import load_config
 
@@ -43,7 +43,7 @@ def clear_detection_engine_caches():
     clear_gliner_cache()
     clear_openai_filter_cache()
     clear_presidio_cache()
-    clear_llm_engine_cache()
+    clear_dspy_lm_cache()
 
 
 def _fake_gliner_model(predictions):
@@ -92,7 +92,7 @@ def _fake_dspy_predictor(spans):
 def _patch_dspy_engine(predictor):
     return patch.multiple(
         "mmore.privacy.detection.llm_engine",
-        _build_dspy_lm=MagicMock(return_value=MagicMock()),
+        build_dspy_lm=MagicMock(return_value=MagicMock()),
         _build_predictor=MagicMock(return_value=predictor),
     )
 
@@ -574,34 +574,34 @@ def test_llm_engine_from_config_requires_llm_block():
 
 
 def test_llm_engine_hf_provider_routes_to_local_hf_lm():
-    from mmore.privacy.detection.llm_engine import _build_dspy_lm, _LocalHFLM
+    from mmore.privacy.dspy_llm import LocalHFLM, build_dspy_lm
 
     cfg = LLMConfig(llm_name="some-org/some-model", max_new_tokens=16)
     assert cfg.provider == "HF"
     assert cfg.base_url is None
 
     with patch(
-        "mmore.privacy.detection.llm_engine._load_local_hf_pipeline",
+        "mmore.privacy.dspy_llm._load_local_hf_pipeline",
         return_value=MagicMock(),
     ):
-        lm = _build_dspy_lm(cfg)
+        lm = build_dspy_lm(cfg)
 
-    assert isinstance(lm, _LocalHFLM)
+    assert isinstance(lm, LocalHFLM)
 
 
 def test_llm_engine_openai_provider_still_uses_litellm():
     import dspy
 
-    from mmore.privacy.detection.llm_engine import _build_dspy_lm, _LocalHFLM
+    from mmore.privacy.dspy_llm import LocalHFLM, build_dspy_lm
 
     cfg = LLMConfig(llm_name="gpt-4o-mini", max_new_tokens=16)
     assert cfg.provider == "OPENAI"
 
     with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-test"}):
-        lm = _build_dspy_lm(cfg)
+        lm = build_dspy_lm(cfg)
 
     assert isinstance(lm, dspy.LM)
-    assert not isinstance(lm, _LocalHFLM)
+    assert not isinstance(lm, LocalHFLM)
 
 
 def test_llm_engine_from_config_propagates_threshold_and_labels():
