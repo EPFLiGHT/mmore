@@ -49,7 +49,7 @@ class GLiNEREngine(DetectionEngine):
     """Detect PII spans with a GLiNER model.
 
     Each instance carries its own ``entity_types`` and ``confidence_threshold``,
-    pipelines with the same ``model_name`` are shared via ``_pipeline_cache``.
+    models with the same ``model_name`` are shared via ``_models_cache``.
     """
 
     def __init__(

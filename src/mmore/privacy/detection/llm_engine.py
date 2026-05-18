@@ -59,6 +59,7 @@ def _build_signature() -> Any:
     return DetectPIISignature.with_instructions(PII_DETECTION_INSTRUCTION)
 
 
+# TODO: refine these examples later once we have domain definitions
 def _build_demos() -> List[Any]:
     return [
         dspy.Example(
@@ -82,7 +83,7 @@ def _build_demos() -> List[Any]:
     ]
 
 
-def _build_predictor() -> Any:
+def _build_predictor() -> dspy.Predict:
     predictor = dspy.Predict(_build_signature())
     predictor.demos = _build_demos()
     return predictor
@@ -92,9 +93,7 @@ class LLMDetectionEngine(DetectionEngine):
     """Detect PII spans by prompting an LLM with a typed DSPy signature.
 
     Each instance carries its own ``LLMConfig``, ``entity_types`` and
-    ``confidence_threshold``; the underlying DSPy LM (and any local-HF
-    pipeline) is built and cached by :mod:`mmore.privacy.dspy_llm`.
-    """
+    ``confidence_threshold``."""
 
     def __init__(
         self,
@@ -107,6 +106,8 @@ class LLMDetectionEngine(DetectionEngine):
             list(entity_types) if entity_types else list(DEFAULT_LABELS)
         )
         self._confidence_threshold = confidence_threshold
+        self._llm: Optional[dspy.BaseLM] = None
+        self._predictor: Optional[dspy.Predict] = None
 
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
@@ -119,9 +120,25 @@ class LLMDetectionEngine(DetectionEngine):
             confidence_threshold=config.confidence_threshold,
         )
 
+    @property
+    def llm(self) -> dspy.BaseLM:
+        """Lazy-build and cache the DSPy LM on first access."""
+        llm = self._llm
+        if llm is None:
+            llm = self._llm = build_dspy_lm(self._llm_config)
+        return llm
+
+    @property
+    def predictor(self) -> dspy.Predict:
+        """Lazy-build and cache the DSPy predictor on first access."""
+        predictor = self._predictor
+        if predictor is None:
+            predictor = self._predictor = _build_predictor()
+        return predictor
+
     def detect(self, text: str) -> List[PIISpan]:
-        lm = build_dspy_lm(self._llm_config)
-        predictor = _build_predictor()
+        lm = self.llm
+        predictor = self.predictor
         try:
             with dspy.context(lm=lm):
                 prediction = predictor(text=text, entity_types=self._entity_types)

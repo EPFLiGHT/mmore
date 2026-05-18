@@ -118,7 +118,7 @@ class LocalHFLM(dspy.BaseLM):
         )
 
 
-def build_dspy_lm(llm_config: LLMConfig) -> Any:
+def build_dspy_lm(llm_config: LLMConfig) -> dspy.BaseLM:
     """Build a DSPy ``BaseLM`` from an ``LLMConfig``."""
     if llm_config.provider == "HF" and llm_config.base_url is None:
         return LocalHFLM(

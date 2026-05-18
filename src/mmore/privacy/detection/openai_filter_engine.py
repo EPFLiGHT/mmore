@@ -97,8 +97,8 @@ class OpenAIFilterEngine(DetectionEngine):
         return spans
 
 
-@register_tool("detect_pii_openai")
-def detect_pii_openai(text: str) -> List[PIISpan]:
+@register_tool("detect_pii_openai_filter")
+def detect_pii_openai_filter(text: str) -> List[PIISpan]:
     """Detect PII spans in ``text`` using a default-configured openai/privacy-filter engine.
 
     Agents needing per-config behavior should be wired by setup code that
@@ -106,6 +106,6 @@ def detect_pii_openai(text: str) -> List[PIISpan]:
     its ``detect()`` function under a distinct tool name, e.g.::
 
         engine = OpenAIFilterEngine.from_config(detection_cfg)
-        register_tool("detect_pii_openai_custom", engine.detect)
+        register_tool("detect_pii_openai_filter_custom", engine.detect)
     """
     return OpenAIFilterEngine().detect(text)
