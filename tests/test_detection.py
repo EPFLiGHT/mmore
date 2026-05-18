@@ -19,7 +19,7 @@ from mmore.privacy.detection.llm_engine import (
 from mmore.privacy.detection.openai_filter_engine import (
     OpenAIFilterEngine,
     clear_openai_filter_cache,
-    detect_pii_openai,
+    detect_pii_openai_filter,
 )
 from mmore.privacy.detection.presidio_engine import (
     PresidioEngine,
@@ -243,9 +243,9 @@ def test_gliner_engine_from_config_propagates_threshold_and_labels():
     assert kwargs["labels"] == ["PERSON", "MRN"]
 
 
-def test_detect_pii_openai_is_registered():
-    assert "detect_pii_openai" in tool_registry
-    assert tool_registry["detect_pii_openai"] is detect_pii_openai
+def test_detect_pii_openai_filter_is_registered():
+    assert "detect_pii_openai_filter" in tool_registry
+    assert tool_registry["detect_pii_openai_filter"] is detect_pii_openai_filter
 
 
 def test_openai_filter_engine_returns_spans_on_synthetic_note():
@@ -631,7 +631,7 @@ def test_llm_engine_from_config_propagates_threshold_and_labels():
     "engine_name, expected_tool",
     [
         ("gliner", detect_pii_gliner),
-        ("openai_filter", detect_pii_openai),
+        ("openai_filter", detect_pii_openai_filter),
         ("presidio", detect_pii_presidio),
         ("llm", detect_pii_llm),
     ],
@@ -647,6 +647,6 @@ def test_detection_engine_name_resolves_to_registered_tool(engine_name, expected
     )
     assert cfg.engine == engine_name
 
-    tool_name = f"detect_pii_{engine_name.replace('openai_filter', 'openai')}"
+    tool_name = f"detect_pii_{engine_name}"
     assert tool_name in tool_registry
     assert tool_registry[tool_name] is expected_tool
