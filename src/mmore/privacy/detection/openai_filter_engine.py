@@ -59,10 +59,13 @@ class OpenAIFilterEngine(DetectionEngine):
         entity_types: Optional[Sequence[str]] = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
+        if entity_types:
+            logger.warning(
+                "OpenAIFilterEngine ignores entity_types=%r; "
+                "the model emits its own label taxonomy.",
+                list(entity_types),
+            )
         self._model_name = model_name
-        self._entity_types: Optional[List[str]] = (
-            list(entity_types) if entity_types else None
-        )
         self._confidence_threshold = confidence_threshold
 
     @classmethod
@@ -84,8 +87,6 @@ class OpenAIFilterEngine(DetectionEngine):
             if score < self._confidence_threshold:
                 continue
             label = str(r.get("entity_group") or r.get("entity") or "")
-            if self._entity_types is not None and label not in self._entity_types:
-                continue
             spans.append(
                 PIISpan(
                     start=int(r["start"]),
