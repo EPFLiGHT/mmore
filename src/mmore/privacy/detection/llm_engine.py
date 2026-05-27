@@ -26,7 +26,8 @@ logger = logging.getLogger(__name__)
 
 PII_DETECTION_INSTRUCTION = (
     "Find every PII occurrence in the input text. For each, return the\n"
-    "exact substring (not paraphrased), its entity label, and a confidence."
+    "exact substring (not paraphrased), its entity label, and a confidence.\n"
+    "Return spans in the order they appear in the text."
 )
 
 SPAN_TEXT_DESC = "exact substring of the input that is PII"
@@ -147,6 +148,8 @@ class LLMDetectionEngine(DetectionEngine):
             return []
 
         spans: List[PIISpan] = []
+        # Maps repeated fragments to successive occurrences
+        search_cursors: dict[str, int] = {}
         for s in getattr(prediction, "spans", None) or []:
             try:
                 fragment = str(s.text)
@@ -159,12 +162,13 @@ class LLMDetectionEngine(DetectionEngine):
             score = max(0.0, min(1.0, score))
             if score < self._confidence_threshold:
                 continue
-            start = text.find(fragment)
+            start = text.find(fragment, search_cursors.get(fragment, 0))
             if start < 0:
                 logger.debug(
                     "LLM emitted fragment %r not found in source text", fragment
                 )
                 continue
+            search_cursors[fragment] = start + len(fragment)
             spans.append(
                 PIISpan(
                     start=start, end=start + len(fragment), label=label, score=score
