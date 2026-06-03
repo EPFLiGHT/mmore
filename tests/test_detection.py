@@ -251,8 +251,8 @@ def test_detect_pii_openai_filter_is_registered():
 def test_openai_filter_engine_returns_spans_on_synthetic_note():
     fake = _fake_openai_pipeline(
         [
-            {"start": 0, "end": 10, "entity_group": "PERSON", "score": 0.95},
-            {"start": 11, "end": 31, "entity_group": "EMAIL", "score": 0.88},
+            {"start": 0, "end": 10, "entity": "B-private_person", "score": 0.95},
+            {"start": 11, "end": 31, "entity": "B-private_email", "score": 0.88},
         ]
     )
     with patch(
@@ -263,15 +263,15 @@ def test_openai_filter_engine_returns_spans_on_synthetic_note():
         spans = engine.detect("John Smith john@hospital.org called.")
 
     assert len(spans) == 2
-    assert spans[0].label == "PERSON"
-    assert spans[1].label == "EMAIL"
+    assert spans[0].label == "B-private_person"
+    assert spans[1].label == "B-private_email"
 
 
 def test_openai_filter_engine_filters_below_threshold():
     fake = _fake_openai_pipeline(
         [
-            {"start": 0, "end": 10, "entity_group": "PERSON", "score": 0.95},
-            {"start": 11, "end": 25, "entity_group": "EMAIL", "score": 0.30},
+            {"start": 0, "end": 10, "entity": "B-private_person", "score": 0.95},
+            {"start": 11, "end": 25, "entity": "B-private_email", "score": 0.30},
         ]
     )
     with patch(
@@ -282,25 +282,27 @@ def test_openai_filter_engine_filters_below_threshold():
         spans = engine.detect("synthetic")
 
     assert len(spans) == 1
-    assert spans[0].label == "PERSON"
+    assert spans[0].label == "B-private_person"
 
 
-def test_openai_filter_engine_restricts_to_entity_types():
+def test_openai_filter_engine_ignores_entity_types():
     fake = _fake_openai_pipeline(
         [
-            {"start": 0, "end": 10, "entity_group": "PERSON", "score": 0.95},
-            {"start": 11, "end": 21, "entity_group": "DATE", "score": 0.90},
+            {"start": 0, "end": 10, "entity": "B-private_person", "score": 0.95},
+            {"start": 11, "end": 21, "entity": "B-private_date", "score": 0.90},
         ]
     )
     with patch(
         "mmore.privacy.detection.openai_filter_engine._load_openai_filter_pipeline",
         return_value=fake,
     ):
-        engine = OpenAIFilterEngine(entity_types=["PERSON"], confidence_threshold=0.5)
+        engine = OpenAIFilterEngine(
+            entity_types=["private_person"], confidence_threshold=0.5
+        )
         spans = engine.detect("synthetic")
 
-    assert len(spans) == 1
-    assert spans[0].label == "PERSON"
+    assert len(spans) == 2
+    assert {s.label for s in spans} == {"B-private_person", "B-private_date"}
 
 
 def test_openai_filter_engine_shares_pipeline_cache_across_instances():
@@ -314,19 +316,19 @@ def test_openai_filter_engine_shares_pipeline_cache_across_instances():
         assert mock_load.call_count == 1
 
 
-def test_openai_filter_engine_from_config_applies_threshold_and_labels():
+def test_openai_filter_engine_from_config_applies_threshold():
     cfg = DetectionConfig(
         engine="openai_filter",
-        entity_types=["PERSON"],
+        entity_types=[],
         confidence_threshold=0.6,
     )
     engine = OpenAIFilterEngine.from_config(cfg)
 
     fake = _fake_openai_pipeline(
         [
-            {"start": 0, "end": 10, "entity_group": "PERSON", "score": 0.95},
-            {"start": 11, "end": 20, "entity_group": "PERSON", "score": 0.50},
-            {"start": 21, "end": 30, "entity_group": "EMAIL", "score": 0.95},
+            {"start": 0, "end": 10, "entity": "B-private_person", "score": 0.95},
+            {"start": 11, "end": 20, "entity": "B-private_person", "score": 0.50},
+            {"start": 21, "end": 30, "entity": "B-private_email", "score": 0.95},
         ]
     )
     with patch(
@@ -335,9 +337,9 @@ def test_openai_filter_engine_from_config_applies_threshold_and_labels():
     ):
         spans = engine.detect("synthetic")
 
-    assert len(spans) == 1
-    assert spans[0].label == "PERSON"
-    assert spans[0].score == 0.95
+    assert len(spans) == 2
+    assert {s.label for s in spans} == {"B-private_person", "B-private_email"}
+    assert all(s.score >= 0.6 for s in spans)
 
 
 def test_detect_pii_presidio_is_registered():
