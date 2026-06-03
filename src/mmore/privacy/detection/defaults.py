@@ -6,6 +6,7 @@ DEFAULT_LANGUAGE = "en"
 
 DEFAULT_GLINER_MODEL = "nvidia/gliner-PII"
 DEFAULT_OPENAI_FILTER_MODEL = "openai/privacy-filter"
+DEFAULT_PRESIDIO_SPACY_MODEL = "en_core_web_lg"
 
 DEFAULT_LLM_CONFIG = LLMConfig(
     llm_name="Qwen/Qwen2.5-3B-Instruct",

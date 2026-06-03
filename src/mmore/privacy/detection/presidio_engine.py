@@ -4,6 +4,8 @@ Wraps ``presidio_analyzer.AnalyzerEngine`` (rule-based and spaCy NER) with
 possibility to add custom clinical recognizers.
 """
 
+import importlib
+import logging
 import threading
 from typing import Any, List, Optional, Sequence
 
@@ -15,8 +17,25 @@ from .config import DetectionConfig
 from .defaults import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_LANGUAGE,
+    DEFAULT_PRESIDIO_SPACY_MODEL,
     PRESIDIO_CLINICAL_PATTERNS,
 )
+
+logger = logging.getLogger(__name__)
+
+
+def _ensure_spacy_model(model_name: str) -> None:
+    """Make sure the spaCy model for Presidio's NLP engine is installed."""
+    import spacy
+
+    if spacy.util.is_package(model_name):
+        return
+    logger.warning(
+        "spaCy model %r not found, downloading it...",
+        model_name,
+    )
+    spacy.cli.download(model_name)
+    importlib.invalidate_caches()
 
 
 def _build_clinical_recognizers() -> List[Any]:
@@ -42,6 +61,7 @@ def _load_presidio_analyzer() -> Any:
     """Build a ``presidio_analyzer.AnalyzerEngine`` with custom clinical recognizers."""
     from presidio_analyzer import AnalyzerEngine
 
+    _ensure_spacy_model(DEFAULT_PRESIDIO_SPACY_MODEL)
     analyzer = AnalyzerEngine()
     for recognizer in _build_clinical_recognizers():
         analyzer.registry.add_recognizer(recognizer)
