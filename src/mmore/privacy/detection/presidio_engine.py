@@ -43,7 +43,7 @@ def _ensure_spacy_model(model_name: str) -> None:
     importlib.invalidate_caches()
 
 
-def _build_clinical_recognizers() -> List[PatternRecognizer]:
+def _build_clinical_recognizers() -> "List[PatternRecognizer]":
     """Build the clinical-domain custom recognizers."""
     from presidio_analyzer import Pattern, PatternRecognizer
 
@@ -62,7 +62,7 @@ def _build_clinical_recognizers() -> List[PatternRecognizer]:
     return recognizers
 
 
-def _load_presidio_analyzer() -> AnalyzerEngine:
+def _load_presidio_analyzer() -> "AnalyzerEngine":
     """Build a ``presidio_analyzer.AnalyzerEngine`` with custom clinical recognizers."""
     from presidio_analyzer import AnalyzerEngine
 
@@ -73,11 +73,11 @@ def _load_presidio_analyzer() -> AnalyzerEngine:
     return analyzer
 
 
-_analyzer_cache: Optional[AnalyzerEngine] = None
+_analyzer_cache: "Optional[AnalyzerEngine]" = None
 _analyzer_cache_lock = threading.Lock()
 
 
-def _get_or_load_analyzer() -> AnalyzerEngine:
+def _get_or_load_analyzer() -> "AnalyzerEngine":
     global _analyzer_cache
     if _analyzer_cache is not None:
         return _analyzer_cache
@@ -121,7 +121,7 @@ class PresidioEngine(DetectionEngine):
         )
 
     @property
-    def analyzer(self) -> AnalyzerEngine:
+    def analyzer(self) -> "AnalyzerEngine":
         return _get_or_load_analyzer()
 
     def detect(self, text: str) -> List[PIISpan]:

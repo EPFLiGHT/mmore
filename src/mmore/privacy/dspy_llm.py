@@ -14,11 +14,11 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_pipeline_cache: Dict[str, TextGenerationPipeline] = {}
+_pipeline_cache: Dict[str, "TextGenerationPipeline"] = {}
 _pipeline_cache_lock = threading.Lock()
 
 
-def _load_local_hf_pipeline(model_name: str) -> TextGenerationPipeline:
+def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
     import torch
     from transformers import pipeline
 
@@ -36,7 +36,7 @@ def _load_local_hf_pipeline(model_name: str) -> TextGenerationPipeline:
     )
 
 
-def _get_or_load_pipeline(model_name: str) -> TextGenerationPipeline:
+def _get_or_load_pipeline(model_name: str) -> "TextGenerationPipeline":
     cached = _pipeline_cache.get(model_name)
     if cached is not None:
         return cached
@@ -81,7 +81,7 @@ class LocalHFLM(dspy.BaseLM):
         return False
 
     @property
-    def pipe(self) -> TextGenerationPipeline:
+    def pipe(self) -> "TextGenerationPipeline":
         return _get_or_load_pipeline(self._model_name)
 
     def forward(self, prompt=None, messages=None, **kwargs):
