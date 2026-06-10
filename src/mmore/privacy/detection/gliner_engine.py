@@ -1,11 +1,11 @@
 """GLiNER-based PII detection engine."""
 
 import logging
-import threading
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
+from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
@@ -20,8 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_model_cache: Dict[str, "BaseEncoderGLiNER"] = {}
-_model_cache_lock = threading.Lock()
+_CACHE_PREFIX = "gliner"
 
 
 def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":
@@ -37,22 +36,9 @@ def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":
     return GLiNER.from_pretrained(model_name).to(device)
 
 
-def _get_or_load_model(model_name: str) -> "BaseEncoderGLiNER":
-    cached = _model_cache.get(model_name)
-    if cached is not None:
-        return cached
-    with _model_cache_lock:
-        cached = _model_cache.get(model_name)
-        if cached is None:
-            cached = _load_gliner_model(model_name)
-            _model_cache[model_name] = cached
-        return cached
-
-
 def clear_gliner_cache() -> None:
     """Drop all cached GLiNER models."""
-    with _model_cache_lock:
-        _model_cache.clear()
+    MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
 
 
 class GLiNEREngine(DetectionEngine):
@@ -85,7 +71,10 @@ class GLiNEREngine(DetectionEngine):
     @property
     def model(self) -> "BaseEncoderGLiNER":
         """Lazy-load and cache the LLM on first access."""
-        return _get_or_load_model(self._model_name)
+        return MODEL_REGISTRY.get_or_load(
+            f"{_CACHE_PREFIX}:{self._model_name}",
+            lambda: _load_gliner_model(self._model_name),
+        )
 
     def detect(self, text: str) -> List[PIISpan]:
         raw = self.model.predict_entities(
