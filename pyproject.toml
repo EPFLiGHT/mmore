@@ -154,7 +154,7 @@ privacy = [
 
 privacy-openai-filter = [
     "mmore[privacy]",
-    "transformers>=5",
+    "transformers>=5.6",
     "peft>=0.18",
 ]
 
@@ -210,6 +210,11 @@ conflicts = [
   [
     { extra = "privacy-openai-filter" },
     { extra = "all" },
+  ],
+  [
+    # different versions of transformers
+    { extra = "privacy-openai-filter" },
+    { extra = "colvision" },
   ],
 ]
 

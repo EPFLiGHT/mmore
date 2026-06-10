@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from transformers import TokenClassificationPipeline
 
 
-def _load_openai_filter_pipeline(model_name: str) -> TokenClassificationPipeline:
+def _load_openai_filter_pipeline(model_name: str) -> "TokenClassificationPipeline":
     from transformers import pipeline
 
     return pipeline(
@@ -26,11 +26,11 @@ def _load_openai_filter_pipeline(model_name: str) -> TokenClassificationPipeline
     )
 
 
-_pipeline_cache: Dict[str, TokenClassificationPipeline] = {}
+_pipeline_cache: Dict[str, "TokenClassificationPipeline"] = {}
 _pipeline_cache_lock = threading.Lock()
 
 
-def _get_or_load_pipeline(model_name: str) -> TokenClassificationPipeline:
+def _get_or_load_pipeline(model_name: str) -> "TokenClassificationPipeline":
     cached = _pipeline_cache.get(model_name)
     if cached is not None:
         return cached
@@ -80,7 +80,7 @@ class OpenAIFilterEngine(DetectionEngine):
         )
 
     @property
-    def pipeline(self) -> TokenClassificationPipeline:
+    def pipeline(self) -> "TokenClassificationPipeline":
         return _get_or_load_pipeline(self._model_name)
 
     def detect(self, text: str) -> List[PIISpan]:
