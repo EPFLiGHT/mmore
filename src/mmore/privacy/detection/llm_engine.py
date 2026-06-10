@@ -1,7 +1,7 @@
 """LLM-backed PII detection engine using DSPy for typed structured output."""
 
 import logging
-from typing import Any, List, Optional, Sequence
+from typing import List, Optional, Sequence
 
 import dspy
 from pydantic import BaseModel, Field
@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 
 PII_DETECTION_INSTRUCTION = (
-    "Find every PII occurrence in the input text. For each, return the\n"
-    "exact substring (not paraphrased), its entity label, and a confidence.\n"
+    "Find every PII occurrence in the input text. For each, return the"
+    "exact substring (not paraphrased), its entity label, and a confidence."
     "Return spans in the order they appear in the text."
 )
 
@@ -51,17 +51,14 @@ class _DetectedSpan(BaseModel):
     )
 
 
-def _build_signature() -> Any:
-    class DetectPIISignature(dspy.Signature):
-        text: str = dspy.InputField(desc=INPUT_TEXT_DESC)
-        entity_types: List[str] = dspy.InputField(desc=INPUT_ENTITY_TYPES_DESC)
-        spans: List[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
-
-    return DetectPIISignature.with_instructions(PII_DETECTION_INSTRUCTION)
+class _DetectPIISignature(dspy.Signature):
+    text: str = dspy.InputField(desc=INPUT_TEXT_DESC)
+    entity_types: List[str] = dspy.InputField(desc=INPUT_ENTITY_TYPES_DESC)
+    spans: List[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
 
 
 # TODO: refine these examples later once we have domain definitions
-def _build_demos() -> List[Any]:
+def _build_demos() -> List[dspy.Example]:
     return [
         dspy.Example(
             text="John Doe called from 555-1234 about his MRN 87654321.",
@@ -85,7 +82,9 @@ def _build_demos() -> List[Any]:
 
 
 def _build_predictor() -> dspy.Predict:
-    predictor = dspy.Predict(_build_signature())
+    predictor = dspy.Predict(
+        _DetectPIISignature.with_instructions(PII_DETECTION_INSTRUCTION)
+    )
     predictor.demos = _build_demos()
     return predictor
 
@@ -113,10 +112,15 @@ class LLMDetectionEngine(DetectionEngine):
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
         """Build an engine from a ``DetectionConfig``."""
-        if config.llm is None:
-            raise ValueError("DetectionConfig.llm must be set")
+        llm_config = config.llm
+        if llm_config is None:
+            llm_config = DEFAULT_LLM_CONFIG
+            logger.warning(
+                "DetectionConfig.llm not set, falling back to default LLM %r",
+                DEFAULT_LLM_CONFIG.llm_name,
+            )
         return cls(
-            llm_config=config.llm,
+            llm_config=llm_config,
             entity_types=config.entity_types or None,
             confidence_threshold=config.confidence_threshold,
         )
