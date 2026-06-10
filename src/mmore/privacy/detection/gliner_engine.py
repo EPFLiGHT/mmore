@@ -25,9 +25,16 @@ _model_cache_lock = threading.Lock()
 
 
 def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":
+    import torch
     from gliner import GLiNER
 
-    return GLiNER.from_pretrained(model_name)
+    if torch.backends.mps.is_available():
+        device = "mps"
+    elif torch.cuda.is_available():
+        device = "cuda"
+    else:
+        device = "cpu"
+    return GLiNER.from_pretrained(model_name).to(device)
 
 
 def _get_or_load_model(model_name: str) -> "BaseEncoderGLiNER":
