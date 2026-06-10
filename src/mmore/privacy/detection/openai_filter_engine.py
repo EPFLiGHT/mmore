@@ -2,7 +2,7 @@
 
 import logging
 import threading
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from typing_extensions import Self
 
@@ -13,8 +13,11 @@ from .defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_OPENAI_FILTER_MODEL
 
 logger = logging.getLogger(__name__)
 
+if TYPE_CHECKING:
+    from transformers import TokenClassificationPipeline
 
-def _load_openai_filter_pipeline(model_name: str) -> Any:
+
+def _load_openai_filter_pipeline(model_name: str) -> TokenClassificationPipeline:
     from transformers import pipeline
 
     return pipeline(
@@ -23,20 +26,21 @@ def _load_openai_filter_pipeline(model_name: str) -> Any:
     )
 
 
-_pipeline_cache: Dict[str, Any] = {}
+_pipeline_cache: Dict[str, TokenClassificationPipeline] = {}
 _pipeline_cache_lock = threading.Lock()
 
 
-def _get_or_load_pipeline(model_name: str) -> Any:
+def _get_or_load_pipeline(model_name: str) -> TokenClassificationPipeline:
     cached = _pipeline_cache.get(model_name)
     if cached is not None:
         return cached
-    with _pipeline_cache_lock:
-        cached = _pipeline_cache.get(model_name)
-        if cached is None:
-            cached = _load_openai_filter_pipeline(model_name)
-            _pipeline_cache[model_name] = cached
-        return cached
+    else:
+        with _pipeline_cache_lock:
+            cached = _pipeline_cache.get(model_name)
+            if cached is None:
+                cached = _load_openai_filter_pipeline(model_name)
+                _pipeline_cache[model_name] = cached
+            return cached
 
 
 def clear_openai_filter_cache() -> None:
@@ -76,7 +80,7 @@ class OpenAIFilterEngine(DetectionEngine):
         )
 
     @property
-    def pipeline(self) -> Any:
+    def pipeline(self) -> TokenClassificationPipeline:
         return _get_or_load_pipeline(self._model_name)
 
     def detect(self, text: str) -> List[PIISpan]:

@@ -7,7 +7,7 @@ possibility to add custom clinical recognizers.
 import importlib
 import logging
 import threading
-from typing import Any, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
@@ -20,6 +20,9 @@ from .defaults import (
     DEFAULT_PRESIDIO_SPACY_MODEL,
     PRESIDIO_CLINICAL_PATTERNS,
 )
+
+if TYPE_CHECKING:
+    from presidio_analyzer import AnalyzerEngine, PatternRecognizer
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +37,17 @@ def _ensure_spacy_model(model_name: str) -> None:
         "spaCy model %r not found, downloading it...",
         model_name,
     )
-    spacy.cli.download(model_name)
+    from spacy.cli.download import download
+
+    download(model_name)
     importlib.invalidate_caches()
 
 
-def _build_clinical_recognizers() -> List[Any]:
+def _build_clinical_recognizers() -> List[PatternRecognizer]:
     """Build the clinical-domain custom recognizers."""
     from presidio_analyzer import Pattern, PatternRecognizer
 
-    recognizers: List[Any] = []
+    recognizers: List[PatternRecognizer] = []
     for spec in PRESIDIO_CLINICAL_PATTERNS:
         recognizers.append(
             PatternRecognizer(
@@ -57,7 +62,7 @@ def _build_clinical_recognizers() -> List[Any]:
     return recognizers
 
 
-def _load_presidio_analyzer() -> Any:
+def _load_presidio_analyzer() -> AnalyzerEngine:
     """Build a ``presidio_analyzer.AnalyzerEngine`` with custom clinical recognizers."""
     from presidio_analyzer import AnalyzerEngine
 
@@ -68,11 +73,11 @@ def _load_presidio_analyzer() -> Any:
     return analyzer
 
 
-_analyzer_cache: Optional[Any] = None
+_analyzer_cache: Optional[AnalyzerEngine] = None
 _analyzer_cache_lock = threading.Lock()
 
 
-def _get_or_load_analyzer() -> Any:
+def _get_or_load_analyzer() -> AnalyzerEngine:
     global _analyzer_cache
     if _analyzer_cache is not None:
         return _analyzer_cache
@@ -116,7 +121,7 @@ class PresidioEngine(DetectionEngine):
         )
 
     @property
-    def analyzer(self) -> Any:
+    def analyzer(self) -> AnalyzerEngine:
         return _get_or_load_analyzer()
 
     def detect(self, text: str) -> List[PIISpan]:

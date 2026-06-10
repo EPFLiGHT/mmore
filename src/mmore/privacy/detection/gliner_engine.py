@@ -2,7 +2,7 @@
 
 import logging
 import threading
-from typing import Any, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
 
 from typing_extensions import Self
 
@@ -15,19 +15,22 @@ from .defaults import (
     DEFAULT_LABELS,
 )
 
+if TYPE_CHECKING:
+    from gliner.model import BaseEncoderGLiNER
+
 logger = logging.getLogger(__name__)
 
-_model_cache: Dict[str, Any] = {}
+_model_cache: Dict[str, "BaseEncoderGLiNER"] = {}
 _model_cache_lock = threading.Lock()
 
 
-def _load_gliner_model(model_name: str) -> Any:
+def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":
     from gliner import GLiNER
 
     return GLiNER.from_pretrained(model_name)
 
 
-def _get_or_load_model(model_name: str) -> Any:
+def _get_or_load_model(model_name: str) -> "BaseEncoderGLiNER":
     cached = _model_cache.get(model_name)
     if cached is not None:
         return cached
@@ -73,7 +76,7 @@ class GLiNEREngine(DetectionEngine):
         )
 
     @property
-    def model(self) -> Any:
+    def model(self) -> "BaseEncoderGLiNER":
         """Lazy-load and cache the LLM on first access."""
         return _get_or_load_model(self._model_name)
 

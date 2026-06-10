@@ -3,19 +3,22 @@
 import logging
 import threading
 from types import SimpleNamespace
-from typing import Any, Dict
+from typing import TYPE_CHECKING, Dict
 
 import dspy
 
 from ..rag.llm import LLMConfig
 
+if TYPE_CHECKING:
+    from transformers import TextGenerationPipeline
+
 logger = logging.getLogger(__name__)
 
-_pipeline_cache: Dict[str, Any] = {}
+_pipeline_cache: Dict[str, TextGenerationPipeline] = {}
 _pipeline_cache_lock = threading.Lock()
 
 
-def _load_local_hf_pipeline(model_name: str) -> Any:
+def _load_local_hf_pipeline(model_name: str) -> TextGenerationPipeline:
     import torch
     from transformers import pipeline
 
@@ -33,7 +36,7 @@ def _load_local_hf_pipeline(model_name: str) -> Any:
     )
 
 
-def _get_or_load_pipeline(model_name: str) -> Any:
+def _get_or_load_pipeline(model_name: str) -> TextGenerationPipeline:
     cached = _pipeline_cache.get(model_name)
     if cached is not None:
         return cached
@@ -78,13 +81,13 @@ class LocalHFLM(dspy.BaseLM):
         return False
 
     @property
-    def pipe(self) -> Any:
+    def pipe(self) -> TextGenerationPipeline:
         return _get_or_load_pipeline(self._model_name)
 
     def forward(self, prompt=None, messages=None, **kwargs):
         merged = {**self.kwargs, **kwargs}
-        max_new_tokens = int(merged.get("max_tokens", 512) or 512)
-        temperature = float(merged.get("temperature", 0.0) or 0.0)
+        max_new_tokens = int(merged.get("max_tokens", 512))
+        temperature = float(merged.get("temperature", 0.0))
         do_sample = temperature > 0.0
 
         chat_input = messages or [{"role": "user", "content": prompt or ""}]
@@ -96,7 +99,7 @@ class LocalHFLM(dspy.BaseLM):
         if do_sample:
             gen_kwargs["temperature"] = temperature
 
-        raw = self.pipe(chat_input, **gen_kwargs)
+        raw: list = self.pipe(chat_input, **gen_kwargs)
         if raw and isinstance(raw[0], list):
             raw = raw[0]
         first = raw[0] if raw else {}
