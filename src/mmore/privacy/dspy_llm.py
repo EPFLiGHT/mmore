@@ -1,21 +1,20 @@
 """Build a DSPy ``BaseLM`` from an ``LLMConfig``."""
 
 import logging
-import threading
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Dict
+from typing import TYPE_CHECKING
 
 import dspy
 
 from ..rag.llm import LLMConfig
+from ._cache import MODEL_REGISTRY
 
 if TYPE_CHECKING:
     from transformers import TextGenerationPipeline
 
 logger = logging.getLogger(__name__)
 
-_pipeline_cache: Dict[str, "TextGenerationPipeline"] = {}
-_pipeline_cache_lock = threading.Lock()
+_CACHE_PREFIX = "hf_lm"
 
 
 def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
@@ -36,22 +35,9 @@ def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
     )
 
 
-def _get_or_load_pipeline(model_name: str) -> "TextGenerationPipeline":
-    cached = _pipeline_cache.get(model_name)
-    if cached is not None:
-        return cached
-    with _pipeline_cache_lock:
-        cached = _pipeline_cache.get(model_name)
-        if cached is None:
-            cached = _load_local_hf_pipeline(model_name)
-            _pipeline_cache[model_name] = cached
-        return cached
-
-
 def clear_dspy_lm_cache() -> None:
     """Drop all cached transformers pipelines."""
-    with _pipeline_cache_lock:
-        _pipeline_cache.clear()
+    MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
 
 
 class LocalHFLM(dspy.BaseLM):
@@ -82,7 +68,10 @@ class LocalHFLM(dspy.BaseLM):
 
     @property
     def pipe(self) -> "TextGenerationPipeline":
-        return _get_or_load_pipeline(self._model_name)
+        return MODEL_REGISTRY.get_or_load(
+            f"{_CACHE_PREFIX}:{self._model_name}",
+            lambda: _load_local_hf_pipeline(self._model_name),
+        )
 
     def forward(self, prompt=None, messages=None, **kwargs):
         merged = {**self.kwargs, **kwargs}

@@ -1,11 +1,11 @@
 """HuggingFace ``openai/privacy-filter`` PII detection engine."""
 
 import logging
-import threading
-from typing import TYPE_CHECKING, Dict, List, Optional, Sequence
+from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
+from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
@@ -15,6 +15,8 @@ logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from transformers import TokenClassificationPipeline
+
+_CACHE_PREFIX = "openai_filter"
 
 
 def _load_openai_filter_pipeline(model_name: str) -> "TokenClassificationPipeline":
@@ -26,27 +28,9 @@ def _load_openai_filter_pipeline(model_name: str) -> "TokenClassificationPipelin
     )
 
 
-_pipeline_cache: Dict[str, "TokenClassificationPipeline"] = {}
-_pipeline_cache_lock = threading.Lock()
-
-
-def _get_or_load_pipeline(model_name: str) -> "TokenClassificationPipeline":
-    cached = _pipeline_cache.get(model_name)
-    if cached is not None:
-        return cached
-    else:
-        with _pipeline_cache_lock:
-            cached = _pipeline_cache.get(model_name)
-            if cached is None:
-                cached = _load_openai_filter_pipeline(model_name)
-                _pipeline_cache[model_name] = cached
-            return cached
-
-
 def clear_openai_filter_cache() -> None:
     """Drop all cached HF pipelines."""
-    with _pipeline_cache_lock:
-        _pipeline_cache.clear()
+    MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
 
 
 class OpenAIFilterEngine(DetectionEngine):
@@ -81,7 +65,10 @@ class OpenAIFilterEngine(DetectionEngine):
 
     @property
     def pipeline(self) -> "TokenClassificationPipeline":
-        return _get_or_load_pipeline(self._model_name)
+        return MODEL_REGISTRY.get_or_load(
+            f"{_CACHE_PREFIX}:{self._model_name}",
+            lambda: _load_openai_filter_pipeline(self._model_name),
+        )
 
     def detect(self, text: str) -> List[PIISpan]:
         raw = self.pipeline(text)

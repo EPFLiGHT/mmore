@@ -6,11 +6,11 @@ possibility to add custom clinical recognizers.
 
 import importlib
 import logging
-import threading
 from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
+from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from .base import DetectionEngine, PIISpan
 from .config import DetectionConfig
@@ -25,6 +25,8 @@ if TYPE_CHECKING:
     from presidio_analyzer import AnalyzerEngine, PatternRecognizer
 
 logger = logging.getLogger(__name__)
+
+_CACHE_PREFIX = "presidio"
 
 
 def _ensure_spacy_model(model_name: str) -> None:
@@ -73,25 +75,9 @@ def _load_presidio_analyzer() -> "AnalyzerEngine":
     return analyzer
 
 
-_analyzer_cache: "Optional[AnalyzerEngine]" = None
-_analyzer_cache_lock = threading.Lock()
-
-
-def _get_or_load_analyzer() -> "AnalyzerEngine":
-    global _analyzer_cache
-    if _analyzer_cache is not None:
-        return _analyzer_cache
-    with _analyzer_cache_lock:
-        if _analyzer_cache is None:
-            _analyzer_cache = _load_presidio_analyzer()
-        return _analyzer_cache
-
-
 def clear_presidio_cache() -> None:
     """Drop the cached analyzer."""
-    global _analyzer_cache
-    with _analyzer_cache_lock:
-        _analyzer_cache = None
+    MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
 
 
 class PresidioEngine(DetectionEngine):
@@ -122,7 +108,9 @@ class PresidioEngine(DetectionEngine):
 
     @property
     def analyzer(self) -> "AnalyzerEngine":
-        return _get_or_load_analyzer()
+        return MODEL_REGISTRY.get_or_load(
+            f"{_CACHE_PREFIX}:{DEFAULT_PRESIDIO_SPACY_MODEL}", _load_presidio_analyzer
+        )
 
     def detect(self, text: str) -> List[PIISpan]:
         results = self.analyzer.analyze(
