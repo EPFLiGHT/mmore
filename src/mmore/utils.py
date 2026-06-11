@@ -1,9 +1,10 @@
 import logging
 import os
+from enum import Enum
 from typing import TYPE_CHECKING, Dict, List, Optional, Type, TypeVar, Union, cast
 
 import yaml
-from dacite import from_dict
+from dacite import Config, from_dict
 
 if TYPE_CHECKING:
     from .index.indexer import Indexer
@@ -37,7 +38,7 @@ def load_config(yaml_dict_or_path: Union[str, Dict, T], config_class: Type[T]) -
     # we want to support $ROOT_IN_DIR, $ROOT_OUT_DIR
     data = expand_env_vars(data)
 
-    return from_dict(config_class, cast(Dict, data))
+    return from_dict(config_class, cast(Dict, data), config=Config(cast=[Enum]))
 
 
 # Custom Dumper to preserve \n and avoid wrapping

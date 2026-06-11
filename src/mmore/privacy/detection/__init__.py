@@ -1,6 +1,6 @@
 """PII detection engines exposed as agent tools."""
 
-from .base import DetectionEngine, PIISpan
+from .base import DetectionEngine, DetectionEngineType, PIISpan
 from .config import DetectionConfig
 from .gliner_engine import GLiNEREngine, detect_pii_gliner
 from .llm_engine import LLMDetectionEngine, detect_pii_llm
@@ -10,6 +10,7 @@ from .presidio_engine import PresidioEngine, detect_pii_presidio
 __all__ = [
     "DetectionConfig",
     "DetectionEngine",
+    "DetectionEngineType",
     "GLiNEREngine",
     "LLMDetectionEngine",
     "OpenAIFilterEngine",

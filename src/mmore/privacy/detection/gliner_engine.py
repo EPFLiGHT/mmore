@@ -7,7 +7,7 @@ from typing_extensions import Self
 
 from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
-from .base import DetectionEngine, PIISpan
+from .base import DetectionEngine, DetectionEngineType, PIISpan
 from .config import DetectionConfig
 from .defaults import (
     DEFAULT_CONFIDENCE_THRESHOLD,
@@ -20,7 +20,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_CACHE_PREFIX = "gliner"
+_CACHE_PREFIX = DetectionEngineType.GLINER.value
 
 
 def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":

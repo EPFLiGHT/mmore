@@ -7,7 +7,17 @@ sanitizer agent can resolve them by name from YAML.
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from enum import Enum
 from typing import List
+
+
+class DetectionEngineType(str, Enum):
+    """The supported PII detection engines."""
+
+    GLINER = "gliner"
+    LLM = "llm"
+    OPENAI_FILTER = "openai_filter"
+    PRESIDIO = "presidio"
 
 
 @dataclass
