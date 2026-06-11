@@ -5603,6 +5603,7 @@ all = [
     { name = "openpyxl" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
+    { name = "psutil" },
     { name = "py7zr" },
     { name = "pymilvus" },
     { name = "pymilvus-model" },
@@ -5739,6 +5740,7 @@ privacy = [
     { name = "langgraph-checkpoint-sqlite" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
+    { name = "psutil" },
     { name = "spacy" },
 ]
 privacy-openai-filter = [
@@ -5758,6 +5760,7 @@ privacy-openai-filter = [
     { name = "peft" },
     { name = "presidio-analyzer" },
     { name = "presidio-anonymizer" },
+    { name = "psutil" },
     { name = "spacy" },
     { name = "transformers", version = "5.13.1", source = { registry = "https://pypi.org/simple" } },
 ]
@@ -5894,6 +5897,7 @@ requires-dist = [
     { name = "pillow" },
     { name = "presidio-analyzer", marker = "extra == 'privacy'" },
     { name = "presidio-anonymizer", marker = "extra == 'privacy'" },
+    { name = "psutil", marker = "extra == 'privacy'", specifier = ">=5.9" },
     { name = "py7zr", marker = "extra == 'process'", specifier = ">=0.22" },
     { name = "pyarrow", marker = "extra == 'colvision'" },
     { name = "pydantic", specifier = ">=2.6" },

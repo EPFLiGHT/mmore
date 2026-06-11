@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mmore.privacy.agents.registry import tool_registry
-from mmore.privacy.detection.config import DetectionConfig
+from mmore.privacy.detection.config import DetectionConfig, DetectionEngineType
 from mmore.privacy.detection.gliner_engine import (
     GLiNEREngine,
     clear_gliner_cache,
@@ -130,6 +130,18 @@ def test_detection_config_defaults_when_minimal():
     assert cfg.llm is None
 
 
+def test_detection_config_casts_engine_to_enum():
+    cfg = load_config({"engine": "presidio"}, DetectionConfig)
+
+    assert isinstance(cfg.engine, DetectionEngineType)
+    assert cfg.engine is DetectionEngineType.PRESIDIO
+
+
+def test_detection_config_rejects_unknown_engine():
+    with pytest.raises(ValueError):
+        load_config({"engine": "regex"}, DetectionConfig)
+
+
 def test_detect_pii_gliner_is_registered():
     assert "detect_pii_gliner" in tool_registry
     assert tool_registry["detect_pii_gliner"] is detect_pii_gliner
@@ -225,7 +237,7 @@ def test_gliner_engine_instances_apply_their_own_threshold():
 
 def test_gliner_engine_from_config_propagates_threshold_and_labels():
     cfg = DetectionConfig(
-        engine="gliner",
+        engine=DetectionEngineType.GLINER,
         entity_types=["PERSON", "MRN"],
         confidence_threshold=0.55,
     )
@@ -318,7 +330,7 @@ def test_openai_filter_engine_shares_pipeline_cache_across_instances():
 
 def test_openai_filter_engine_from_config_applies_threshold():
     cfg = DetectionConfig(
-        engine="openai_filter",
+        engine=DetectionEngineType.OPENAI_FILTER,
         entity_types=[],
         confidence_threshold=0.6,
     )
@@ -411,7 +423,7 @@ def test_presidio_engine_shares_analyzer_cache_across_instances():
 
 def test_presidio_engine_from_config_propagates_threshold_and_labels():
     cfg = DetectionConfig(
-        engine="presidio",
+        engine=DetectionEngineType.PRESIDIO,
         entity_types=["PERSON", "MRN"],
         confidence_threshold=0.55,
     )
@@ -571,7 +583,10 @@ def test_llm_engine_from_config_falls_back_to_default_llm():
     from mmore.privacy.detection.defaults import DEFAULT_LLM_CONFIG
 
     cfg = DetectionConfig(
-        engine="llm", entity_types=[], confidence_threshold=0.7, llm=None
+        engine=DetectionEngineType.LLM,
+        entity_types=[],
+        confidence_threshold=0.7,
+        llm=None,
     )
     engine = LLMDetectionEngine.from_config(cfg)
     assert engine._llm_config is DEFAULT_LLM_CONFIG
@@ -610,7 +625,7 @@ def test_llm_engine_openai_provider_still_uses_litellm():
 
 def test_llm_engine_from_config_propagates_threshold_and_labels():
     cfg = DetectionConfig(
-        engine="llm",
+        engine=DetectionEngineType.LLM,
         entity_types=["PERSON", "MRN"],
         confidence_threshold=0.55,
         llm=LLMConfig(llm_name="Qwen/Qwen2.5-3B-Instruct", max_new_tokens=128),
