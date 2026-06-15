@@ -21,7 +21,7 @@ from ...rag.llm import LLMConfig
 from ...utils import load_config
 from ..config import AttackVector, PrivacyConfig
 from ..dspy_llm import build_dspy_lm
-from ..leakage import LeakageVerdict
+from ..leakage import SAFE_VERDICT, LeakageVerdict
 from ..policy import PrivacyPolicy
 from .base import BaseAgent
 from .state import PrivacyState
@@ -109,11 +109,6 @@ def _clamp_confidence(value: object) -> float:
         return 0.0
 
 
-_SAFE_VERDICT = LeakageVerdict(
-    leaked=False, vector="none", entity_type="NONE", evidence="", confidence=0.0
-)
-
-
 # ========================================================================
 # Agent
 # ========================================================================
@@ -182,17 +177,17 @@ class AdversarialAgent(BaseAgent):
             )
             return LeakageVerdict(
                 leaked=False,
-                vector=vector.value,
-                entity_type="NONE",
+                vector=vector,
+                entity_type=None,
                 evidence="",
                 confidence=0.0,
             )
         confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
+        entity = str(getattr(prediction, "entity_type", "")).strip()
         return LeakageVerdict(
             leaked=confidence >= self.leakage_threshold,
-            vector=vector.value,
-            entity_type=str(getattr(prediction, "entity_type", "NONE")).strip()
-            or "NONE",
+            vector=vector,
+            entity_type=entity if entity and entity.upper() != "NONE" else None,
             evidence=str(getattr(prediction, "evidence", "")).strip(),
             confidence=confidence,
         )
@@ -203,7 +198,7 @@ class AdversarialAgent(BaseAgent):
         """Attack the sanitized context and return the strongest leakage signal."""
         context = "\n\n".join(c for c in sanitized_chunks if c).strip()
         if not context or not self.strategies:
-            return _SAFE_VERDICT
+            return SAFE_VERDICT
 
         predictor = _build_probe_predictor()
         entities = list(policy.sensitive_entities)

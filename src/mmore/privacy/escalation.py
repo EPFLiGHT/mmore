@@ -1,30 +1,31 @@
 """Bounded escalation of the privacy policy for the leakage loop.
 
 When the leakage adversary flags the sanitized context, the loop re-enters the
-Detector and Sanitizer under a stricter policy. ``escalate_policy`` returns a
-new, more aggressive ``PrivacyPolicy`` (it never mutates its input) plus a
-short label of what changed, for the escalation log read by PR #7.
-
-The escalation ladder follows the spec: merge the analyzer's leak-targeted
-entity labels, then lower the detection threshold, then bring in a detection
-engine not used on the previous pass, then switch to a stricter sanitization
-strategy (masking -> synthetic rewrite). Steps apply cumulatively because each
-call receives the policy already escalated by the previous iterations.
-"""
+Detector and Sanitizer under a stricter policy. Returns a new and stricter
+PrivacyPolicy plus a short label of what changed."""
 
 from dataclasses import replace
 from typing import Callable, List, Optional, Tuple
 
+from .config import DetectionEngineType, SanitizationStrategyType
 from .policy import PrivacyPolicy
 
 _CONFIDENCE_FLOOR = 0.1
 _THRESHOLD_DECAY = 0.5
 
 # Detection-engine ladder (might change after experiments)
-_ENGINE_LADDER = ["presidio", "gliner", "llm"]
+_ENGINE_LADDER = [
+    DetectionEngineType.PRESIDIO.value,
+    DetectionEngineType.GLINER.value,
+    DetectionEngineType.LLM.value,
+]
 
 # Stricter-sanitization ladder (might change after experiments)
-_STRATEGY_LADDER = ["token_masking", "entity_replacement", "synthetic_rewrite"]
+_STRATEGY_LADDER = [
+    SanitizationStrategyType.TOKEN_MASKING.value,
+    SanitizationStrategyType.ENTITY_REPLACEMENT.value,
+    SanitizationStrategyType.SYNTHETIC_REWRITE.value,
+]
 
 _ESCALATION_NOTE = (
     "Escalation: a prior sanitization pass leaked: treat every quasi-identifier "
@@ -42,16 +43,23 @@ def _next_in_ladder(ladder: List[str], current: str, cap: bool) -> str:
     return ladder[nxt]
 
 
-def _broaden_entities(
-    policy: PrivacyPolicy, extra_entities: Optional[List[str]]
+def apply_entity_guidance(
+    policy: PrivacyPolicy,
+    extra_entities: Optional[List[str]] = None,
+    context_note: Optional[str] = None,
 ) -> PrivacyPolicy:
-    """Merge the analyzer's leak-targeted labels and pin the escalation note."""
+    """Merge targeted entity labels and pin the escalation note plus any human
+    guidance into the domain prompt."""
     entities = list(policy.sensitive_entities) + [
         e for e in (extra_entities or []) if e not in policy.sensitive_entities
     ]
     prompt = policy.domain_prompt
     if _ESCALATION_NOTE not in prompt:
         prompt = prompt + _ESCALATION_NOTE
+    if context_note:
+        guidance = f" Human guidance: {context_note}"
+        if guidance not in prompt:
+            prompt = prompt + guidance
     return replace(policy, sensitive_entities=entities, domain_prompt=prompt)
 
 
@@ -86,12 +94,7 @@ def escalate_policy(
     iteration: int,
     extra_entities: Optional[List[str]] = None,
 ) -> Tuple[PrivacyPolicy, str]:
-    """Return a stricter ``PrivacyPolicy`` and a label for the escalation log.
-
-    Each round merges the analyzer's leak-targeted ``extra_entities`` (if any)
-    and applies one progressive knob: lower threshold, then switch detection
-    engine, then stricter sanitization.
-    """
-    broadened = _broaden_entities(policy, extra_entities)
+    """Return a stricter ``PrivacyPolicy`` and a label for the escalation log."""
+    broadened = apply_entity_guidance(policy, extra_entities)
     step = _STEPS[min(iteration, len(_STEPS) - 1)]
     return step(broadened)
