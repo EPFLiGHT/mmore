@@ -30,6 +30,8 @@ from ..detection.constants import (
 )
 from ..domains.profile import DOMAIN_PROFILES, get_domain_profile
 from ..dspy_llm import build_dspy_lm
+from ..escalation import escalate_policy
+from ..leakage import EscalationRecord
 from ..policy import PrivacyPolicy
 from .base import BaseAgent
 from .registry import tool_registry
@@ -68,6 +70,15 @@ _LABEL_EXPAND_INSTRUCTION = (
     "Return an empty list if the current set already covers everything."
 )
 
+_LEAK_LABEL_EXPAND_INSTRUCTION = (
+    "A leakage adversary recovered or inferred a protected identifier from the "
+    "sanitized context via the described attack. Propose additional "
+    "sensitive-entity labels that would catch this identifier and related "
+    "quasi-identifiers on the next detection pass, beyond the current set. "
+    "Return them as uppercase identifiers like GPS_COORDINATES, RARE_DIAGNOSIS, "
+    "JOB_TITLE. Return an empty list if the current set already covers it."
+)
+
 
 # ========================================================================
 # DSPy signature field descriptions
@@ -85,6 +96,9 @@ _ADDITIONAL_ENTITIES_DESC = (
     "JSON array of uppercase identifier strings, e.g. "
     '["PASSPORT_NUMBER", "BANK_ACCOUNT"]. Empty array if nothing extra is needed.'
 )
+_LEAK_VECTOR_DESC = "the attack vector that leaked, e.g. quasi_identifier"
+_LEAK_ENTITY_TYPE_DESC = "the entity type the adversary recovered, or NONE"
+_LEAK_EVIDENCE_DESC = "the adversary's justification for the leak (PII-free)"
 
 _MAX_ADDITIONAL_ENTITIES = 8
 _LABEL_NON_ID_RE = re.compile(r"[^A-Z0-9_]")
@@ -116,6 +130,16 @@ class _LabelExpandSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
     current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
+    additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
+
+
+class _LeakLabelExpandSignature(dspy.Signature):
+    query: str = dspy.InputField(desc=_QUERY_DESC)
+    context: str = dspy.InputField(desc=_CONTEXT_DESC)
+    current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
+    leak_vector: str = dspy.InputField(desc=_LEAK_VECTOR_DESC)
+    leak_entity_type: str = dspy.InputField(desc=_LEAK_ENTITY_TYPE_DESC)
+    leak_evidence: str = dspy.InputField(desc=_LEAK_EVIDENCE_DESC)
     additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
 
 
@@ -186,6 +210,12 @@ def _build_detection_engine_selector_predictor() -> dspy.Predict:
 def _build_label_expansion_predictor() -> dspy.Predict:
     return dspy.Predict(
         _LabelExpandSignature.with_instructions(_LABEL_EXPAND_INSTRUCTION)
+    )
+
+
+def _build_leak_label_expansion_predictor() -> dspy.Predict:
+    return dspy.Predict(
+        _LeakLabelExpandSignature.with_instructions(_LEAK_LABEL_EXPAND_INSTRUCTION)
     )
 
 
@@ -353,6 +383,37 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             getattr(prediction, "additional_entities", None), current
         )
 
+    def _expand_labels_for_leak(
+        self, state: PrivacyState, policy: PrivacyPolicy
+    ) -> List[str]:
+        """Propose leak-targeted sensitive labels via DSPy, biased by the verdict."""
+        if self._llm_config is None:
+            return []
+        verdict = state.get("verdict")
+        if verdict is None or not verdict.leaked:
+            return []
+        current = list(policy.sensitive_entities)
+        self._ensure_dspy_lm()
+        predictor = _build_leak_label_expansion_predictor()
+        try:
+            with dspy.context(lm=self._dspy_lm, adapter=dspy.JSONAdapter()):
+                prediction = predictor(
+                    query=state.get("query", ""),
+                    context="\n\n".join(state.get("raw_chunks", [])),
+                    current_entities=current,
+                    leak_vector=verdict.vector,
+                    leak_entity_type=verdict.entity_type,
+                    leak_evidence=verdict.evidence,
+                )
+        except Exception as e:
+            logger.warning(
+                "Leak-targeted label expansion failed (%s), using fallback list", e
+            )
+            return []
+        return _sanitize_label_additions(
+            getattr(prediction, "additional_entities", None), current
+        )
+
     def _select_params(
         self, engine: str, query: str, chunks: List[str]
     ) -> Dict[str, Union[float, bool]] | None:
@@ -429,9 +490,43 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             sanitizer_system_prompt=profile.sanitizer_system_prompt,
         )
 
-    def _node(self, state: PrivacyState) -> PrivacyState:
-        """Graph node: write the resolved policy into the pipeline state."""
-        policy = self.build_policy(
-            state.get("query", ""), list(state.get("raw_chunks", []))
+    def _escalate(self, state: PrivacyState, policy: PrivacyPolicy) -> PrivacyState:
+        """Re-entry path: adjust the policy after a leak or a gate rejection."""
+        iteration = state.get("iteration", 0)
+        extra_entities = self._expand_labels_for_leak(state, policy)
+        new_policy, label = escalate_policy(policy, iteration, extra_entities or None)
+        verdict = state.get("verdict")
+        if verdict is not None and verdict.leaked:
+            trigger_vector, trigger_entity = verdict.vector, verdict.entity_type
+        elif state.get("approved") is False:
+            trigger_vector, trigger_entity = "hitl_reject", "NONE"
+        else:
+            trigger_vector, trigger_entity = "unknown", "NONE"
+        record = EscalationRecord(
+            iteration=iteration + 1,
+            vector=trigger_vector,
+            entity_type=trigger_entity,
+            escalation=label,
         )
-        return PrivacyState(policy=policy)
+        logger.info("Policy escalation %d: %s", iteration + 1, label)
+        return PrivacyState(
+            policy=new_policy,
+            iteration=iteration + 1,
+            escalation_log=list(state.get("escalation_log", [])) + [record],
+            outcome="re-looped",
+        )
+
+    def _node(self, state: PrivacyState) -> PrivacyState:
+        """Graph node: build the policy on first entry, escalate it on re-entry.
+
+        A policy already in the state means the loop or the gate sent the
+        request back for a stricter pass, so the analyzer escalates rather than
+        rebuilding from scratch.
+        """
+        policy = state.get("policy")
+        if policy is None:
+            policy = self.build_policy(
+                state.get("query", ""), list(state.get("raw_chunks", []))
+            )
+            return PrivacyState(policy=policy)
+        return self._escalate(state, policy)
