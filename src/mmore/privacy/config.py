@@ -25,6 +25,16 @@ class SanitizationStrategyType(str, Enum):
     PRESIDIO = "presidio"
 
 
+class AttackVector(str, Enum):
+    """Adversarial attack vectors probed by the leakage adversary."""
+
+    RESIDUAL_SPAN = "residual_span"
+    QUASI_IDENTIFIER = "quasi_identifier"
+    STRUCTURAL_REID = "structural_reid"
+    CONTEXT_RECONSTRUCTION = "context_reconstruction"
+    MEMBERSHIP_INFERENCE = "membership_inference"
+
+
 @dataclass
 class AnalyzerConfig:
     llm: LLMConfig
@@ -47,8 +57,20 @@ class SanitizationConfig:
 
 
 @dataclass
+class LeakageAdversaryConfig:
+    max_iterations: int = 3
+    leakage_threshold: float = 0.1
+    strategies: List[AttackVector] = field(default_factory=lambda: list(AttackVector))
+    llm: Optional[LLMConfig] = None
+
+
+@dataclass
 class PrivacyConfig:
     domain: Optional[str] = None
+    interactive: Optional[bool] = None
     context_analyzer: Optional[AnalyzerConfig] = None
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     sanitization: SanitizationConfig = field(default_factory=SanitizationConfig)
+    leakage_adversary: LeakageAdversaryConfig = field(
+        default_factory=LeakageAdversaryConfig
+    )
