@@ -1,6 +1,6 @@
 """The verdict produced by the pre-cloud Leakage Adversary.
 
-Emitted by the ``LeakageAdversaryAgent`` after probing the sanitized context
+Emitted by the ``AdversarialAgent`` after probing the sanitized context
 for residual PII and quasi-identifiers, and consumed by the escalation loop
 and the HITL gate.
 """

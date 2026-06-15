@@ -1,3 +1,4 @@
+from .adversary import AdversarialAgent
 from .base import AgentState, BaseAgent, clear_llm_cache
 from .checkpointer import build_checkpointer, open_checkpointer
 from .config import AgentConfig
@@ -13,6 +14,7 @@ __all__ = [
     "AgentConfig",
     "AgentState",
     "BaseAgent",
+    "AdversarialAgent",
     "ToolNotRegisteredError",
     "build_checkpointer",
     "open_checkpointer",
