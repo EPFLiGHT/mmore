@@ -32,6 +32,16 @@ logger = logging.getLogger(__name__)
 NodeFn = Callable[..., NodeOutput]
 
 
+class _Node(str, Enum):
+    """Graph node ids in the pre-cloud pipeline."""
+
+    ANALYZER = "analyzer"
+    DETECTOR = "detector"
+    SANITIZER = "sanitizer"
+    ADVERSARY = "leakage_adversary"
+    MARK_UNSAFE = "mark_unsafe"
+
+
 class _Route(str, Enum):
     """Branches out of the adversary node in the pre-cloud loop."""
 
@@ -63,33 +73,28 @@ def build_pipeline_graph(
     max_iterations: int = 3,
     checkpointer: Optional[BaseCheckpointSaver] = None,
 ):
-    """Compile the pre-cloud loop from explicit node callables.
-
-    On a leak the adversary routes back to the analyzer, which escalates the
-    policy. ``_PROCEED`` routes to ``END`` here; PR #4's HITL gate (and PR #5
-    beyond it) replace that terminal edge with the gate node.
-    """
+    """Compile the pre-cloud loop from explicit node callables."""
     graph = StateGraph(PrivacyState)
-    graph.add_node("analyzer", analyzer)
-    graph.add_node("detector", detector)
-    graph.add_node("sanitizer", sanitizer)
-    graph.add_node("leakage_adversary", adversary)
-    graph.add_node("mark_unsafe", _mark_unsafe_node)
+    graph.add_node(_Node.ANALYZER, analyzer)
+    graph.add_node(_Node.DETECTOR, detector)
+    graph.add_node(_Node.SANITIZER, sanitizer)
+    graph.add_node(_Node.ADVERSARY, adversary)
+    graph.add_node(_Node.MARK_UNSAFE, _mark_unsafe_node)
 
-    graph.add_edge(START, "analyzer")
-    graph.add_edge("analyzer", "detector")
-    graph.add_edge("detector", "sanitizer")
-    graph.add_edge("sanitizer", "leakage_adversary")
+    graph.add_edge(START, _Node.ANALYZER)
+    graph.add_edge(_Node.ANALYZER, _Node.DETECTOR)
+    graph.add_edge(_Node.DETECTOR, _Node.SANITIZER)
+    graph.add_edge(_Node.SANITIZER, _Node.ADVERSARY)
     graph.add_conditional_edges(
-        "leakage_adversary",
+        _Node.ADVERSARY,
         lambda state: _route_after_adversary(state, max_iterations),
         {
             _Route.PROCEED: END,
-            _Route.ESCALATE: "analyzer",
-            _Route.UNSAFE: "mark_unsafe",
+            _Route.ESCALATE: _Node.ANALYZER,
+            _Route.UNSAFE: _Node.MARK_UNSAFE,
         },
     )
-    graph.add_edge("mark_unsafe", END)
+    graph.add_edge(_Node.MARK_UNSAFE, END)
     return graph.compile(checkpointer=checkpointer)
 
 
