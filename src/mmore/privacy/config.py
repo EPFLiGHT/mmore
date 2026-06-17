@@ -35,6 +35,14 @@ class AttackVector(str, Enum):
     MEMBERSHIP_INFERENCE = "membership_inference"
 
 
+class VerifierCheck(str, Enum):
+    """Advisory checks run by the post-cloud verifier over the answer."""
+
+    # TODO: check if we can do other check as well that are more analytic/math based
+    RESIDUAL_LEAKAGE = "residual_leakage"
+    FAITHFULNESS = "faithfulness"
+
+
 @dataclass
 class AnalyzerConfig:
     llm: LLMConfig
@@ -66,6 +74,19 @@ class LeakageAdversaryConfig:
 
 
 @dataclass
+class CloudLLMConfig:
+    llm: LLMConfig
+    system_prompt: Optional[str] = None
+
+
+@dataclass
+class VerifierConfig:
+    checks: List[VerifierCheck] = field(default_factory=lambda: list(VerifierCheck))
+    warn_threshold: float = 0.5
+    llm: Optional[LLMConfig] = None
+
+
+@dataclass
 class PrivacyConfig:
     domain: Optional[str] = None
     interactive: bool = False
@@ -75,3 +96,5 @@ class PrivacyConfig:
     leakage_adversary: LeakageAdversaryConfig = field(
         default_factory=LeakageAdversaryConfig
     )
+    answer: Optional[CloudLLMConfig] = None
+    verifier: VerifierConfig = field(default_factory=VerifierConfig)
