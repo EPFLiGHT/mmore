@@ -1,0 +1,29 @@
+# Privacy config, loaded directly as PrivacyConfig (fields at the top level).
+# Enable it with: mmore rag --config-file config.yaml --privacy privacy.yaml
+domain: healthcare          # free-form domain label that drives the analyzer policy
+interactive: false          # HITL gate; keep false for batch / local runs
+context_analyzer:
+  llm:
+    llm_name: Qwen/Qwen2.5-3B-Instruct
+detection:
+  engine: null          # one engine: presidio | gliner | llm | openai_filter
+  confidence_threshold: 0.7
+  entity_types: []          # optional restriction; empty = engine defaults
+sanitization:
+  strategy: null   # token_masking | entity_replacement | synthetic_rewrite | presidio
+  consistency: true
+leakage_adversary:
+  max_iterations: 3
+  leakage_threshold: 0.1
+  # strategies: [...]        # defaults to all attack vectors
+  llm:
+    llm_name: Qwen/Qwen2.5-3B-Instruct
+answer:                      # CloudLLMConfig: any LLMConfig backend (API or self-hosted/vLLM)
+  llm:
+    llm_name: Qwen/Qwen2.5-3B-Instruct
+  # system_prompt: ...       # optional
+verifier:                    # advisory only, no loop-back
+  checks: [residual_leakage, faithfulness]
+  warn_threshold: 0.5
+  llm:
+    llm_name: Qwen/Qwen2.5-3B-Instruct

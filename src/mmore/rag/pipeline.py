@@ -32,6 +32,10 @@ Context:
 {context}
 """
 
+# Privacy fields surfaced alongside the answer when privacy mode is on. Both are
+# PII-free: a structured report record and an advisory type+count summary.
+PRIVACY_OUTPUT_KEYS = ("privacy_report", "privacy_warnings")
+
 
 @dataclass
 class RAGConfig:
@@ -56,23 +60,31 @@ class RAGPipeline:
         prompt_template: Union[str, ChatPromptTemplate],
         llm: BaseChatModel,
         judge: Optional[LLMJudge] = None,
+        privacy_graph: Optional[Any] = None,
     ):
         # Get modules
         self.retriever = retriever
         self.prompt = prompt_template
         self.llm = llm
         self.judge = judge
+        # Compiled privacy pipeline; when set, it replaces the answer step.
+        self.privacy_graph = privacy_graph
 
         # Build the rag chain
         self.rag_chain = RAGPipeline._build_chain(
-            self.retriever, RAGPipeline.format_docs, self.prompt, self.llm, self.judge
+            self.retriever,
+            RAGPipeline.format_docs,
+            self.prompt,
+            self.llm,
+            self.judge,
+            self.privacy_graph,
         )
 
     def __str__(self):
         return str(self.rag_chain)
 
     @classmethod
-    def from_config(cls, config: str | RAGConfig):
+    def from_config(cls, config: str | RAGConfig, privacy_graph: Optional[Any] = None):
         if isinstance(config, str):
             config = load_config(config, RAGConfig)
 
@@ -87,7 +99,7 @@ class RAGPipeline:
             [("system", config.system_prompt), ("human", "{input}")]
         )
 
-        return cls(retriever, chat_template, llm, judge)
+        return cls(retriever, chat_template, llm, judge, privacy_graph)
 
     @staticmethod
     def format_docs(docs: List[Document]) -> str:
@@ -97,7 +109,9 @@ class RAGPipeline:
         )
 
     @staticmethod
-    def _build_chain(retriever, format_docs, prompt, llm, judge=None) -> Runnable:
+    def _build_chain(
+        retriever, format_docs, prompt, llm, judge=None, privacy_graph=None
+    ) -> Runnable:
         validate_input = RunnableLambda(
             lambda x: MMOREInput.model_validate(x).model_dump()
         )
@@ -107,7 +121,7 @@ class RAGPipeline:
             res_dict = MMOREOutput.model_validate(x).model_dump()
             res_dict["answer"] = res_dict["answer"].split("<|im_start|>assistant\n")[-1]
             # Expose formatted context and judge correction logs in the API response (context is not on MMOREOutput).
-            for key in ("context", *JUDGE_OUTPUT_KEYS):
+            for key in ("context", *JUDGE_OUTPUT_KEYS, *PRIVACY_OUTPUT_KEYS):
                 if key in x:
                     res_dict[key] = x[key]
 
@@ -128,11 +142,45 @@ class RAGPipeline:
             # retrieve without judge
             retrieval_step = RunnablePassthrough.assign(docs=retriever)
 
-        core_chain = retrieval_step.assign(
-            context=lambda x: format_docs(x["docs"])
-        ).assign(answer=rag_chain_from_docs)
+        with_context = retrieval_step.assign(context=lambda x: format_docs(x["docs"]))
+        if privacy_graph is not None:
+            # Privacy mode swaps only the answer step: the verified answer comes
+            # from the privacy graph driven over the retrieved chunks.
+            answer_step: Runnable = RunnableLambda(
+                RAGPipeline._privacy_answer_step(privacy_graph)
+            )
+            core_chain = with_context | answer_step
+        else:
+            core_chain = with_context.assign(answer=rag_chain_from_docs)
 
         return validate_input | core_chain | validate_output
+
+    @staticmethod
+    def _privacy_answer_step(privacy_graph):
+        """Answer step that routes the retrieved chunks through the privacy graph.
+
+        Returns the chain state updated with the verified ``answer`` and the
+        PII-free report fields, mirroring the ``.assign(answer=...)`` it replaces.
+        """
+        from dataclasses import asdict
+
+        from ..privacy.runner import run_privacy_query
+
+        def step(x: Dict[str, Any]) -> Dict[str, Any]:
+            docs: List[Document] = x["docs"]
+            raw_chunks = [doc.page_content for doc in docs]
+            result = run_privacy_query(privacy_graph, x["input"], raw_chunks)
+            updated = dict(x)
+            updated["answer"] = result.answer
+            if result.record is not None:
+                updated["privacy_report"] = asdict(result.record)
+                updated["privacy_warnings"] = [
+                    {"kind": w.kind.value, "count": w.count}
+                    for w in result.record.advisory_warnings
+                ]
+            return updated
+
+        return step
 
     def __call__(
         self,

@@ -188,18 +188,25 @@ def live_retrieval(config_file: str, host: str, port: int):
 @click.option(
     "--config-file", type=str, required=True, help="Dispatcher configuration file path."
 )
-def rag(config_file: str):
+@click.option(
+    "--privacy",
+    type=str,
+    default=None,
+    help="Path to a privacy config. Its presence enables privacy mode.",
+)
+def rag(config_file: str, privacy: Optional[str]):
     """Run the Retrieval-Augmented Generation (RAG) pipeline.
 
     Args:
       config_file: Dispatcher configuration file path.
+      privacy: Optional privacy config path; enables privacy mode when given.
 
     Returns:
 
     """
     from .run_rag import rag as run_rag
 
-    run_rag(config_file)
+    run_rag(config_file, privacy_config_file=privacy)
 
 
 @main.command()

@@ -52,6 +52,7 @@ core_features/colvision
 core_features/websearch
 core_features/evaluation
 core_features/llm_as_a_judge
+core_features/privacy_mode
 ```
 
 ```{toctree}
@@ -87,6 +88,7 @@ Here is a quick overview of the main pages:
 - [Websearch](core_features/websearch.md): web search integration and related workflows
 - [Evaluation](core_features/evaluation.md): assess system performance
 - [LLM as a judge](core_features/llm_as_a_judge.md): corrective retrieval with an LLM judge
+- [Privacy mode](core_features/privacy_mode.md): sanitize retrieved context before it reaches the answer model
 - [Distributed processing](advanced_usage/distributed_processing.md): scale processing across larger workloads
 - [Profiler](advanced_usage/profiler.md): profile and analyze performance
 - [uv](advanced_usage/uv.md): environment and dependency workflow

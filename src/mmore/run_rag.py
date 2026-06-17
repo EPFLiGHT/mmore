@@ -15,7 +15,7 @@ from rich.markup import escape
 
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.judge import extract_judge_output
-from mmore.rag.pipeline import RAGConfig, RAGPipeline
+from mmore.rag.pipeline import PRIVACY_OUTPUT_KEYS, RAGConfig, RAGPipeline
 from mmore.ragcli_helper import RunTimer
 from mmore.utils import load_config
 from mmore.ux import (
@@ -113,6 +113,10 @@ def _to_public_output(pipeline_result: Dict[str, Any]) -> Dict[str, Any]:
     """Bridge pipeline dict (internal keys like docs) to the public RAGOutput / JSON schema."""
     out = {key: pipeline_result[key] for key in _RAG_KEYS if key in pipeline_result}
     out.update(extract_judge_output(pipeline_result))
+    # Privacy mode surfaces a PII-free report record + advisory summary, if present.
+    for key in PRIVACY_OUTPUT_KEYS:
+        if key in pipeline_result:
+            out[key] = pipeline_result[key]
     docs = pipeline_result.get("docs")
     if docs:
         out["documents"] = _serialize_documents(docs)
@@ -148,6 +152,9 @@ class RAGOutput(BaseModel):
     hit_max_corrective_steps: Optional[float] = None
     retrieval_metrics: Optional[Dict[str, float]] = None
     retrieval_corrections: Optional[List[Dict[str, Any]]] = None
+    # Privacy mode only: PII-free report record and advisory type+count summary.
+    privacy_report: Optional[Dict[str, Any]] = None
+    privacy_warnings: Optional[List[Dict[str, Any]]] = None
 
 
 def create_api(rag: RAGPipeline, endpoint: str):
@@ -172,9 +179,25 @@ def create_api(rag: RAGPipeline, endpoint: str):
     return app
 
 
+def _build_privacy_graph(privacy_config_file: str):
+    """Load + validate the privacy config and compile its pipeline graph.
+
+    Errors (missing answer.llm, unknown domain, unregistered engine) surface
+    here, eagerly, before any query runs.
+    """
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from mmore.privacy.pipeline import build_privacy_pipeline
+    from mmore.privacy.runner import load_privacy_config
+
+    privacy_config = load_privacy_config(privacy_config_file)
+    # One checkpointer for the graph; the runner threads each request by id.
+    return build_privacy_pipeline(privacy_config, MemorySaver())
+
+
 @profile_function()
-def rag(config_file):
-    """Run RAG in local or API"""
+def rag(config_file, privacy_config_file: Optional[str] = None):
+    """Run RAG in local or API, optionally through the privacy pipeline."""
     quiet_noisy_libs()
     config = load_config(config_file, RAGInferenceConfig)
 
@@ -186,6 +209,8 @@ def rag(config_file):
         fields.append(f"answers: {cast(LocalConfig, config.mode_args).output_file}")
     else:
         fields.append(f"mode: {config.mode}")
+    if privacy_config_file is not None:
+        fields.append("privacy: on")
     step_intro(
         RAG_NAME,
         RAG_EMOJI,
@@ -193,8 +218,13 @@ def rag(config_file):
         fields,
     )
 
+    privacy_graph = None
+    if privacy_config_file is not None:
+        logger.debug("Privacy mode enabled, building the privacy pipeline...")
+        privacy_graph = _build_privacy_graph(privacy_config_file)
+
     logger.debug("Creating the RAG Pipeline...")
-    rag_pp = RAGPipeline.from_config(config.rag)
+    rag_pp = RAGPipeline.from_config(config.rag, privacy_graph=privacy_graph)
     logger.debug("RAG pipeline initialized!")
 
     if config.mode == "local":
@@ -266,6 +296,11 @@ if __name__ == "__main__":
     parser.add_argument(
         "--config-file", required=True, help="Path to the rag configuration file."
     )
+    parser.add_argument(
+        "--privacy",
+        default=None,
+        help="Path to a privacy config; its presence enables privacy mode.",
+    )
     args = parser.parse_args()
 
-    rag(args.config_file)
+    rag(args.config_file, privacy_config_file=args.privacy)
