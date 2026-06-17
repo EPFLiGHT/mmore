@@ -6,24 +6,15 @@ Each agent contributes a node that reads what it needs and writes its
 output back.
 """
 
-from enum import Enum
 from typing import List, Optional
 
 from ..detection.base import PIISpan
 from ..leakage import EscalationRecord, LeakageVerdict
 from ..policy import PrivacyPolicy
+from ..report import PreCloudOutcome, ReportRecord
 from ..risk import RiskAssessment
 from ..verification import VerifierVerdict
 from .base import NodeOutput
-
-
-class PreCloudOutcome(str, Enum):
-    """Outcome of a request at the pre-cloud trust boundary."""
-
-    APPROVED = "approved"
-    RE_LOOPED = "re-looped"
-    ABORTED = "aborted"  # leak loop exhausted
-    REJECTED = "rejected"
 
 
 class PrivacyState(NodeOutput, total=False):
@@ -67,4 +58,4 @@ class PrivacyState(NodeOutput, total=False):
     verifier_verdict: Optional[VerifierVerdict]
 
     # Final append-only report records
-    report: List[dict]  # TODO: have a report record here
+    report: List[ReportRecord]
