@@ -24,7 +24,10 @@ from .agents.detector import DetectorAgent
 from .agents.gate import HITLGateAgent
 from .agents.sanitizer import SanitizerAgent
 from .agents.state import PreCloudOutcome, PrivacyState
+from .agents.verifier import AdvisoryVerifierAgent
+from .answer import AnswerModel
 from .config import PrivacyConfig
+from .report_builder import build_report_record
 
 logger = logging.getLogger(__name__)
 
@@ -35,7 +38,7 @@ class NodeFn(Protocol):
 
 
 class _Node(str, Enum):
-    """Graph node ids in the pre-cloud pipeline."""
+    """Graph node ids across the full pipeline."""
 
     ANALYZER = "analyzer"
     DETECTOR = "detector"
@@ -43,6 +46,9 @@ class _Node(str, Enum):
     ADVERSARY = "leakage_adversary"
     GATE = "gate"
     MARK_UNSAFE = "mark_unsafe"
+    ANSWER = "answer"
+    VERIFIER = "advisory_verifier"
+    REPORT = "report"
 
 
 class _Route(str, Enum):
@@ -80,6 +86,12 @@ def _mark_unsafe_node(state: PrivacyState) -> PrivacyState:
     return PrivacyState(safe=False, outcome=PreCloudOutcome.ABORTED)
 
 
+def _report_node(state: PrivacyState) -> PrivacyState:
+    """Terminal node: append this request's PII-free report record."""
+    record = build_report_record(state)
+    return PrivacyState(report=[*state.get("report", []), record])
+
+
 def build_pipeline_graph(
     *,
     analyzer: NodeFn,
@@ -87,10 +99,12 @@ def build_pipeline_graph(
     sanitizer: NodeFn,
     adversary: NodeFn,
     gate: NodeFn,
+    answer: NodeFn,
+    verifier: NodeFn,
     max_iterations: int = 3,
     checkpointer: Optional[BaseCheckpointSaver] = None,
 ):
-    """Compile the pre-cloud loop from explicit node callables."""
+    """Compile the full pipeline from explicit node callables."""
     graph = StateGraph(PrivacyState)
     graph.add_node(_Node.ANALYZER, analyzer)
     graph.add_node(_Node.DETECTOR, detector)
@@ -98,6 +112,9 @@ def build_pipeline_graph(
     graph.add_node(_Node.ADVERSARY, adversary)
     graph.add_node(_Node.GATE, gate)
     graph.add_node(_Node.MARK_UNSAFE, _mark_unsafe_node)
+    graph.add_node(_Node.ANSWER, answer)
+    graph.add_node(_Node.VERIFIER, verifier)
+    graph.add_node(_Node.REPORT, _report_node)
 
     graph.add_edge(START, _Node.ANALYZER)
     graph.add_edge(_Node.ANALYZER, _Node.DETECTOR)
@@ -116,12 +133,15 @@ def build_pipeline_graph(
         _Node.GATE,
         _route_after_gate,
         {
-            _Route.PROCEED: END,
-            _Route.REJECTED: END,
+            _Route.PROCEED: _Node.ANSWER,
+            _Route.REJECTED: _Node.REPORT,
             _Route.ESCALATE: _Node.ANALYZER,
         },
     )
-    graph.add_edge(_Node.MARK_UNSAFE, END)
+    graph.add_edge(_Node.MARK_UNSAFE, _Node.REPORT)
+    graph.add_edge(_Node.ANSWER, _Node.VERIFIER)
+    graph.add_edge(_Node.VERIFIER, _Node.REPORT)
+    graph.add_edge(_Node.REPORT, END)
     return graph.compile(checkpointer=checkpointer)
 
 
@@ -129,7 +149,7 @@ def build_privacy_pipeline(
     config: PrivacyConfig,
     checkpointer: Optional[BaseCheckpointSaver] = None,
 ):
-    """Build the pre-cloud pipeline from a ``PrivacyConfig``.
+    """Build the full privacy pipeline from a ``PrivacyConfig``.
 
     The agents provide the node callables: the compiled graph owns the single
     shared checkpointer (the agents are used only as node providers, so they
@@ -140,6 +160,8 @@ def build_privacy_pipeline(
     sanitizer = SanitizerAgent.from_config(config)
     adversary = AdversarialAgent.from_config(config)
     gate = HITLGateAgent.from_config(config)
+    answer = AnswerModel.from_config(config)
+    verifier = AdvisoryVerifierAgent.from_config(config)
 
     return build_pipeline_graph(
         analyzer=analyzer._node,
@@ -147,6 +169,8 @@ def build_privacy_pipeline(
         sanitizer=sanitizer._node,
         adversary=adversary._node,
         gate=gate._node,
+        answer=answer._node,
+        verifier=verifier._node,
         max_iterations=config.leakage_adversary.max_iterations,
         checkpointer=checkpointer,
     )

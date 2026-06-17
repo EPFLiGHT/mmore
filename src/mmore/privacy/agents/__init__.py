@@ -10,12 +10,14 @@ from .registry import (
     resolve_tools,
     tool_registry,
 )
+from .verifier import AdvisoryVerifierAgent
 
 __all__ = [
     "AgentConfig",
     "AgentState",
     "BaseAgent",
     "AdversarialAgent",
+    "AdvisoryVerifierAgent",
     "HITLGateAgent",
     "ToolNotRegisteredError",
     "build_checkpointer",

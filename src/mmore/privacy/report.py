@@ -1,8 +1,8 @@
-"""The final report returned alongside the answer.
+"""The final report record returned alongside the answer.
 
-A structured, PII-free, append-only audit record: one record per request,
-serialized as a JSON line. It records only types and counts, never raw
-information, so it can be persisted and shown to the user.
+A structured, PII-free, append-only audit record: one record per request. It
+holds only types and counts, never raw information, so it can be persisted and
+shown to the user.
 """
 
 from dataclasses import dataclass
