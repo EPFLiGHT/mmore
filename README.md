@@ -222,11 +222,11 @@ If you use mmore in your research, please cite the paper:
 ```
 
 <p align="center">
-  <a href="https://www.star-history.com/#EPFLiGHT/mmore&Date">
-     <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date&theme=dark" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date" />
-   </picture>
+  <a href="https://www.star-history.com/?repos=EPFLiGHT%2Fmmore&type=date&legend=top-left">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&theme=dark&legend=top-left" />
+    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&legend=top-left" />
+    <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&legend=top-left" />
+  </picture>
   </a>
 </p>
