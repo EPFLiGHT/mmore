@@ -40,7 +40,7 @@ class MultimodalChunker(BasePostProcessor):
     table_handling: TableHandlingMode
 
     def __init__(self, text_chunker: BaseChunker, table_handling: str = "single_row"):
-        super().__init__("🦛 Chunker")
+        super().__init__("Chunker")
         self.text_chunker = text_chunker
         try:
             self.table_handling = TableHandlingMode(table_handling)

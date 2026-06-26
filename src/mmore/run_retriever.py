@@ -5,7 +5,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import json
-import logging
 import re
 import time
 from pathlib import Path
@@ -21,14 +20,11 @@ from tqdm import tqdm
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.retriever import Retriever, RetrieverConfig
 from mmore.utils import load_config
+from mmore.ux import quiet_noisy_libs, setup_logging, step_intro
 
-logger = logging.getLogger(__name__)
-RETRIVER_EMOJI = "🔍"
-logging.basicConfig(
-    format=f"[RETRIEVER {RETRIVER_EMOJI} -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+RETRIEVER_NAME = "Retrieve"
+RETRIEVER_EMOJI = "🔍"
+logger = setup_logging(RETRIEVER_NAME, RETRIEVER_EMOJI)
 
 load_dotenv()
 
@@ -109,7 +105,11 @@ class Msg(BaseModel):
 
 
 class RetrieverQuery(BaseModel):
-    fileIds: list[str] = Field(..., description="List of file IDs to search within")
+    query: str = Field(..., description="Search query")
+    fileIds: list[str] = Field(
+        default_factory=list,
+        description="File IDs to search within (empty = whole collection)",
+    )
     maxMatches: int = Field(
         ..., ge=1, description="Maximum number of matches to return"
     )
@@ -119,7 +119,6 @@ class RetrieverQuery(BaseModel):
         le=1.0,
         description="Minimum similarity score for results (-1.0 to 1.0)",
     )
-    query: str = Field(..., description="Search query")
 
 
 _ID_PATTERN = re.compile(r'^[^"+]+$')
@@ -136,14 +135,15 @@ def _chunk_metadata(paragraph_positions) -> Optional[dict]:
 
 
 def make_router(config_file: str) -> APIRouter:
+    quiet_noisy_libs()
     router = APIRouter()
 
     # Load the config file
     config = load_config(config_file, RetrieverConfig)
 
-    logger.info("Running retriever...")
+    logger.debug("Running retriever...")
     retriever_obj = Retriever.from_config(config)
-    logger.info("Retriever loaded!")
+    logger.debug("Retriever loaded!")
 
     @router.get(
         "/list_files",
@@ -290,6 +290,18 @@ def make_router(config_file: str) -> APIRouter:
 
 @profile_function()
 def run_api(config_file: str, host: str, port: int):
+    quiet_noisy_libs()
+    config = load_config(config_file, RetrieverConfig)
+    step_intro(
+        RETRIEVER_NAME,
+        RETRIEVER_EMOJI,
+        "Serve document search over an API",
+        [
+            f"http://{host}:{port}",
+            f"collection: {config.collection_name}",
+            "endpoint: POST /v1/retrieve",
+        ],
+    )
     router = make_router(config_file)
 
     app = FastAPI(

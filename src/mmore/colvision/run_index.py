@@ -1,5 +1,5 @@
 import argparse
-import logging
+import time
 from dataclasses import dataclass
 from typing import Union
 
@@ -9,15 +9,12 @@ import pandas as pd
 from mmore.profiler import enable_profiling_from_env, profile_function
 
 from ..utils import load_config
+from ..ux import quiet_noisy_libs, setup_logging, step_intro, step_summary
 from .milvuscolvision import MilvusColvisionManager
 
-INDEX_EMOJI = "🗂️"
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format=f"[INDEX {INDEX_EMOJI}  -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
+INDEX_NAME = "ColVision Index"
+INDEX_EMOJI = "📇"
+logger = setup_logging(INDEX_NAME, INDEX_EMOJI)
 
 
 @dataclass
@@ -47,19 +44,28 @@ def index(config_file: Union[IndexConfig, str]):
     Main indexing function.
     Loads embeddings from parquet and inserts them into Milvus local DB.
     """
+    quiet_noisy_libs()
     config = load_config(config_file, IndexConfig)
 
     parquet_path = config.parquet_path
     df = pd.read_parquet(parquet_path)
-    logger.info(f"Loaded {len(df)} rows from {parquet_path}")
+    logger.debug(f"Indexing {len(df)} rows from {parquet_path}")
 
     if df.empty:
-        logger.info(f"Parquet {parquet_path} is empty — nothing to index, exiting.")
+        logger.warning(f"Parquet {parquet_path} is empty — nothing to index, exiting.")
         return
 
-    dim = _get_embedding_dim(df)
-    logger.info(f"Detected embedding dim={dim} from parquet")
+    step_intro(
+        INDEX_NAME,
+        INDEX_EMOJI,
+        "Store PDF-page data so the pages can be searched",
+        [f"{len(df)} rows", f"collection: {config.milvus.collection_name}"],
+    )
 
+    dim = _get_embedding_dim(df)
+    logger.debug(f"Detected embedding dim={dim} from parquet")
+
+    start = time.time()
     manager = MilvusColvisionManager(
         db_path=config.milvus.db_path,
         collection_name=config.milvus.collection_name,
@@ -69,6 +75,12 @@ def index(config_file: Union[IndexConfig, str]):
     )
     manager.insert_from_dataframe(df)
     manager.create_index()
+    step_summary(
+        INDEX_NAME,
+        INDEX_EMOJI,
+        time.time() - start,
+        {"indexed": f"{len(df)} rows", "collection": config.milvus.collection_name},
+    )
 
 
 if __name__ == "__main__":

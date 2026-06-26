@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from mmore.tui.commands import REGISTRY, check_stage_available
-from mmore.tui.config_builder import _ask, _confirm, _prompt
+from mmore.tui.config_builder import _ask, _confirm, _prompt, _select
 from mmore.tui.theme import ACCENT, ACCENT2, MUTED, OK, QMARK, QSTYLE, console
 
 # ---------------------------------------------------------------------------
@@ -25,8 +25,10 @@ _STAGE_EXTRAS: dict[str, list[str]] = {
     "index": ["index"],
     "rag": ["rag"],
     "ragcli": ["rag"],
-    "retrieve": ["rag", "api"],
     "websearch": ["websearch"],
+    "colvision-process": ["colvision"],
+    "colvision-index": ["colvision"],
+    "colvision-retrieve": ["colvision", "api"],
 }
 
 _COMPUTE_EXTRAS = [
@@ -56,9 +58,8 @@ _STAGE_ENV_VARS: dict[str, list[tuple[str, str, str]]] = {
     ],
 }
 
-# Aliases: ragcli and retrieve share rag's env vars
+# Aliases: ragcli shares rag's env vars
 _STAGE_ENV_VARS["ragcli"] = _STAGE_ENV_VARS["rag"]
-_STAGE_ENV_VARS["retrieve"] = _STAGE_ENV_VARS["rag"]
 
 # Profiling env vars (always available)
 _PROFILING_VARS: list[tuple[str, str, str]] = [
@@ -103,13 +104,10 @@ def _pick_compute() -> str:
         questionary.Choice(f"{name:<6} — {desc}", value=name)
         for name, desc in _COMPUTE_EXTRAS
     ]
-    return _ask(
-        questionary.select(
-            "Compute backend",
-            choices=choices,
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    return _select(
+        "Compute backend",
+        choices=choices,
+        answer_labels={name: name for name, _ in _COMPUTE_EXTRAS},
     )
 
 

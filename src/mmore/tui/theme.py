@@ -2,38 +2,101 @@
 
 from __future__ import annotations
 
+import re
 import time
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any, Callable, Sequence
 
+import questionary
 from questionary import Style
 from rich.align import Align
 from rich.console import Console, Group
+from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
 console = Console()
 
-QSTYLE = Style(
-    [
-        ("qmark", "fg:#5fd7ff bold"),
-        ("question", "bold"),
-        ("answer", "fg:#ff5fd7 bold"),
-        ("pointer", "fg:#5fd7ff bold"),
-        ("highlighted", "fg:#5fd7ff bold"),
-        ("selected", "fg:#ff5fd7"),
-        ("instruction", "fg:#808080 italic"),
-        ("disabled", "fg:#ffaf00 italic"),
-    ]
-)
-QMARK = "▸"
-
 # Palette
+BRAND = "#f7cb46"
 ACCENT = "bright_cyan"
 ACCENT2 = "magenta"
 MUTED = "grey58"
 OK = "bold green"
 WARN = "yellow"
 ERR = "bold red"
+
+QSTYLE = Style(
+    [
+        ("qmark", "fg:#5fd7ff bold"),
+        ("question", "bold"),
+        ("answer", f"fg:{BRAND} bold"),
+        ("pointer", "fg:#5fd7ff bold"),
+        ("highlighted", "fg:#5fd7ff bold"),
+        ("selected", f"fg:{BRAND}"),
+        ("instruction", "fg:#808080 italic"),
+        ("disabled", "fg:#ffaf00 italic"),
+    ]
+)
+QMARK = "▸"
+
+# Strip the leading decoration (emoji, ★, ▶ ...) up to the first word/path char
+_DECORATION = re.compile(r"^[^\w/~.]+\s*")
+
+
+def _choice_title(value: Any, choices: Sequence[Any]) -> str:
+    """The display title of the chosen value, joining formatted-text titles."""
+    for c in choices:
+        if isinstance(c, questionary.Choice):
+            if c.value == value:
+                title = c.title
+                if isinstance(title, str):
+                    return title
+                if title is None:
+                    return str(value)
+                return "".join(tok[1] for tok in title)
+        elif c == value:
+            return str(c)
+    return str(value)
+
+
+def _clean_answer(title: str) -> str:
+    """Reduce a menu label to a compact text."""
+    text = re.sub(r"\s{2,}", " ", title.strip())
+    text = _DECORATION.sub("", text)
+    text = re.sub(r"\s*\(recommended\)$", "", text)
+    home = str(Path.home())
+    if text.startswith(home):
+        text = "~" + text[len(home) :]
+    return text.strip()
+
+
+def select(
+    question: str,
+    choices: Sequence[Any],
+    answer_labels: dict[Any, str] | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Themed `questionary.select` with a uniform answer echo."""
+    value = questionary.select(
+        question,
+        choices=choices,
+        style=QSTYLE,
+        qmark=QMARK,
+        erase_when_done=True,
+        **kwargs,
+    ).ask()
+    if value is not None:
+        if answer_labels and value in answer_labels:
+            answer = answer_labels[value]
+        else:
+            answer = _clean_answer(_choice_title(value, choices))
+        console.print(
+            f"[{ACCENT}]{QMARK}[/] [bold]{escape(question)}[/] "
+            f"[bold {BRAND}]{escape(answer)}[/]"
+        )
+    return value
+
 
 BANNER = r"""
 
@@ -50,7 +113,7 @@ def _mmore_logo(text: str) -> Text:
     """Color the banner like the mmore GitHub logo.
 
     Strategy, per character:
-    - The second `M` (columns 12:23 of every row) is rendered fully in yellow.
+    - The second `M` (columns 12:23 of every row) is rendered in the brand color.
     - Elsewhere: outline characters (`╔╗╚╝═║╔╝╗`, etc.) are white and the
       filled `█` blocks are black, giving the letters a hollow look.
     """
@@ -75,7 +138,7 @@ def _mmore_logo(text: str) -> Text:
                     out.append(ch)
 
         _emit(left)
-        out.append(mid, style="bold yellow")
+        out.append(mid, style=f"bold {BRAND}")
         _emit(right)
         out.append("\n")
     return out
@@ -105,18 +168,10 @@ def section(title: str, body: str | Text, style: str = ACCENT) -> Panel:
 
 
 def run_step(label: str, fn: Callable[..., Any], **kwargs: Any) -> float:
-    """Print a start line, call fn(**kwargs), print a timed done line.
-
-    Heavy pipeline commands emit their own logs via logging/click which bypass
-    rich.Console — a Live spinner would clash with them. Plain prints keep the
-    output readable while still showing progress.
-    """
+    """Call fn(**kwargs) and return its clock duration."""
     start = time.time()
-    console.print(f"  [{ACCENT}]▸[/] {label}…")
     fn(**kwargs)
-    elapsed = time.time() - start
-    console.print(f"  [{OK}]✓[/] {label} [dim]({elapsed:.1f}s)[/dim]")
-    return elapsed
+    return time.time() - start
 
 
 def step_header(idx: int, total: int, name: str) -> None:

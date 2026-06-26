@@ -21,6 +21,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_openai import ChatOpenAI
 
 from ..utils import load_config
+from ..ux import loading_model
 
 _OPENAI_MODELS = [
     # GPT-5 series (2026)
@@ -189,29 +190,30 @@ class LLM(BaseChatModel):
             pipeline_kwargs = dict(config.generation_kwargs)
             if hf_return_full_text is not None:
                 pipeline_kwargs["return_full_text"] = hf_return_full_text
-            if torch.backends.mps.is_available():
+            with loading_model(f"the answer-generation model ({config.llm_name})"):
+                if torch.backends.mps.is_available():
+                    return ChatHuggingFace(
+                        llm=HuggingFacePipeline.from_model_id(
+                            model_id=config.llm_name,
+                            task="text-generation",
+                            device_map="mps",
+                            pipeline_kwargs=pipeline_kwargs,
+                        )
+                    )
+                if torch.cuda.is_available():
+                    current_device = cls.device_count
+                    cls.device_count = (cls.device_count + 1) % cls._get_nb_devices()
+                else:
+                    current_device = -1
+
                 return ChatHuggingFace(
                     llm=HuggingFacePipeline.from_model_id(
-                        model_id=config.llm_name,
+                        config.llm_name,
                         task="text-generation",
-                        device_map="mps",
+                        device=current_device,
                         pipeline_kwargs=pipeline_kwargs,
                     )
                 )
-            if torch.cuda.is_available():
-                current_device = cls.device_count
-                cls.device_count = (cls.device_count + 1) % cls._get_nb_devices()
-            else:
-                current_device = -1
-
-            return ChatHuggingFace(
-                llm=HuggingFacePipeline.from_model_id(
-                    config.llm_name,
-                    task="text-generation",
-                    device=current_device,
-                    pipeline_kwargs=pipeline_kwargs,
-                )
-            )
         else:
             loader = loaders.get(cast(str, config.provider), ChatOpenAI)
             return loader(

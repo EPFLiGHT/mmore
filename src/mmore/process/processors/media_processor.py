@@ -13,6 +13,7 @@ from torch._C import device as torch_device
 from transformers.pipelines import pipeline as pipeline_t
 
 from ...type import DocumentMetadata, FileDescriptor, MultimodalSample
+from ...ux import is_verbose, loading_model, progress
 from .base import Processor, ProcessorConfig
 
 logger = logging.getLogger(__name__)
@@ -92,14 +93,15 @@ class MediaProcessor(Processor):
 
         try:
             MediaProcessor.pipelines = []
-            for device in MediaProcessor.devices:
-                pipe = pipeline_t(
-                    "automatic-speech-recognition",
-                    model=model_name,
-                    device=device,
-                    return_timestamps=True,
-                )
-                MediaProcessor.pipelines.append(pipe)
+            with loading_model(f"the speech-to-text model ({model_name})"):
+                for device in MediaProcessor.devices:
+                    pipe = pipeline_t(
+                        "automatic-speech-recognition",
+                        model=model_name,
+                        device=device,
+                        return_timestamps=True,
+                    )
+                    MediaProcessor.pipelines.append(pipe)
         except Exception as e:
             logger.error(f"Error loading models: {e}")
             MediaProcessor.pipelines = []
@@ -124,13 +126,19 @@ class MediaProcessor(Processor):
         file_chunks = self.evenly_split_across_gpus(files_paths, len(self.devices))
 
         results = []
+        bar = progress(
+            total=len(files_paths), desc=self.__class__.__name__, unit="file"
+        )
         for pipeline, chunk in zip(self.pipelines, file_chunks):
             for file in chunk:
+                bar.set_postfix_str(os.path.basename(file))
                 try:
                     result = self._process_file(file, pipeline, fast_mode)
                     results.append(result)
                 except Exception as e:
                     logger.error(f"Error processing {file}: {e}")
+                bar.update(1)
+        bar.close()
         return results
 
     def _process_file(self, file_path, pipeline, fast_mode):
@@ -159,15 +167,20 @@ class MediaProcessor(Processor):
 
     def _extract_text(self, file_path: str, pipeline, fast_mode=False) -> str:
         def _prepare_audio_file(file_path: str, ext: str, temp_audio):
+            mp_logger = "bar" if is_verbose() else None
             try:
                 if ext in [".mp4", ".avi", ".mov", ".mkv"]:
                     with VideoFileClip(file_path) as clip:
                         if clip.audio is None:
                             raise ValueError("No audio track found in video.")
-                        clip.audio.write_audiofile(temp_audio.name, codec="pcm_s16le")
+                        clip.audio.write_audiofile(
+                            temp_audio.name, codec="pcm_s16le", logger=mp_logger
+                        )
                 elif ext in [".mp3", ".flac", ".wav"]:
                     with AudioFileClip(file_path) as audio_clip:
-                        audio_clip.write_audiofile(temp_audio.name, codec="pcm_s16le")
+                        audio_clip.write_audiofile(
+                            temp_audio.name, codec="pcm_s16le", logger=mp_logger
+                        )
                 temp_audio.flush()
             except Exception as e:
                 logger.error(f"Error preparing audio file {file_path}: {e}")
@@ -198,14 +211,14 @@ class MediaProcessor(Processor):
                         frame = np.asarray(clip.get_frame(t))
                         image = Image.fromarray(frame).convert("RGB")
                         images.append(image)
-                logger.info(f"Extracted {len(images)} images from {file_path}.")
+                logger.debug(f"Extracted {len(images)} images from {file_path}.")
             except Exception as e:
                 logger.error(f"Error extracting images from {file_path}: {e}")
             return images
 
         ext = os.path.splitext(file_path)[1].lower()
         if ext in [".mp3", ".flac", ".wav"]:
-            logger.info(f"No images to extract from {file_path}.")
+            logger.debug(f"No images to extract from {file_path}.")
             return []
         return _extract_video_frames(file_path)
 

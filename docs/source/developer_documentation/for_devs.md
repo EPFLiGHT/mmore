@@ -34,6 +34,7 @@ This guide will help you set up your development environment and contribute to t
   - [🖥️ Interactive TUI](#️-interactive-tui)
   - [💡 Development tips](#-development-tips)
     - [Working with `uv`](#working-with-uv)
+    - [Verbose / debug output (`MMORE_VERBOSE`)](#verbose--debug-output-mmore_verbose)
   - [❓ Questions](#-questions)
 
 ---
@@ -283,6 +284,18 @@ Stages whose extras are missing are disabled in the menu with an install hint (e
 - Use `uv pip` instead of `pip` for all package installations
 - The project uses dependency overrides that are handled automatically by `uv`
 - See the `uv` tutorial for more details
+
+### Verbose / debug output (`MMORE_VERBOSE`)
+
+By default, pipelines show a clean, single progress line per step and hide noisy
+third-party output and debug logs.
+
+Debugging a stuck or failing document? Set `MMORE_VERBOSE=1` to see everything (
+`DEBUG` logs, all third-party output, etc...):
+
+```bash
+MMORE_VERBOSE=1 mmore process --config_file examples/process/config.yaml
+```
 
 ## ❓ Questions
 

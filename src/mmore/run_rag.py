@@ -1,30 +1,63 @@
 import argparse
 import json
-import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Union, cast
+from uuid import UUID
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import FastAPI
 from langchain_core.documents import Document
 from pydantic import BaseModel
+from rich.markup import escape
 
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.judge import extract_judge_output
 from mmore.rag.pipeline import RAGConfig, RAGPipeline
+from mmore.ragcli_helper import RunTimer
 from mmore.utils import load_config
-
-RAG_EMOJI = "🧠"
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format=f"[RAG {RAG_EMOJI} -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
+from mmore.ux import (
+    Color,
+    model_loading_seconds,
+    progress,
+    quiet_noisy_libs,
+    setup_logging,
+    step_intro,
+    step_summary,
 )
 
+RAG_NAME = "RAG"
+RAG_EMOJI = "🧠"
+logger = setup_logging(RAG_NAME, RAG_EMOJI)
+
 load_dotenv()
+
+
+class BatchGenerationTimer(RunTimer):
+    """Accumulates LLM generation time across a RAG batch."""
+
+    def __init__(self, on_generate_start: Optional[Callable[[], None]] = None) -> None:
+        super().__init__()
+        self.generate_seconds = 0.0
+        self._on_generate_start = on_generate_start
+
+    def _start(self, run_id: UUID) -> None:
+        self._begin(run_id)
+        if self._on_generate_start is not None:
+            self._on_generate_start()
+
+    def on_llm_start(self, serialized, prompts, *, run_id, **kwargs) -> None:
+        self._start(run_id)
+
+    def on_chat_model_start(self, serialized, messages, *, run_id, **kwargs) -> None:
+        self._start(run_id)
+
+    def on_llm_end(self, response, *, run_id, **kwargs) -> None:
+        elapsed = self._elapsed(run_id)
+        if elapsed is not None:
+            self.generate_seconds += elapsed
 
 
 @dataclass
@@ -142,18 +175,78 @@ def create_api(rag: RAGPipeline, endpoint: str):
 @profile_function()
 def rag(config_file):
     """Run RAG in local or API"""
+    quiet_noisy_libs()
     config = load_config(config_file, RAGInferenceConfig)
 
-    logger.info("Creating the RAG Pipeline...")
+    fields = [
+        f"collection: {config.rag.retriever.collection_name}",
+        f"LLM: {config.rag.llm.llm_name}",
+    ]
+    if config.mode == "local":
+        fields.append(f"answers: {cast(LocalConfig, config.mode_args).output_file}")
+    else:
+        fields.append(f"mode: {config.mode}")
+    step_intro(
+        RAG_NAME,
+        RAG_EMOJI,
+        "Find relevant passages and answer questions about your docs",
+        fields,
+    )
+
+    logger.debug("Creating the RAG Pipeline...")
     rag_pp = RAGPipeline.from_config(config.rag)
-    logger.info("RAG pipeline initialized!")
+    logger.debug("RAG pipeline initialized!")
 
     if config.mode == "local":
         config_args = cast(LocalConfig, config.mode_args)
 
         queries = read_queries(config_args.input_file)
-        results = rag_pp(queries, return_dict=True)
+        rag_pp.retriever.pop_timings()  # reset accumulators before this run
+
+        results = []
+        bar = progress(total=len(queries), desc="Answering", unit="")
+
+        stage_labels = {
+            "retrieve": "retrieving",
+            "rerank": "reranking",
+            "generate": "generating",
+        }
+        rag_pp.retriever.set_stage_callback(
+            lambda stage: bar.set_unit(stage_labels.get(stage, stage))
+        )
+        timer = BatchGenerationTimer(
+            on_generate_start=lambda: bar.set_unit(stage_labels["generate"])
+        )
+
+        start = time.time()
+        loading_start = model_loading_seconds()
+        for i, query in enumerate(queries, 1):
+            question = str(query.get("input", ""))
+            bar.print_above(f"[{Color.BRAND}]Q{i}/{len(queries)}[/] {escape(question)}")
+            results.append(
+                rag_pp.rag_chain.invoke(query, config={"callbacks": [timer]})
+            )
+            bar.update(1)
+        rag_pp.retriever.set_stage_callback(None)
+        bar.set_unit("")
+        bar.close()
+
+        elapsed = time.time() - start - (model_loading_seconds() - loading_start)
         save_results(results, config_args.output_file)
+
+        n = max(1, len(queries))
+        retrieve_s, rerank_s = rag_pp.retriever.pop_timings()
+        step_summary(
+            RAG_NAME,
+            RAG_EMOJI,
+            elapsed,
+            {
+                "queries": len(queries),
+                "retrieve": f"{retrieve_s / n:.2f} s/query",
+                "rerank": f"{rerank_s / n:.2f} s/query" if rerank_s else "n/a",
+                "generate": f"{timer.generate_seconds / n:.2f} s/query",
+            },
+        )
 
     elif config.mode == "api":
         config_args = cast(APIConfig, config.mode_args)

@@ -20,12 +20,12 @@ from mmore.tui.theme import (
     ACCENT,
     ACCENT2,
     MUTED,
-    OK,
     QMARK,
     QSTYLE,
     console,
     run_step,
     section,
+    select,
     show_banner,
 )
 
@@ -101,12 +101,20 @@ def _disabled_label(label: str) -> str:
     return f"⚠  {label}"
 
 
-def _run_single_command() -> None:
+def _is_colvision(spec) -> bool:
+    return spec.name.startswith("colvision-")
+
+
+def _select_and_run(specs, display_name, prompt: str) -> None:
+    """Show a command picker for `specs` and run the chosen one. `display_name`
+    maps a spec to its menu label text."""
     choices = []
     enabled_count = 0
-    for spec in REGISTRY.values():
+    displays = {spec.name: display_name(spec) for spec in specs}
+    width = max(len(d) for d in displays.values())
+    for spec in specs:
         hint = check_stage_available(spec)
-        label = f"{spec.name:<12} — {spec.description}"
+        label = f"{displays[spec.name]:<{width}} — {spec.description}"
         if hint:
             choices.append(
                 questionary.Choice(
@@ -126,14 +134,12 @@ def _run_single_command() -> None:
             console.print(notice)
         return
 
-    name = questionary.select(
-        "Pick a command",
-        choices=choices,
-        style=QSTYLE,
-        qmark=QMARK,
-    ).ask()
-    if name is None:
-        return
+    name = select(prompt, choices, answer_labels=displays)
+    if name is not None:
+        _run_spec(name)
+
+
+def _run_spec(name: str) -> None:
     spec = REGISTRY[name]
     # Defensive re-check in case the user typed past the disabled state.
     hint = check_stage_available(spec)
@@ -153,26 +159,31 @@ def _run_single_command() -> None:
             return
         kwargs["input_data"] = input_data
 
-    console.print()
-    console.print(
-        section(
-            f"Running {name}",
-            Text(f"config: {config_file}", style=MUTED),
-            style=ACCENT2,
-        )
-    )
-    interactive = name in {"ragcli", "retrieve", "rag"}
+    interactive = name in {"ragcli", "rag", "colvision-retrieve"}
     if interactive:
         spec.run(**kwargs)
     else:
         run_step(spec.description, spec.run, **kwargs)
-    console.print(f"[{OK}]✓ {name} finished[/]")
+    console.print()
+
+
+def _run_single_command() -> None:
+    # ColVision is a separate sub menu
+    specs = [s for s in REGISTRY.values() if not _is_colvision(s)]
+    _select_and_run(specs, lambda s: s.name, "Pick a command")
+
+
+def _run_colvision_menu() -> None:
+    specs = [s for s in REGISTRY.values() if _is_colvision(s)]
+    _select_and_run(
+        specs,
+        lambda s: s.name.removeprefix("colvision-"),
+        "Pick a ColVision command",
+    )
 
 
 def _chat_only() -> None:
     config_file = pick_or_build_config(REGISTRY["ragcli"])
-    console.print()
-    console.print(section("RAG chat", Text(f"config: {config_file}", style=MUTED)))
     REGISTRY["ragcli"].run(config_file=config_file)
 
 
@@ -212,6 +223,13 @@ def _pipeline_hint() -> str | None:
     return " | ".join(hints) if hints else None
 
 
+def _colvision_hint() -> str | None:
+    hints = [check_stage_available(s) for s in REGISTRY.values() if _is_colvision(s)]
+    if hints and all(h is not None for h in hints):
+        return next(h for h in hints if h)
+    return None
+
+
 def _main_menu() -> str | None:
     notice = _missing_extras_notice()
     if notice is not None:
@@ -219,14 +237,16 @@ def _main_menu() -> str | None:
 
     pipeline_hint = _pipeline_hint()
     chat_hint = check_stage_available(REGISTRY["ragcli"])
+    colvision_hint = _colvision_hint()
     # The wizard validates each generated YAML against the stage's dataclass,
     # which transitively imports torch / transformers / etc. — so it needs the
     # same extras as the full pipeline. Reuse `_pipeline_hint()` to stay aligned.
     wizard_hint = _pipeline_hint()
 
     pipeline_label = "🚀 Run full pipeline  (process → postprocess → index)"
-    wizard_label = "🧙  Build a full pipeline config (guided wizard)"
+    wizard_label = "🧙 Build a full pipeline config (guided wizard)"
     chat_label = "💬 Chat with indexed documents"
+    colvision_label = "🖼  ColVision  (process → index → retrieve)"
 
     pipeline_choice = questionary.Choice(
         _disabled_label(pipeline_label) if pipeline_hint else pipeline_label,
@@ -243,21 +263,28 @@ def _main_menu() -> str | None:
         value="chat",
         disabled="missing extras" if chat_hint else None,
     )
+    colvision_choice = questionary.Choice(
+        _disabled_label(colvision_label) if colvision_hint else colvision_label,
+        value="colvision",
+        disabled="missing extras" if colvision_hint else None,
+    )
 
-    return questionary.select(
+    return select(
         "What do you want to do?",
         choices=[
-            questionary.Choice("⚙  Run a single command", value="single"),
+            questionary.Separator("Default pipeline (text-based) ──"),
+            questionary.Choice("🟢 Run a single command", value="single"),
             pipeline_choice,
             wizard_choice,
             chat_choice,
+            questionary.Separator(" "),
+            questionary.Separator("Alternative pipeline (vision-based) ──"),
+            colvision_choice,
             questionary.Separator(),
             questionary.Choice("🔧 Setup (install dependencies)", value="setup"),
             questionary.Choice("✕  Quit", value="quit"),
         ],
-        style=QSTYLE,
-        qmark=QMARK,
-    ).ask()
+    )
 
 
 def run() -> None:
@@ -285,12 +312,14 @@ def run() -> None:
                 _run_full_wizard()
             elif mode == "chat":
                 _chat_only()
+            elif mode == "colvision":
+                _run_colvision_menu()
             elif mode == "setup":
                 from mmore.tui.setup import run_setup_wizard
 
                 run_setup_wizard()
         except (UserCancelledError, KeyboardInterrupt):
-            console.print(f"[{ACCENT2}]cancelled — back to menu.[/]")
+            console.print("[white]cancelled — back to menu.[/]")
             continue
         except Exception as e:  # noqa: BLE001
             console.print(f"[bold red]error:[/] {e}")

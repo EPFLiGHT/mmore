@@ -6,7 +6,7 @@ import tempfile
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 try:
     import torch
@@ -14,11 +14,13 @@ except ImportError:
     torch = None
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
+from rich.markup import escape
 
 from ..rag.llm import LLM, LLMConfig
 from ..run_rag import rag
+from ..ux import Color, model_loading_seconds, progress, step_intro, step_summary
 from .config import WebsearchConfig
-from .logging_config import logger
+from .logging_config import WEBSEARCH_EMOJI, logger
 from .websearch import WebsearchOnly
 
 # --- Prompt constants ---
@@ -70,6 +72,12 @@ SYNTHESIS_SUFFIX = (
     "short answer: <1-2 sentence answer>\n"
     "detailed answer: <comprehensive answer with key details>"
 )
+
+ASSISTANT_DELIMS = (
+    "<|eot_id|><|start_header_id|>assistant<|end_header_id|>",
+    "<|im_start|>assistant",
+)
+END_TOKENS = ("<|im_end|>", "<|eot_id|>", "<|end_of_text|>")
 
 
 @dataclass
@@ -173,13 +181,14 @@ class WebsearchPipeline:
         )
         return False
 
-    def _clean_llm_output(self, content: str):
-        delimiter = "<|eot_id|><|start_header_id|>assistant<|end_header_id|>"
-        if delimiter not in content:
-            return content
-        # Extract the section after the delimiter
-        cleaned_section = content.split(delimiter, 1)[-1].strip()
-        return cleaned_section
+    def _clean_llm_output(self, content: str) -> str:
+        for delim in ASSISTANT_DELIMS:
+            if delim in content:
+                content = content.rsplit(delim, 1)[-1]
+                break
+        for end in END_TOKENS:
+            content = content.replace(end, "")
+        return content.strip()
 
     def _get_tokenizer(self):
         """Try to get a local tokenizer."""
@@ -330,7 +339,21 @@ class WebsearchPipeline:
         detailed = da_matches[-1].strip() if da_matches else ""
         return {"short": short, "detailed": detailed}
 
-    def process_record(self, rec: Dict[str, Any]) -> Dict[str, Any]:
+    def process_record(
+        self,
+        rec: Dict[str, Any],
+        on_status: Optional[Callable[[str], None]] = None,
+        on_excerpt: Optional[Callable[[str], None]] = None,
+    ) -> Dict[str, Any]:
+        def status(msg: str) -> None:
+            if on_status is not None:
+                on_status(msg)
+
+        def excerpt(title: str, snippet: str) -> None:
+            if on_excerpt is not None:
+                text = " ".join(f"{title}: {snippet}".split())
+                on_excerpt(text[:90] + ("..." if len(text) > 90 else ""))
+
         qr = rec.get("input", "").strip()
         rag_ans = rec.get("answer", "") if self.config.use_rag else None
         self.rag_results = rag_ans
@@ -349,6 +372,8 @@ class WebsearchPipeline:
         previous_sub = []
 
         for loop in range(self.config.n_loops):
+            tag = f"loop {loop + 1}/{self.config.n_loops}"
+            status(f"{tag}: generating subqueries")
             if self.config.use_rag:
                 subs = self.generate_subqueries(qr, current_context)
             else:
@@ -392,6 +417,7 @@ class WebsearchPipeline:
                     SUMMARY_SYSTEM_MSG, sq_prefix, SUMMARY_SUFFIX
                 )
 
+                status(f"{tag}: searching web ({sq[:40]})")
                 # Only sleep for DDG, and make it 2 seconds instead of 10
                 if self.config.search_provider == "duckduckgo":
                     time.sleep(2)
@@ -429,6 +455,8 @@ class WebsearchPipeline:
                     if title not in source_map[url]:
                         source_map[url].append(title)
 
+                    if not subquery_snippets:
+                        excerpt(title, snippet)
                     snippets.append(snippet)
                     subquery_snippets.append(snippet)
                     total_tokens += snippet_tokens
@@ -447,6 +475,7 @@ class WebsearchPipeline:
             if torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
 
+            status(f"{tag}: summarizing results")
             combined_sub_summaries = "\n".join(
                 [str(s) if s else "" for s in subquery_summaries]
             )
@@ -463,6 +492,7 @@ class WebsearchPipeline:
             )
             web_summary_all = self.generate_summary(combined_web_summaries, qr)
 
+            status(f"{tag}: synthesizing answer ({len(source_map)} sources)")
             out = self.integrate_with_llm(qr, rag_for_llm, web_for_llm)
             final_short, final_detailed = out["short"], out["detailed"]
 
@@ -486,7 +516,7 @@ class WebsearchPipeline:
         if self.config.use_rag:
             if not self.config.rag_config_path:
                 raise ValueError("rag_config_path required when use_rag=True")
-            logger.info("Running RAG pipeline...")
+            logger.debug("Running RAG pipeline...")
             rag(self.config.rag_config_path)
             rc = self.config.access_rag_config()
             self.config.input_file = rc["mode_args"]["output_file"]
@@ -503,15 +533,56 @@ class WebsearchPipeline:
                 for line in f:
                     data.append(json.loads(line.strip()))  # JSONL format
 
+        config = self.config
+        step_intro(
+            "WebSearch",
+            WEBSEARCH_EMOJI,
+            "Answer each question by searching the web and your docs",
+            [
+                f"{len(data)} queries",
+                f"provider: {config.search_provider}",
+                f"<={config.n_loops} loops x {config.n_subqueries} subqueries",
+                f"RAG: {'on' if config.use_rag else 'off'}",
+            ],
+        )
+
+        start = time.time()
+        time_loading = model_loading_seconds()
         outputs = []
-        outputs = [self.process_record(rec) for rec in data]
+        bar = progress(total=len(data), desc="Web search", unit="")
+        for i, rec in enumerate(data, 1):
+            question = str(rec.get("input", ""))
+            bar.print_above(f"[{Color.BRAND}]Q{i}/{len(data)}[/] {escape(question)}")
+            outputs.append(
+                self.process_record(
+                    rec,
+                    on_status=bar.set_postfix_str,
+                    on_excerpt=lambda e: bar.print_above(f"   [dim]{escape(e)}[/]"),
+                )
+            )
+            bar.update(1)
+        bar.close()
 
         # save
-        outp = Path(self.config.output_file)
-        outp.parent.mkdir(exist_ok=True, parents=True)
-        with open(outp, "w", encoding="utf-8") as f:
+        output_path = Path(self.config.output_file)
+        output_path.parent.mkdir(exist_ok=True, parents=True)
+        with open(output_path, "w", encoding="utf-8") as f:
             json.dump(outputs, f, ensure_ascii=False, indent=2)
-        logger.info(f"Results saved to {outp}")
+
+        elapsed = time.time() - start - (model_loading_seconds() - time_loading)
+        unique_sources = len({u for o in outputs for u in (o.get("sources") or {})})
+        per_query = elapsed / len(outputs) if outputs else 0.0
+        step_summary(
+            "WebSearch",
+            WEBSEARCH_EMOJI,
+            elapsed,
+            {
+                "queries": len(outputs),
+                "unique sources": unique_sources,
+                "avg": f"{per_query:.0f} s/query",
+                "output": str(output_path),
+            },
+        )
 
     def run_api(self, use_rag, use_summary, query):
         """
@@ -546,7 +617,7 @@ class WebsearchPipeline:
 
         finally:
             # Delete the temporary file
-            logger.info(f"Deleting temporary file: {temp_file_path}")
+            logger.debug(f"Deleting temporary file: {temp_file_path}")
             os.remove(temp_file_path)
 
     def _save_query_as_json(self, query):
@@ -565,5 +636,5 @@ class WebsearchPipeline:
                 temp_file.write(
                     json.dumps(query.dict() if hasattr(query, "dict") else query) + "\n"
                 )
-            logger.info(f"Query saved to temporary file: {temp_file.name}")
+            logger.debug(f"Query saved to temporary file: {temp_file.name}")
             return temp_file.name

@@ -11,6 +11,7 @@ from dask.distributed import Client, as_completed
 from tqdm import tqdm
 
 from ..type import MultimodalSample
+from ..ux import init_worker
 from .crawler import DispatcherReadyResult, FileDescriptor, URLDescriptor
 from .execution_state import ExecutionState
 from .processors.base import (
@@ -147,11 +148,17 @@ class _LazyPool:
         self._processes = processes
         self._pool = None
 
-    def map(self, func, iterable):
+    def _ensure_pool(self):
         if self._pool is None:
-            logger.info(f"Initializing shared pool with {self._processes} workers...")
-            self._pool = mp.Pool(processes=self._processes)
-        return self._pool.map(func, iterable)
+            logger.debug(f"Initializing shared pool with {self._processes} workers...")
+            self._pool = mp.Pool(processes=self._processes, initializer=init_worker)
+        return self._pool
+
+    def map(self, func, iterable):
+        return self._ensure_pool().map(func, iterable)
+
+    def imap(self, func, iterable):
+        return self._ensure_pool().imap(func, iterable)
 
     def close(self):
         if self._pool is not None:
@@ -238,14 +245,14 @@ class Dispatcher:
                         custom_config=processor_config,
                     )
 
-                    logger.info(f"Initializing processor: {processor_type.__name__}")
+                    logger.debug(f"Initializing processor: {processor_type.__name__}")
                     new_proc_instance = processor_type(full_config)
                     new_proc_instance.set_shared_pool(global_pool)
                     instantiated_processors[processor_type] = new_proc_instance
 
                 proc_instance = instantiated_processors[processor_type]
 
-                logger.info(
+                logger.debug(
                     f"Processing batch of {len(files)} files with {proc_instance.__class__.__name__}"
                 )
 
@@ -256,7 +263,7 @@ class Dispatcher:
                 self.save_individual_processor_results(res, processor_type.__name__)
                 yield res
         finally:
-            logger.info("Closing Shared Global Pool")
+            logger.debug("Closing shared global pool")
             global_pool.close()
             global_pool.join()
 
@@ -305,7 +312,7 @@ class Dispatcher:
                     ExecutionState.initialize(distributed_mode=True, client=client)
 
                 worker_count = os.cpu_count() or 1
-                task_pool = mp.Pool(processes=worker_count)
+                task_pool = mp.Pool(processes=worker_count, initializer=init_worker)
 
                 try:
                     proc_instance = processor_class(processor_config)
@@ -453,4 +460,4 @@ class Dispatcher:
         output_file = os.path.join(processor_output_path, "results.jsonl")
         MultimodalSample.to_jsonl(output_file, results)
 
-        logger.info(f"Results saved to {output_file}")
+        logger.debug(f"Results saved to {output_file}")

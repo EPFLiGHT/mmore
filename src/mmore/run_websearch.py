@@ -19,6 +19,7 @@ from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.pipeline import RAGPipeline
 from mmore.run_rag import APIConfig, LocalConfig, RAGInferenceConfig
 from mmore.utils import load_config
+from mmore.ux import Spinner, quiet_noisy_libs
 from mmore.websearchRAG.config import WebsearchConfig
 from mmore.websearchRAG.logging_config import logger
 from mmore.websearchRAG.pipeline import WebsearchPipeline
@@ -45,14 +46,16 @@ class WebsearchInferenceConfig:
 
 @profile_function()
 def run_websearch(config_file):
+    quiet_noisy_libs()
     cfg = load_config(config_file, WebsearchInferenceConfig)
     ws = cfg.websearch
     if ws.mode == "local":
-        pipeline = WebsearchPipeline(config=ws)
-        logger.info("Running Websearch pipeline in LOCAL mode...")
+        with Spinner("Loading websearch pipeline"):
+            pipeline = WebsearchPipeline(config=ws)
+        logger.debug("Running Websearch pipeline in LOCAL mode...")
         start = time.time()
         pipeline.run()
-        logger.info(f"Completed in {time.time() - start:.2f}s")
+        logger.debug(f"Completed in {time.time() - start:.2f}s")
 
     elif ws.mode == "api":
         logger.info("Starting Websearch pipeline in API mode...")
@@ -102,22 +105,22 @@ This API defines the retriever API of mmore, handling:
         pipeline = WebsearchPipeline(config=config.websearch)
 
         if query.use_rag:
-            logger.info("Launch RAG")
+            logger.debug("Launch RAG")
             config_rag = load_config(
                 config.websearch.rag_config_path, RAGInferenceConfig
             )
-            logger.info("Creating the RAG Pipeline...")
+            logger.debug("Creating the RAG Pipeline...")
             rag_pp = RAGPipeline.from_config(config_rag.rag)
             data = rag_pp([query.query.dict()], return_dict=True)
-            logger.info("RAG done")
-            logger.info("##RAG##", data)
+            logger.debug("RAG done")
+            logger.debug("##RAG## %s", data)
         else:
             data = query.query
 
-        logger.info("Launch websearch")
+        logger.debug("Launch websearch")
 
         answers = pipeline.run_api(query.use_rag, query.use_summary, data)
-        logger.info("Websearch done")
+        logger.debug("Websearch done")
 
         return answers
 

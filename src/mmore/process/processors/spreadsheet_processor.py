@@ -151,7 +151,7 @@ class SpreadsheetProcessor(Processor):
                                     "RGB"
                                 )
                                 embedded_images.append(img)
-                logger.info(
+                logger.debug(
                     f"Extracted {len(embedded_images)} images from {file_path}."
                 )
                 return embedded_images

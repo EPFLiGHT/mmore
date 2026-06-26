@@ -1,5 +1,6 @@
 import io
 import logging
+import os
 import re
 import threading
 from dataclasses import dataclass, field
@@ -15,6 +16,7 @@ from marker.output import text_from_rendered
 from PIL import Image, UnidentifiedImageError
 
 from ...type import DocumentMetadata, FileDescriptor, MultimodalSample
+from ...ux import is_verbose, loading_model, progress
 from ..utils import clean_image, clean_text
 from .base import Processor, ProcessorConfig
 
@@ -59,7 +61,8 @@ class PDFProcessor(Processor):
         with PDFProcessor._load_lock:
             if device is None:
                 if PDFProcessor.artifact_dict is None:
-                    PDFProcessor.artifact_dict = create_model_dict()
+                    with loading_model("the PDF reading model"):
+                        PDFProcessor.artifact_dict = create_model_dict()
                 return PDFProcessor.artifact_dict
             if device not in PDFProcessor.artifacts_by_device:
                 PDFProcessor.artifacts_by_device[device] = create_model_dict(
@@ -79,6 +82,7 @@ class PDFProcessor(Processor):
             "use_llm": False,
             "disable_multiprocessing": False,
             "paginate_output": True,
+            "disable_tqdm": not is_verbose(),
         }
         if device is not None:
             marker_config["device"] = str(device)
@@ -128,7 +132,9 @@ class PDFProcessor(Processor):
                     )
 
                 results = []
-                for file_path in files_paths:
+                bar = progress(files_paths, desc=self.__class__.__name__, unit="file")
+                for file_path in bar:
+                    bar.set_postfix_str(os.path.basename(file_path))
                     try:
                         res = self.process(file_path)
                         results.append(res)
@@ -356,6 +362,7 @@ class PDFProcessor(Processor):
                 "use_llm": False,
                 "disable_multiprocessing": False,
                 "device": f"cuda:{gpu_id}",
+                "disable_tqdm": not is_verbose(),
             }
 
             config_parser = ConfigParser(marker_config)

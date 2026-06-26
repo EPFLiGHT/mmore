@@ -265,7 +265,7 @@ class Crawler:
         total_files = sum(len(files) for files in self.files["local"].values()) + len(
             self.files["url"]
         )
-        logger.info(f"Found {total_files} files/URLs to process.")
+        logger.debug(f"Found {total_files} files/URLs to process.")
 
         urls: List[URLDescriptor] = self.files["url"]
         file_paths: Dict[str, List[FileDescriptor]] = self.files["local"]

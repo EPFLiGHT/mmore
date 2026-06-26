@@ -85,7 +85,7 @@ class HTMLProcessor(Processor):
                     images.append(image)
 
                 except Exception as e:
-                    logger.error(f"Failed to load image {src}: {e}")
+                    logger.debug(f"Failed to load image {src}: {e}")
 
             return images
 

@@ -19,7 +19,7 @@ class WebsearchOnly:
 
     def __init__(
         self,
-        region: str = "wt-wt",
+        region: str = "us-en",
         max_results: int = 10,
         provider: Literal["duckduckgo", "tavily"] = "duckduckgo",
         max_retries: int = 3,

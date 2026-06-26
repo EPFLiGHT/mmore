@@ -57,7 +57,7 @@ class PPTXProcessor(Processor):
         and extracts notes if present. The elements are sorted by their vertical position.
         """
 
-        logger.info(f"Processing PowerPoint file: {file_path}")
+        logger.debug(f"Processing PowerPoint file: {file_path}")
         try:
             prs = Presentation(file_path)
         except Exception as e:

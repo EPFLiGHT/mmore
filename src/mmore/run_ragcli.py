@@ -1,31 +1,28 @@
 import argparse
-import logging
 from typing import Any, Dict, List, Optional
 
 from huggingface_hub import model_info
 from huggingface_hub.errors import HfHubHTTPError
 from pymilvus.exceptions import MilvusException
 
-RAG_EMOJI = "🧠🧠🧠🧠🧠"
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format=f"[RAG {RAG_EMOJI} -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
-)
-
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.pipeline import RAGPipeline
-from mmore.ragcli_helper import (
-    Spinner,
-    TimingHandler,
-    print_in_color,
-    quiet_noisy_libs,
-    str_green,
-    str_in_color,
-)
+from mmore.ragcli_helper import TimingHandler
 from mmore.run_rag import RAGInferenceConfig
 from mmore.utils import load_config
+from mmore.ux import (
+    Color,
+    Spinner,
+    print_in_color,
+    quiet_noisy_libs,
+    setup_logging,
+    str_brand,
+    str_in_color,
+)
+
+RAG_NAME = "RAG"
+RAG_EMOJI = "🧠"
+logger = setup_logging(RAG_NAME, RAG_EMOJI)
 
 
 class RagCLI:
@@ -38,21 +35,21 @@ class RagCLI:
         self.config_file = config_file
 
     def launch_cli(self):
-        quiet_noisy_libs()
+        quiet_noisy_libs(hide_info=True)
         print_in_color(
-            "Welcome to this RAG command-line interface! 🧠", "green", bold=True
+            "Welcome to this RAG command-line interface! 🧠", Color.BRAND, bold=True
         )
         print(
-            f"\nPress {str_green('Enter', bold=True)} to start asking questions about your documents.\n"
+            f"\nPress {str_brand('Enter', bold=True)} to start asking questions about your documents.\n"
         )
         print(
             f"Other commands:\n\
-        {str_green('config')} : see the current config \n\
-        {str_green('setK')} : set the number of documents to retrieve \n\
-        {str_green('setModel')} : set the model for generation \n\
-        {str_green('setWebrag')} : decide whether to use web rag \n\
-        {str_green('help')} : learn more about a command (help <command>) \n\
-        {str_green('exit')} : exit the CLI"
+        {str_brand('config')} : see the current config \n\
+        {str_brand('setK')} : set the number of documents to retrieve \n\
+        {str_brand('setModel')} : set the model for generation \n\
+        {str_brand('setWebrag')} : decide whether to use web rag \n\
+        {str_brand('help')} : learn more about a command (help <command>) \n\
+        {str_brand('exit')} : exit the CLI"
         )
         while True:
             try:
@@ -62,7 +59,7 @@ class RagCLI:
                     break
                 elif cmd == "help":
                     print(
-                        f"Press {str_green('Enter')} (or type rag) to start asking questions about your documents.\nOther commands are: config, setK, setModel, setWebrag, exit. To learn more about usage of a specific command, use the following: \n help <command>"
+                        f"Press {str_brand('Enter')} (or type rag) to start asking questions about your documents.\nOther commands are: config, setK, setModel, setWebrag, exit. To learn more about usage of a specific command, use the following: \n help <command>"
                     )
                 elif cmd.startswith("help "):
                     command = cmd.split(" ", 1)[1]
@@ -99,11 +96,11 @@ class RagCLI:
 
                     confrag = self.ragConfig.rag
                     print(
-                        f"k: {str_in_color(confrag.retriever.k, 'blue')} \nmodel: {str_in_color(confrag.llm.llm_name, 'blue')} \nuse web for rag: {str_in_color(confrag.retriever.use_web, 'blue')}"
+                        f"k: {str_in_color(confrag.retriever.k, Color.BLUE)} \nmodel: {str_in_color(confrag.llm.llm_name, Color.BLUE)} \nuse web for rag: {str_in_color(confrag.retriever.use_web, Color.BLUE)}"
                     )
                 elif cmd.startswith("greet "):
                     name = cmd.split(" ", 1)[1]
-                    print(f"Hello, {str_in_color(name, 'yellow', True)}!")
+                    print(f"Hello, {str_in_color(name, Color.YELLOW, True)}!")
                 elif cmd.startswith("setK "):
                     k_str = cmd.split(" ", 1)[1]
                     try:
@@ -150,7 +147,7 @@ class RagCLI:
                         )
                     else:
                         print(
-                            f"Invalid output. Enter {str_in_color('setWebrag True', 'green')} or {str_in_color('setWebrag False', 'red')}."
+                            f"Invalid output. Enter {str_brand('setWebrag True')} or {str_in_color('setWebrag False', Color.RED)}."
                         )
 
                 elif cmd in ("", "rag"):
@@ -160,7 +157,7 @@ class RagCLI:
                     print(f"Unknown command: {cmd}")
                     if " " in cmd or cmd.endswith("?"):
                         print(
-                            f"Looks like a question! Press {str_green('Enter')} first to start asking questions about your documents."
+                            f"Looks like a question! Press {str_brand('Enter')} first to start asking questions about your documents."
                         )
             except (EOFError, KeyboardInterrupt):
                 print("\nExiting...")
@@ -173,18 +170,18 @@ class RagCLI:
                 with Spinner():
                     self.initialize_ragpp()
             except MilvusException as e:
-                print_in_color(f"Failed to open the document database: {e}", "red")
+                print_in_color(f"Failed to open the document database: {e}", Color.RED)
                 print(
-                    f"A previous session may still be holding it. Run {str_green('pkill -f milvus_lite/lib/milvus')} and try again."
+                    f"A previous session may still be holding it. Run {str_brand('pkill -f milvus_lite/lib/milvus')} and try again."
                 )
                 return
             self.modified = False
-            print_in_color("RAG pipeline ready! Ask your questions.", "green")
-        print(str_in_color("Type /bye to exit.\n", "gray"))
+            print_in_color("RAG pipeline ready! Ask your questions.", Color.BRAND)
+        print(str_in_color("Type /bye to exit.\n", Color.GRAY))
         while True:
-            query = input(str_in_color("RAG > ", "red", bold=True))
+            query = input(str_in_color("RAG > ", Color.RED, bold=True))
             if query == "/bye":
-                print_in_color("Exiting the RAG CLI", "red", True)
+                print_in_color("Exiting the RAG CLI", Color.RED, True)
                 break
             else:
                 with Spinner():
@@ -266,8 +263,8 @@ class RagCLI:
         if scores:
             line2.append(f"top score {max(scores):.2f}")
 
-        print(str_in_color(" | ".join(line1), "gray"))
-        print(str_in_color(" | ".join(line2), "gray") + "\n")
+        print(str_in_color(" | ".join(line1), Color.GRAY))
+        print(str_in_color(" | ".join(line2), Color.GRAY) + "\n")
 
     def _count_tokens(self, text: Optional[str]) -> Optional[int]:
         """Token count using the local model tokenizer, if one is available."""
@@ -285,16 +282,16 @@ class RagCLI:
 def is_valid_model_path(model_path: str):
     try:
         model_info(model_path)
-        return True, f"New model set to {str_in_color(model_path, 'blue', True)}"
+        return True, f"New model set to {str_in_color(model_path, Color.BLUE, True)}"
     except HfHubHTTPError as e:
         return (
             False,
-            f"{str_in_color('There seems to be an error. Are you sure the model you are asking for exists?', 'red', True)} The error message: {e}",
+            f"{str_in_color('There seems to be an error. Are you sure the model you are asking for exists?', Color.RED, True)} The error message: {e}",
         )
 
 
 if __name__ == "__main__":
-    quiet_noisy_libs()
+    quiet_noisy_libs(hide_info=True)
     enable_profiling_from_env()
     # example usage: python -m mmore.ragcli --config-file examples/rag/config.yaml
 

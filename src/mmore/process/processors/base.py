@@ -3,7 +3,8 @@ import logging
 import os
 import tempfile
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional, Union
+from multiprocessing.pool import Pool
+from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch.multiprocessing as mp
 from PIL import Image
@@ -11,6 +12,7 @@ from PIL import Image
 from ...process.crawler import FileDescriptor, URLDescriptor
 from ...process.execution_state import ExecutionState
 from ...type import DocumentMetadata, MultimodalRawInput, MultimodalSample
+from ...ux import init_worker, progress
 
 logger = logging.getLogger(__name__)
 
@@ -189,19 +191,46 @@ class Processor(ABC):
         """
         # use fast mode if user requests it
         process_func = self.process_fast if fast_mode else self.process
+        step = self.__class__.__name__
 
         if self._pool is not None:
             try:
-                return self._pool.map(process_func, files_paths)
+                return self._run_with_progress(
+                    self._pool, process_func, files_paths, step
+                )
             except Exception as e:
                 logger.error(f"Error during pool execution: {e}")
                 raise
         else:
-            logger.info(
-                f"⚠️ No shared pool found. Creating temporary pool with {num_workers} workers..."
+            logger.debug(
+                f"No shared pool found. Creating temporary pool with {num_workers} workers."
             )
-            with mp.Pool(processes=num_workers) as temp_pool:
-                return temp_pool.map(process_func, files_paths)
+            with mp.Pool(processes=num_workers, initializer=init_worker) as temp_pool:
+                return self._run_with_progress(
+                    temp_pool, process_func, files_paths, step
+                )
+
+    @staticmethod
+    def _run_with_progress(
+        pool: Pool,
+        process_func: Callable[[str], MultimodalSample],
+        files_paths: List[str],
+        step: str,
+    ) -> List[MultimodalSample]:
+        """Run process_func over files on the pool, updating one progress line
+        with the current file."""
+        results = []
+        bar = progress(total=len(files_paths), desc=step, unit="file")
+        if files_paths:
+            bar.set_postfix_str(os.path.basename(files_paths[0]))
+        for i, res in enumerate(pool.imap(process_func, files_paths)):
+            results.append(res)
+            bar.update(1)
+            # Once all files processed we don't show names next to the progress bars
+            if i + 1 < len(files_paths):
+                bar.set_postfix_str(os.path.basename(files_paths[i + 1]))
+        bar.close()
+        return results
 
     def __del__(self):
         if hasattr(self, "_owns_pool") and self._owns_pool and self._pool:

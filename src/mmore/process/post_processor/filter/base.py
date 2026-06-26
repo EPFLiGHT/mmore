@@ -2,10 +2,9 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, List, Optional, Tuple
 
-from tqdm import tqdm
-
 from ....process.post_processor import BasePostProcessor
 from ....type import MultimodalSample
+from ....ux import progress
 
 
 @dataclass
@@ -59,7 +58,7 @@ class BaseFilter(BasePostProcessor):
         Returns: a list, the same size as `batch`, containing the filter result for each document
 
         """
-        return list(map(self.filter, tqdm(batch, desc=f"{self.name}")))
+        return list(map(self.filter, progress(batch, desc=self.name, unit="sample")))
 
     def batch_process(
         self,

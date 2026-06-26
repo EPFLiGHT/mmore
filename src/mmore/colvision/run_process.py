@@ -1,5 +1,4 @@
 import argparse
-import logging
 import tempfile
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -7,7 +6,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import List, Optional, Sequence, Union
 
-import click
 import fitz
 import pandas as pd
 import torch
@@ -20,19 +18,19 @@ from mmore.profiler import enable_profiling_from_env, profile_function
 
 from ..process.crawler import Crawler, CrawlerConfig
 from ..utils import load_config
+from ..ux import (
+    is_verbose,
+    progress,
+    quiet_noisy_libs,
+    setup_logging,
+    step_intro,
+    step_summary,
+)
 from .model_utils import empty_device_cache, get_device, load_model_and_processor
 
+PROCESS_NAME = "ColVision Process"
 PROCESS_EMOJI = "🚀"
-logger = logging.getLogger(__name__)
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        fmt=f"[Process {PROCESS_EMOJI} -- %(asctime)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger = setup_logging(PROCESS_NAME, PROCESS_EMOJI)
 
 if torch.cuda.is_available():
     torch.backends.cuda.enable_mem_efficient_sdp(False)
@@ -105,7 +103,7 @@ class ColVisionEmbedder:
             collate_fn=lambda x: self.processor.process_images(x),
         )
         ds: List[torch.Tensor] = []
-        for batch_doc in tqdm(dataloader):
+        for batch_doc in tqdm(dataloader, disable=not is_verbose()):
             with torch.no_grad():
                 batch_doc = {k: v.to(self.model.device) for k, v in batch_doc.items()}
                 embeddings_doc = self.model(**batch_doc)
@@ -172,15 +170,15 @@ def save_results(
     parquet_path = output_path / "pdf_page_objects.parquet"
 
     if existing_df is not None and not existing_df.empty:
-        logger.info(
+        logger.debug(
             f"Merging {len(df)} new records with {len(existing_df)} existing records"
         )
         df = pd.concat([existing_df, df], ignore_index=True)
         # Remove duplicates based on pdf_path and page_number (keep the new ones)
         df = df.drop_duplicates(subset=["pdf_path", "page_number"], keep="last")
-        logger.info(f"After merging: {len(df)} total records")
+        logger.debug(f"After merging: {len(df)} total records")
 
-    logger.info(f"Saving {len(df)} records to {parquet_path}")
+    logger.info(f"Saving {len(df)} page records to {parquet_path}")
     try:
         df.to_parquet(parquet_path, index=False, compression="zstd")
     except Exception as e:
@@ -192,7 +190,7 @@ def save_results(
         text_parquet_path = output_path / "pdf_page_text.parquet"
 
         if existing_text_df is not None and not existing_text_df.empty:
-            logger.info(
+            logger.debug(
                 f"Merging {len(text_df)} new text records with {len(existing_text_df)} existing text records"
             )
             text_df = pd.concat([existing_text_df, text_df], ignore_index=True)
@@ -200,9 +198,9 @@ def save_results(
             text_df = text_df.drop_duplicates(
                 subset=["pdf_path", "page_number"], keep="last"
             )
-            logger.info(f"After merging: {len(text_df)} total text records")
+            logger.debug(f"After merging: {len(text_df)} total text records")
 
-        logger.info(f"Saving {len(text_df)} text records to {text_parquet_path}")
+        logger.debug(f"Saving {len(text_df)} text records to {text_parquet_path}")
         try:
             text_df.to_parquet(text_parquet_path, index=False, compression="zstd")
         except Exception as e:
@@ -222,7 +220,9 @@ def process_pdf_batch(
         batch_records = []
         batch_text_records = []
 
-        for pdf_path in tqdm(batch_pdfs, desc=f"Batch on {device}", ncols=100):
+        for pdf_path in tqdm(
+            batch_pdfs, desc=f"Batch on {device}", ncols=100, disable=not is_verbose()
+        ):
             page_records, text_records = process_single_pdf(pdf_path, model, converter)
             batch_records.extend(page_records)
             batch_text_records.extend(text_records)
@@ -239,13 +239,14 @@ def process_pdf_batch(
 
 @profile_function()
 def run_process(config_file: str, model_name_override: Optional[str] = None):
-    click.echo(f"Processing configuration file path: {config_file}")
+    quiet_noisy_libs()
+    logger.debug(f"Processing configuration file path: {config_file}")
     overall_start_time = time.time()
 
     config = load_config(config_file, PDFProcessConfig)
     if model_name_override:
         config.model_name = model_name_override
-        logger.info(f"Model overridden via CLI: {model_name_override}")
+        logger.debug(f"Model overridden via CLI: {model_name_override}")
     output_dir = Path(config.output_path)
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -256,11 +257,11 @@ def run_process(config_file: str, model_name_override: Optional[str] = None):
     existing_text_df = None
 
     if config.skip_already_processed and parquet_path.exists():
-        logger.info(f"Skip mode enabled — loading existing {parquet_path}")
+        logger.debug(f"Skip mode enabled — loading existing {parquet_path}")
         try:
             existing_df = pd.read_parquet(parquet_path)
             already_processed_pdfs = set(existing_df["pdf_path"].unique())
-            logger.info(
+            logger.debug(
                 f"Found {len(already_processed_pdfs)} processed PDFs with {len(existing_df)} page records."
             )
         except Exception as e:
@@ -269,20 +270,33 @@ def run_process(config_file: str, model_name_override: Optional[str] = None):
     if config.skip_already_processed and text_parquet_path.exists():
         try:
             existing_text_df = pd.read_parquet(text_parquet_path)
-            logger.info(f"Found {len(existing_text_df)} existing text records.")
+            logger.debug(f"Found {len(existing_text_df)} existing text records.")
         except Exception as e:
             logger.warning(f"Could not read existing text parquet: {e}")
 
     pdf_files = crawl_pdfs(config.data_path)
     pdf_files = [p for p in pdf_files if str(p) not in already_processed_pdfs]
 
-    if not pdf_files:
-        logger.info("No new PDFs to process.")
-        return
-
-    logger.info(
-        f"Processing {len(pdf_files)} PDFs in parallel batches of {config.batch_size} using {config.num_workers} workers..."
+    step_intro(
+        PROCESS_NAME,
+        PROCESS_EMOJI,
+        "Turn each PDF page into a searchable image",
+        [
+            f"{len(pdf_files)} PDFs",
+            f"model: {config.model_name}",
+            f"batch {config.batch_size} x {config.num_workers} workers",
+        ],
     )
+
+    if not pdf_files:
+        logger.warning("No new PDFs to process")
+        step_summary(
+            PROCESS_NAME,
+            PROCESS_EMOJI,
+            time.time() - overall_start_time,
+            {"PDFs": 0, "page records": 0},
+        )
+        return
 
     batches = [
         pdf_files[i : i + config.batch_size]
@@ -297,11 +311,8 @@ def run_process(config_file: str, model_name_override: Optional[str] = None):
             for idx, batch in enumerate(batches)
         }
 
-        for future in tqdm(
-            as_completed(futures),
-            total=len(futures),
-            desc="Processing batches",
-            ncols=100,
+        for future in progress(
+            as_completed(futures), total=len(futures), desc="Processing", unit="batch"
         ):
             batch_result, batch_text_result = future.result()
             all_page_records.extend(batch_result)
@@ -316,11 +327,13 @@ def run_process(config_file: str, model_name_override: Optional[str] = None):
             existing_text_df,
         )
     else:
-        logger.info("No new PDFs to process.")
+        logger.warning("No new PDFs to process.")
 
-    overall_end_time = time.time()
-    logger.info(
-        f"✅ All done! Total time: {overall_end_time - overall_start_time:.2f}s"
+    step_summary(
+        PROCESS_NAME,
+        PROCESS_EMOJI,
+        time.time() - overall_start_time,
+        {"PDFs": len(pdf_files), "page records": len(all_page_records)},
     )
 
 

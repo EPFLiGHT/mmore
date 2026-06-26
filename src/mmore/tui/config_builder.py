@@ -26,7 +26,7 @@ from rich.text import Text
 from mmore.tui.commands import CommandSpec
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default, repo_root, resolve_example
-from mmore.tui.theme import ACCENT, ACCENT2, QMARK, QSTYLE, console, section
+from mmore.tui.theme import ACCENT, ACCENT2, QMARK, QSTYLE, console, section, select
 
 
 def _ask(prompt_obj: Any) -> Any:
@@ -45,6 +45,22 @@ def _ask(prompt_obj: Any) -> Any:
 
 
 CONFIG_DIR = Path("./tui-configs")
+
+
+def _select(
+    question: str,
+    choices: Any,
+    default: Any = None,
+    answer_labels: Optional[dict[Any, str]] = None,
+) -> Any:
+    """`theme.select` with this module's cancel semantics (Esc/Ctrl-C -> back)."""
+    try:
+        value = select(question, choices, answer_labels=answer_labels, default=default)
+    except KeyboardInterrupt as e:
+        raise UserCancelledError("cancelled") from e
+    if value is None:
+        raise UserCancelledError("cancelled")
+    return value
 
 
 def _prompt(question: str, default: str = "") -> str:
@@ -107,18 +123,14 @@ def _post_validation_menu(path: str, spec: CommandSpec) -> str:
     Returns the (potentially re-validated) path.
     """
     while True:
-        action = _ask(
-            questionary.select(
-                "What next?",
-                choices=[
-                    questionary.Choice("▶  Run with this config", value="run"),
-                    questionary.Choice("👁  Preview config", value="preview"),
-                    questionary.Choice("✎  Edit in $EDITOR", value="edit"),
-                ],
-                default="run",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        action = _select(
+            "What next?",
+            choices=[
+                questionary.Choice("▶  Run with this config", value="run"),
+                questionary.Choice("👁  Preview config", value="preview"),
+                questionary.Choice("✎  Edit in $EDITOR", value="edit"),
+            ],
+            default="run",
         )
         if action == "run":
             return path
@@ -195,23 +207,15 @@ def build_process_config() -> str:
 
 
 def build_postprocess_config() -> str:
-    strategy = _ask(
-        questionary.select(
-            "Chunking strategy",
-            choices=["sentence", "token", "word", "semantic"],
-            default="sentence",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    strategy = _select(
+        "Chunking strategy",
+        choices=["sentence", "token", "word", "semantic"],
+        default="sentence",
     )
-    table_handling = _ask(
-        questionary.select(
-            "Table handling",
-            choices=["single_row", "multi_rows", "keep_whole", "none"],
-            default="single_row",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    table_handling = _select(
+        "Table handling",
+        choices=["single_row", "multi_rows", "keep_whole", "none"],
+        default="single_row",
     )
     output_path = _prompt(
         "Output JSONL path",
@@ -273,14 +277,10 @@ def build_rag_config() -> str:
     use_web = _confirm("Augment retrieval with web search?", default=False)
     reranker = _prompt("Reranker model (blank to skip)", "BAAI/bge-reranker-base")
 
-    mode = _ask(
-        questionary.select(
-            "Run mode",
-            choices=["local", "api"],
-            default="local",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    mode = _select(
+        "Run mode",
+        choices=["local", "api"],
+        default="local",
     )
 
     cfg: dict[str, Any] = {
@@ -339,14 +339,10 @@ def build_websearch_config() -> str:
     )
     n_subqueries = _prompt_int("Number of sub-queries per question", 2)
     max_searches = _prompt_int("Max searches per query", 5)
-    provider = _ask(
-        questionary.select(
-            "Search provider",
-            choices=["duckduckgo"],
-            default="duckduckgo",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    provider = _select(
+        "Search provider",
+        choices=["duckduckgo"],
+        default="duckduckgo",
     )
 
     cfg: dict[str, Any] = {
@@ -378,7 +374,6 @@ BUILDERS = {
     "postprocess": build_postprocess_config,
     "index": build_index_config,
     "rag": build_rag_config,
-    "retrieve": build_rag_config,
     "ragcli": build_rag_config,
     "websearch": build_websearch_config,
 }
@@ -505,23 +500,15 @@ def _postprocessor_choices() -> list[str]:
 
 def _ask_module_args(pp_type: str) -> dict[str, Any]:
     if pp_type == "chunker":
-        strategy = _ask(
-            questionary.select(
-                "Chunking strategy",
-                choices=["sentence", "token", "word", "semantic"],
-                default="sentence",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        strategy = _select(
+            "Chunking strategy",
+            choices=["sentence", "token", "word", "semantic"],
+            default="sentence",
         )
-        table_handling = _ask(
-            questionary.select(
-                "Table handling",
-                choices=["single_row", "multi_rows", "keep_whole", "none"],
-                default="single_row",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        table_handling = _select(
+            "Table handling",
+            choices=["single_row", "multi_rows", "keep_whole", "none"],
+            default="single_row",
         )
         return {
             "chunking_strategy": strategy,
@@ -549,13 +536,9 @@ def build_postprocess_config_wizard() -> str:
             console.print(
                 f"  [dim]current modules:[/] {', '.join(m['type'] for m in modules)}"
             )
-        pp_type = _ask(
-            questionary.select(
-                "Add a post-processor module" if not modules else "Add another module",
-                choices=[*available, questionary.Separator(), "(done)"],
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        pp_type = _select(
+            "Add a post-processor module" if not modules else "Add another module",
+            choices=[*available, questionary.Separator(), "(done)"],
         )
         if pp_type == "(done)":
             break
@@ -764,20 +747,14 @@ def pick_or_build_config(
     on failure rather than letting the run blow up later.
     """
     while True:
-        choice = _ask(
-            questionary.select(
-                f"Config for `{spec.name}`?",
-                choices=[
-                    questionary.Choice("📂 Pick existing YAML", value="pick"),
-                    questionary.Choice("✨ Generate new YAML (guided)", value="build"),
-                    questionary.Choice(
-                        "✎  Edit an existing YAML in $EDITOR", value="edit"
-                    ),
-                    questionary.Choice("⌨  Type a path manually", value="manual"),
-                ],
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        choice = _select(
+            f"Config for `{spec.name}`?",
+            choices=[
+                questionary.Choice("📂 Pick existing YAML", value="pick"),
+                questionary.Choice("✨ Generate new YAML (guided)", value="build"),
+                questionary.Choice("✎  Edit an existing YAML in $EDITOR", value="edit"),
+                questionary.Choice("⌨  Type a path manually", value="manual"),
+            ],
         )
 
         path: Optional[str] = None
@@ -793,15 +770,10 @@ def pick_or_build_config(
                 )
                 choice = "manual"
             else:
-                picked = _ask(
-                    questionary.select(
-                        f"Select a config for `{spec.name}`",
-                        choices=ranked,
-                        style=QSTYLE,
-                        qmark=QMARK,
-                    )
+                path = _select(
+                    f"Select a config for `{spec.name}`",
+                    choices=ranked,
                 )
-                path = picked
                 if choice == "edit" and path is not None:
                     _edit_config(path)
 

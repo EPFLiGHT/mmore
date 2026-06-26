@@ -10,10 +10,10 @@ from langchain_core.language_models import LanguageModelLike
 from langchain_core.output_parsers.base import BaseOutputParser
 from langchain_core.prompts import BasePromptTemplate, PromptTemplate
 from langchain_core.runnables.config import RunnableConfig
-from tqdm import tqdm
 
 from ....rag.llm import LLM, LLMConfig
 from ....type import MultimodalSample
+from ....ux import progress
 from ._prompts import DEFAULT_ER_EXTRACTION_PROMPT
 from .output_parser import EntityExtractionOutputParser
 
@@ -116,5 +116,5 @@ class NERExtractor:
         """
         return [
             self.invoke(sample)
-            for sample in tqdm(samples, desc="Extracting entities and relationships")
+            for sample in progress(samples, desc="Extracting entities", unit="sample")
         ]

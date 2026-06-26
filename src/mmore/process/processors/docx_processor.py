@@ -91,7 +91,7 @@ class DOCXProcessor(Processor):
                     image_path = image_path.with_suffix(extension)
 
                     pil_image.save(image_path)
-                    logger.info(f"Saving image to {image_path}")
+                    logger.debug(f"Saving image to {image_path}")
                     all_images.append(
                         MultimodalRawInput(type="image", value=str(image_path))
                     )
@@ -99,7 +99,7 @@ class DOCXProcessor(Processor):
                     return {"src": "", "alt": self.config.attachment_tag}
 
                 except Exception as e:
-                    logger.warning(
+                    logger.debug(
                         f"Failed to load image with MIME type {content_type}: {e}"
                     )
                     return {"src": "", "alt": ""}
@@ -109,7 +109,7 @@ class DOCXProcessor(Processor):
         # If no image_output_dir is specified then create a temporary output dir
         if image_output_dir is None:
             image_output_dir = tempfile.mkdtemp(prefix="mmore_docx_")
-            logger.info(f"Saving files in {image_output_dir}")
+            logger.debug(f"Saving files in {image_output_dir}")
 
         try:
             with open(file_path, "rb") as docx_fileobj:

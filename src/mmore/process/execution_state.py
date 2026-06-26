@@ -57,10 +57,10 @@ class ExecutionState:
                     "should_stop_execution", client=client
                 )
                 ExecutionState._dask_var.set(False)
-                logger.info("Execution state initialized (distributed mode)")
+                logger.debug("Execution state initialized (distributed mode)")
             else:
                 ExecutionState._local_state = False
-                logger.info("Execution state initialized (local mode)")
+                logger.debug("Execution state initialized (local mode)")
 
     @staticmethod
     def shutdown():
