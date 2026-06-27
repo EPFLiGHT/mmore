@@ -3,7 +3,6 @@ import json
 from typing import Dict, List
 
 import pytest
-from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
 from mmore.type import DocumentMetadata, MultimodalSample
 
@@ -11,15 +10,23 @@ from mmore.type import DocumentMetadata, MultimodalSample
 if importlib.util.find_spec("colpali_engine") is None:
     collect_ignore = ["test_colvision.py"]
 
+try:
+    from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
-class FakeSparseEmbedding(BaseSparseEmbedding):
-    """Fake sparse embedder for test purposes."""
+    class FakeSparseEmbedding(BaseSparseEmbedding):
+        """Fake sparse embedder for test purposes."""
 
-    def embed_query(self, query: str) -> Dict[int, float]:
-        return {0: 1.0, 1: float(len(query))}
+        def embed_query(self, query: str) -> Dict[int, float]:
+            return {0: 1.0, 1: float(len(query))}
 
-    def embed_documents(self, texts: List[str]) -> List[Dict[int, float]]:
-        return [{0: 1.0, i + 1: float(len(t))} for i, t in enumerate(texts)]
+        def embed_documents(self, texts: List[str]) -> List[Dict[int, float]]:
+            return [{0: 1.0, i + 1: float(len(t))} for i, t in enumerate(texts)]
+
+except ImportError:
+    # langchain_milvus is part of the optional `index`/`rag` extras.
+    # Tests that need FakeSparseEmbedding should be marked and will be
+    # collected only when those extras are installed.
+    FakeSparseEmbedding = None  # type: ignore[assignment,misc]
 
 
 SAMPLE_DOCS = [

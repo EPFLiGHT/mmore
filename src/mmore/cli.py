@@ -250,6 +250,20 @@ def websearch(config_file):
     run_websearch(config_file)
 
 
+@main.command(name="paper-discovery")
+@click.option(
+    "--config-file",
+    type=str,
+    required=True,
+    help="Path to the Paper Discovery configuration file (YAML),",
+)
+def paper_discovery(config_file):
+    """Run the Paper Discovery pipeline (fetch papers from academic repos)."""
+    from .run_paper_discovery import run_paper_discovery
+
+    run_paper_discovery(config_file)
+
+
 @main.command()
 @click.option(
     "--config-file", type=str, required=True, help="Configuration for the RAG CLI."

@@ -128,8 +128,12 @@ test*.sh
 .venv
 
 # Examples
-examples/outputs
+examples/outputs/
 outputs/
+
+# Paper Discovery local artifacts
+examples/paper_discovery/pdf_cache/
+examples/paper_discovery/papers.json
 
 paper/
 chitchat/

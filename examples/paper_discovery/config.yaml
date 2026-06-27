@@ -1,0 +1,44 @@
+synonyms_path: examples/paper_discovery/synonyms.json
+output_file: examples/paper_discovery/papers.json
+pdf_dir: examples/paper_discovery/pdf_cache
+
+sources:
+  - openalex
+  - europepmc
+  - arxiv
+  # - google_scholar  # opt-in, captcha-prone. Requires `pip install scholarly`.
+  #                   See docs/core_features/paper_discovery.md.
+
+download_pdfs: true
+max_pages: 2
+max_results: 25
+
+# Reuse PDFs already in pdf_dir from previous runs. Set true to force
+# re-downloading everything (e.g. after a publisher updates a paper).
+force_redownload: false
+
+# Optional EZproxy prefix for institutional access to paywalled PDFs.
+# Example for EPFL: "https://login.proxy.epfl.ch"
+# pdf_proxy_prefix: "https://login.proxy.epfl.ch"
+
+# HTTP User-Agent header sent on every outbound request. Identify your
+# caller honestly so rate-limiters / abuse desks can reach you. OpenAlex
+# routes UAs with a contact address into a faster pool.
+user_agent: "mmore-paper-discovery/1.0 (https://github.com/swiss-ai/mmore)"
+
+categories:
+  Broad Foundational Search:
+    - Foundation model
+    - Machine Learning
+  Humanitarian AI Search:
+    - Foundation model
+    - Humanitarian & Crisis Response
+
+# Custom labels for arXiv category codes. Each key is a substring matched
+# (case-insensitive) against the human-readable category title above; the
+# value is the arXiv category code injected into the arXiv query as
+# `cat:<code>`. Categories without a match here just don't get a `cat:`
+# clause - the search still runs.
+arxiv_category_map:
+  Foundational: cs.LG
+  Humanitarian: cs.CY

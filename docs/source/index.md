@@ -50,6 +50,7 @@ getting_started/windows
 
 core_features/colvision
 core_features/websearch
+core_features/paper_discovery
 core_features/evaluation
 core_features/llm_as_a_judge
 ```
@@ -85,6 +86,7 @@ Here is a quick overview of the main pages:
 - [RAG](getting_started/rag.md): structure retrieval-augmented generation workflows
 - [ColVision](core_features/colvision.md): multimodal retrieval-related documentation
 - [Websearch](core_features/websearch.md): web search integration and related workflows
+- [Paper Discovery](core_features/paper_discovery.md): fetch academic papers from OpenAlex, Europe PMC, arXiv, and Google Scholar
 - [Evaluation](core_features/evaluation.md): assess system performance
 - [LLM as a judge](core_features/llm_as_a_judge.md): corrective retrieval with an LLM judge
 - [Distributed processing](advanced_usage/distributed_processing.md): scale processing across larger workloads
