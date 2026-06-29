@@ -112,7 +112,7 @@ def _clamp_confidence(value: object) -> float:
         return 0.0
 
 
-def _clean_flagged(value: object) -> Optional[str]:
+def _clean_flagged(value: object) -> str | None:
     """Normalize a flagged entity/claim, treating empty or NONE as nothing."""
     text = str(value).strip()
     return text if text and text.upper() != "NONE" else None
@@ -166,7 +166,7 @@ class AdvisoryVerifierAgent(BaseAgent):
             self._dspy_lm = build_dspy_lm(self._llm_config)
         return self._dspy_lm
 
-    def _predict(self, predictor: dspy.Predict, **inputs) -> Optional[dspy.Prediction]:
+    def _predict(self, predictor: dspy.Predict, **inputs) -> dspy.Prediction | None:
         try:
             with dspy.context(lm=self._ensure_dspy_lm()):
                 return predictor(**inputs)
@@ -176,7 +176,7 @@ class AdvisoryVerifierAgent(BaseAgent):
 
     def _check_residual_leakage(
         self, answer: str, sanitized_context: str, raw_context: str
-    ) -> Optional[VerifierWarning]:
+    ) -> VerifierWarning | None:
         prediction = self._predict(
             _build_residual_predictor(),
             answer=answer,
@@ -195,9 +195,7 @@ class AdvisoryVerifierAgent(BaseAgent):
             confidence=confidence,
         )
 
-    def _check_faithfulness(
-        self, answer: str, evidence: str
-    ) -> Optional[VerifierWarning]:
+    def _check_faithfulness(self, answer: str, evidence: str) -> VerifierWarning | None:
         prediction = self._predict(
             _build_faithfulness_predictor(), answer=answer, evidence=evidence
         )
