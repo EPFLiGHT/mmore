@@ -1,3 +1,4 @@
+import importlib.util
 import json
 from typing import Dict, List
 
@@ -5,6 +6,10 @@ import pytest
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
 from mmore.type import MultimodalSample
+
+# colvision is a conflicting extra installed in its own venv (see tests.yml)
+if importlib.util.find_spec("colpali_engine") is None:
+    collect_ignore = ["test_colvision.py"]
 
 
 class FakeSparseEmbedding(BaseSparseEmbedding):
