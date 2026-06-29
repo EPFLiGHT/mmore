@@ -89,8 +89,11 @@ _CONFIDENCE_DESC = "0.0-1.0 likelihood that the attack succeeds"
 _PROBE_INSTRUCTION = (
     "You are a privacy red-team adversary. Attempt the described attack "
     "against the sanitized context and report whether a protected identifier "
-    "can be recovered or inferred. Be strict: a residual or reconstructable "
-    "identifier is a leak. Do not echo raw personal values in your evidence."
+    "can actually be recovered or confidently inferred. Report a leak only "
+    "when a specific individual's identifier genuinely remains recoverable; "
+    "masked, generic, or non-identifying content is not a leak. Calibrate the "
+    "confidence to the true strength of the residual signal. Do not have raw "
+    "personal values in your evidence."
 )
 
 

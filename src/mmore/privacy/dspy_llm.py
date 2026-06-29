@@ -1,8 +1,10 @@
 """Build a DSPy ``BaseLM`` from an ``LLMConfig``."""
 
+import json
 import logging
+import re
 from types import SimpleNamespace
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import dspy
 
@@ -15,6 +17,42 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 _CACHE_PREFIX = "hf_lm"
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
+_JSON_VALUE_RE = re.compile(r"(\[.*\]|\{.*\})", re.DOTALL)
+
+
+class TolerantJSONAdapter(dspy.JSONAdapter):
+    """``JSONAdapter`` that tolerates a single-output-field value return (this
+    is a recurring issue with small local models)."""
+
+    def parse(self, signature, completion):
+        try:
+            return super().parse(signature, completion)
+        except Exception:
+            output_fields = list(signature.output_fields)
+            value = self._extract_json_value(completion)
+            if len(output_fields) != 1 or value is None:
+                raise
+            return {output_fields[0]: value}
+
+    @staticmethod
+    def _extract_json_value(completion: str) -> Any | None:
+        """Returns ``Any`` as json.loads returns an arbitrary JSON value."""
+        text = completion.strip()
+        fenced = _JSON_FENCE_RE.search(text)
+        if fenced:
+            text = fenced.group(1).strip()
+        candidates = [text]
+        embedded = _JSON_VALUE_RE.search(text)
+        if embedded:
+            candidates.append(embedded.group(0))
+        for candidate in candidates:
+            try:
+                return json.loads(candidate)
+            except (ValueError, TypeError):
+                continue
+        return None
 
 
 def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
