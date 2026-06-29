@@ -2774,6 +2774,18 @@ wheels = [
 ]
 
 [[package]]
+name = "faker"
+version = "40.28.1"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "tzdata", marker = "sys_platform == 'win32' or (extra == 'extra-5-mmore-all' and extra == 'extra-5-mmore-colvision') or (extra == 'extra-5-mmore-all' and extra == 'extra-5-mmore-privacy-openai-filter') or (extra == 'extra-5-mmore-colvision' and extra == 'extra-5-mmore-privacy-openai-filter') or (extra == 'extra-5-mmore-colvision' and extra == 'extra-5-mmore-process') or (extra == 'extra-5-mmore-cpu' and extra == 'extra-5-mmore-cu126') or (extra == 'extra-5-mmore-privacy-openai-filter' and extra == 'extra-5-mmore-process')" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/cc/2d/3ead106cef42eab305e15f9c089dcc68a40387d5ce04af18585af4ebbb44/faker-40.28.1.tar.gz", hash = "sha256:2a63fb51abab8790636d4030a094cf942404cbccc9c288d1cad70e2e3e9ecd58", size = 2022717, upload-time = "2026-07-01T22:23:43.763Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/92/a6/6111b9f13c1564b0e2f5dbeeb611fd00dc731e6add2336f62b798598c73d/faker-40.28.1-py3-none-any.whl", hash = "sha256:e8d3f5c469100a553d246dce7937c291308068a5ec6c9c3a228d7878b50720be", size = 2061052, upload-time = "2026-07-01T22:23:41.946Z" },
+]
+
+[[package]]
 name = "fastapi"
 version = "0.139.0"
 source = { registry = "https://pypi.org/simple" }
@@ -5571,6 +5583,7 @@ all = [
     { name = "ddgs" },
     { name = "docx2pdf" },
     { name = "dspy" },
+    { name = "faker" },
     { name = "fastapi", extra = ["standard"], marker = "extra == 'extra-5-mmore-all' or (extra == 'extra-5-mmore-colvision' and extra == 'extra-5-mmore-privacy-openai-filter') or (extra == 'extra-5-mmore-colvision' and extra == 'extra-5-mmore-process') or (extra == 'extra-5-mmore-cpu' and extra == 'extra-5-mmore-cu126') or (extra == 'extra-5-mmore-privacy-openai-filter' and extra == 'extra-5-mmore-process')" },
     { name = "fasteners" },
     { name = "gliner", version = "0.2.27", source = { registry = "https://pypi.org/simple" } },
@@ -5726,6 +5739,7 @@ llm = [
 privacy = [
     { name = "cohere" },
     { name = "dspy" },
+    { name = "faker" },
     { name = "gliner", version = "0.2.24", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-5-mmore-privacy-openai-filter' or (extra == 'extra-5-mmore-all' and extra == 'extra-5-mmore-colvision') or (extra == 'extra-5-mmore-colvision' and extra == 'extra-5-mmore-process') or (extra == 'extra-5-mmore-cpu' and extra == 'extra-5-mmore-cu126') or (extra != 'extra-5-mmore-all' and extra != 'extra-5-mmore-colvision' and extra != 'extra-5-mmore-cu126' and extra != 'extra-5-mmore-process') or (extra != 'extra-5-mmore-all' and extra != 'extra-5-mmore-colvision' and extra != 'extra-5-mmore-cpu' and extra != 'extra-5-mmore-process')" },
     { name = "gliner", version = "0.2.27", source = { registry = "https://pypi.org/simple" }, marker = "extra == 'extra-5-mmore-all' or extra == 'extra-5-mmore-colvision' or extra == 'extra-5-mmore-process' or (extra == 'extra-5-mmore-cpu' and extra == 'extra-5-mmore-cu126')" },
     { name = "langchain" },
@@ -5746,6 +5760,7 @@ privacy = [
 privacy-openai-filter = [
     { name = "cohere" },
     { name = "dspy" },
+    { name = "faker" },
     { name = "gliner", version = "0.2.24", source = { registry = "https://pypi.org/simple" } },
     { name = "langchain" },
     { name = "langchain-anthropic" },
@@ -5855,6 +5870,7 @@ requires-dist = [
     { name = "ddgs", marker = "extra == 'websearch'", specifier = ">=6.0" },
     { name = "docx2pdf", marker = "extra == 'process'" },
     { name = "dspy", marker = "extra == 'privacy'", specifier = ">=2.6" },
+    { name = "faker", marker = "extra == 'privacy'", specifier = ">=30" },
     { name = "fastapi", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.110" },
     { name = "fasteners", marker = "extra == 'process'", specifier = ">=0.19" },
     { name = "gliner", marker = "extra == 'privacy'", specifier = ">=0.2.24" },

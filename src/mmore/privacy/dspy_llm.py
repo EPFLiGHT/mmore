@@ -35,6 +35,14 @@ def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
     )
 
 
+def get_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
+    """Shared registry-cached local pipeline, loaded once per ``model_name``."""
+    return MODEL_REGISTRY.get_or_load(
+        f"{_CACHE_PREFIX}:{model_name}",
+        lambda: _load_local_hf_pipeline(model_name),
+    )
+
+
 def clear_dspy_lm_cache() -> None:
     """Drop all cached transformers pipelines."""
     MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
@@ -68,10 +76,7 @@ class LocalHFLM(dspy.BaseLM):
 
     @property
     def pipe(self) -> "TextGenerationPipeline":
-        return MODEL_REGISTRY.get_or_load(
-            f"{_CACHE_PREFIX}:{self._model_name}",
-            lambda: _load_local_hf_pipeline(self._model_name),
-        )
+        return get_local_hf_pipeline(self._model_name)
 
     def forward(self, prompt=None, messages=None, **kwargs):
         merged = {**self.kwargs, **kwargs}

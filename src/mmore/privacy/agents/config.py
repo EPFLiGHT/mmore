@@ -8,7 +8,11 @@ from ...rag.llm import LLMConfig
 
 @dataclass
 class AgentConfig:
-    """Definition of a single agent in the privacy system."""
+    """General definition of a agent in the privacy system.
+
+    This config will most likely not be used in the privacy pipeline as we have
+    a ``PrivacyConfig``. However it serves as a template in case we want to
+    leverage the Agent integration for other purposes."""
 
     llm: LLMConfig
     name: str = "agent"

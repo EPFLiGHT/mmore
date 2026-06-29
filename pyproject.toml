@@ -151,6 +151,7 @@ privacy = [
     "spacy>=3.8",
     "dspy>=2.6",
     "psutil>=5.9",
+    "faker>=30",
 ]
 
 privacy-openai-filter = [

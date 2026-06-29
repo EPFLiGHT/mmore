@@ -1,23 +1,12 @@
 """PII detection interface.
 
 Each engine implements ``DetectionEngine.detect`` and returns a list of
-``PIISpan`` records. Engines are independently registered as agent tools so a
-sanitizer agent can resolve them by name from YAML.
+``PIISpan`` records. Engines are independently registered as agent tools.
 """
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from enum import Enum
 from typing import List
-
-
-class DetectionEngineType(str, Enum):
-    """The supported PII detection engines."""
-
-    GLINER = "gliner"
-    LLM = "llm"
-    OPENAI_FILTER = "openai_filter"
-    PRESIDIO = "presidio"
 
 
 @dataclass

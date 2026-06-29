@@ -1,15 +1,16 @@
 """HuggingFace ``openai/privacy-filter`` PII detection engine."""
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, List
 
 from typing_extensions import Self
 
 from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
-from .base import DetectionEngine, DetectionEngineType, PIISpan
-from .config import DetectionConfig
-from .defaults import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_OPENAI_FILTER_MODEL
+from ..config import DetectionConfig, DetectionEngineType
+from ..policy import PrivacyPolicy
+from .base import DetectionEngine, PIISpan
+from .constants import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_OPENAI_FILTER_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -37,30 +38,27 @@ class OpenAIFilterEngine(DetectionEngine):
     """Detect PII spans with the token classification model
     ``openai/privacy-filter`` from HuggingFace.
 
-    Each instance carries its own ``entity_types`` and ``confidence_threshold``.
-    The model is shared across instances via ``MODEL_REGISTRY``.
+    The model has a fixed label set so entity selection is not configurable.
+    Each instance carries its own ``confidence_threshold``, pipelines with the
+    same ``model_name`` are shared via ``MODEL_REGISTRY``.
     """
 
     def __init__(
         self,
         model_name: str = DEFAULT_OPENAI_FILTER_MODEL,
-        entity_types: Optional[Sequence[str]] = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
     ):
-        if entity_types:
-            logger.warning(
-                "OpenAIFilterEngine ignores entity_types=%r; "
-                "the model emits its own label taxonomy.",
-                list(entity_types),
-            )
         self._model_name = model_name
         self._confidence_threshold = confidence_threshold
 
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
         return cls(
-            entity_types=config.entity_types or None,
-            confidence_threshold=config.confidence_threshold,
+            confidence_threshold=(
+                config.confidence_threshold
+                if config.confidence_threshold is not None
+                else DEFAULT_CONFIDENCE_THRESHOLD
+            ),
         )
 
     @property
@@ -90,14 +88,10 @@ class OpenAIFilterEngine(DetectionEngine):
 
 
 @register_tool("detect_pii_openai_filter")
-def detect_pii_openai_filter(text: str) -> List[PIISpan]:
-    """Detect PII spans in ``text`` using a default-configured openai/privacy-filter engine.
-
-    Agents needing per-config behavior should be wired by setup code that
-    builds an ``OpenAIFilterEngine.from_config(detection_cfg)`` and registers
-    its ``detect()`` function under a distinct tool name, e.g.::
-
-        engine = OpenAIFilterEngine.from_config(detection_cfg)
-        register_tool("detect_pii_openai_filter_custom", engine.detect)
-    """
-    return OpenAIFilterEngine().detect(text)
+def detect_pii_openai_filter(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+    """Detect PII spans in ``text`` using an openai/privacy-filter engine
+    configured from ``policy``."""
+    if policy.sensitive_entities:
+        logger.debug("OpenAi Filter has a fixed sensitive label lists.")
+    engine = OpenAIFilterEngine(**policy.detection_params)
+    return engine.detect(text)

@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from mmore.privacy.agents.registry import tool_registry
-from mmore.privacy.detection.config import DetectionConfig, DetectionEngineType
+from mmore.privacy.config import DetectionConfig, DetectionEngineType
 from mmore.privacy.detection.gliner_engine import (
     GLiNEREngine,
     clear_gliner_cache,
@@ -126,7 +126,7 @@ def test_detection_config_defaults_when_minimal():
 
     assert cfg.engine == "presidio"
     assert cfg.entity_types == []
-    assert cfg.confidence_threshold == 0.7
+    assert cfg.confidence_threshold is None
     assert cfg.llm is None
 
 
@@ -214,7 +214,7 @@ def test_gliner_engine_shares_model_cache_across_instances():
         return_value=fake,
     ) as mock_load:
         a = GLiNEREngine(confidence_threshold=0.4)
-        b = GLiNEREngine(entity_types=["PERSON"], confidence_threshold=0.9)
+        b = GLiNEREngine(sensitive_entities=["PERSON"], confidence_threshold=0.9)
         a.detect("x")
         b.detect("y")
         assert mock_load.call_count == 1
@@ -297,26 +297,6 @@ def test_openai_filter_engine_filters_below_threshold():
     assert spans[0].label == "B-private_person"
 
 
-def test_openai_filter_engine_ignores_entity_types():
-    fake = _fake_openai_pipeline(
-        [
-            {"start": 0, "end": 10, "entity": "B-private_person", "score": 0.95},
-            {"start": 11, "end": 21, "entity": "B-private_date", "score": 0.90},
-        ]
-    )
-    with patch(
-        "mmore.privacy.detection.openai_filter_engine._load_openai_filter_pipeline",
-        return_value=fake,
-    ):
-        engine = OpenAIFilterEngine(
-            entity_types=["private_person"], confidence_threshold=0.5
-        )
-        spans = engine.detect("synthetic")
-
-    assert len(spans) == 2
-    assert {s.label for s in spans} == {"B-private_person", "B-private_date"}
-
-
 def test_openai_filter_engine_shares_pipeline_cache_across_instances():
     fake = _fake_openai_pipeline([])
     with patch(
@@ -386,7 +366,7 @@ def test_presidio_engine_passes_threshold_and_entity_types_to_analyzer():
         return_value=fake,
     ):
         engine = PresidioEngine(
-            entity_types=["PERSON", "MRN"], confidence_threshold=0.55
+            sensitive_entities=["PERSON", "MRN"], confidence_threshold=0.55
         )
         engine.detect("synthetic note")
 
@@ -543,7 +523,7 @@ def test_llm_engine_passes_text_and_entity_types_to_predictor():
     cfg = LLMConfig(llm_name="Qwen/Qwen2.5-3B-Instruct")
     with _patch_dspy_engine(predictor):
         engine = LLMDetectionEngine(
-            cfg, entity_types=["PERSON", "MRN"], confidence_threshold=0.5
+            cfg, sensitive_entities=["PERSON", "MRN"], confidence_threshold=0.5
         )
         engine.detect("synthetic note")
 
@@ -580,7 +560,7 @@ def test_llm_engine_skips_malformed_individual_spans():
 
 
 def test_llm_engine_from_config_falls_back_to_default_llm():
-    from mmore.privacy.detection.defaults import DEFAULT_LLM_CONFIG
+    from mmore.privacy.detection.constants import DEFAULT_LLM_CONFIG
 
     cfg = DetectionConfig(
         engine=DetectionEngineType.LLM,

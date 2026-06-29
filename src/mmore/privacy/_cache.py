@@ -92,7 +92,7 @@ class ModelRegistry:
         self._budget_ready = False
         self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._total = 0
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
 
     def _budget(self) -> Optional[int]:
         """Resolve the byte budget once, auto-detecting device memory if unset."""

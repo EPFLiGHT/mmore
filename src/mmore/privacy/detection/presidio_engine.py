@@ -12,13 +12,14 @@ from typing_extensions import Self
 
 from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
-from .base import DetectionEngine, DetectionEngineType, PIISpan
-from .config import DetectionConfig
-from .defaults import (
+from ..config import DetectionConfig, DetectionEngineType
+from ..domains.profile import PRESIDIO_CLINICAL_PATTERNS
+from ..policy import PrivacyPolicy
+from .base import DetectionEngine, PIISpan
+from .constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_PRESIDIO_SPACY_MODEL,
-    PRESIDIO_CLINICAL_PATTERNS,
 )
 
 if TYPE_CHECKING:
@@ -83,18 +84,19 @@ def clear_presidio_cache() -> None:
 class PresidioEngine(DetectionEngine):
     """Detect PII spans with Microsoft Presidio + custom clinical recognizers.
 
-    Each instance carries its own ``entity_types`` and ``confidence_threshold``.
-    The model is shared across instances via the global ``MODEL_REGISTRY``.
+    Each instance carries its own ``sensitive_entities`` and
+    ``confidence_threshold``. The analyzer is shared across instances via the
+    global ``MODEL_REGISTRY``.
     """
 
     def __init__(
         self,
-        entity_types: Optional[Sequence[str]] = None,
+        sensitive_entities: Optional[Sequence[str]] = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         language: str = DEFAULT_LANGUAGE,
     ):
-        self._entity_types: Optional[List[str]] = (
-            list(entity_types) if entity_types else None
+        self._sensitive_entities: Optional[List[str]] = (
+            list(sensitive_entities) if sensitive_entities else None
         )
         self._confidence_threshold = confidence_threshold
         self._language = language
@@ -102,8 +104,12 @@ class PresidioEngine(DetectionEngine):
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
         return cls(
-            entity_types=config.entity_types or None,
-            confidence_threshold=config.confidence_threshold,
+            sensitive_entities=config.entity_types or None,
+            confidence_threshold=(
+                config.confidence_threshold
+                if config.confidence_threshold is not None
+                else DEFAULT_CONFIDENCE_THRESHOLD
+            ),
         )
 
     @property
@@ -116,7 +122,7 @@ class PresidioEngine(DetectionEngine):
         results = self.analyzer.analyze(
             text=text,
             language=self._language,
-            entities=self._entity_types,
+            entities=self._sensitive_entities,
             score_threshold=self._confidence_threshold,
         )
         return [
@@ -131,14 +137,10 @@ class PresidioEngine(DetectionEngine):
 
 
 @register_tool("detect_pii_presidio")
-def detect_pii_presidio(text: str) -> List[PIISpan]:
-    """Detect PII spans in ``text`` using a default-configured Presidio engine.
-
-    Agents needing per-config behavior should be wired by setup code that
-    builds a ``PresidioEngine.from_config(detection_cfg)`` and registers its
-    ``detect()`` function under a distinct tool name, e.g.::
-
-        engine = PresidioEngine.from_config(detection_cfg)
-        register_tool("detect_pii_presidio_strict", engine.detect)
-    """
-    return PresidioEngine().detect(text)
+def detect_pii_presidio(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+    """Detect PII spans in ``text`` using a Presidio engine configured from ``policy``."""
+    engine = PresidioEngine(
+        sensitive_entities=policy.sensitive_entities or None,
+        **policy.detection_params,
+    )
+    return engine.detect(text)

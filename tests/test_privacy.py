@@ -1,6 +1,6 @@
 """Integration tests for mmore.privacy.agents."""
 
-from typing import Any
+from typing import Any, Dict, TypedDict
 from unittest.mock import patch
 
 import pytest
@@ -54,7 +54,7 @@ def test_system_prompt_is_prepended_to_messages(isolate_llm_cache):
             return super()._call(messages, stop, run_manager, **kwargs)
 
     fake = Capturing(responses=["ok"])
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake):
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
         agent = BaseAgent.from_config(_cfg(system_prompt="SYS"))
         agent.invoke("hello")
 
@@ -78,7 +78,7 @@ def test_registered_tools_are_bound_to_llm_at_first_invoke(
         return f"hi {name}"
 
     fake = Binding(responses=["ok"])
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake):
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
         agent = BaseAgent.from_config(_cfg(tools=["greet"]))
         agent.invoke("trigger")
 
@@ -114,7 +114,7 @@ def test_memory_checkpointer_persists_state_in_a_thread(isolate_llm_cache):
     cfg = _cfg(checkpointer="memory")
     thread: RunnableConfig = {"configurable": {"thread_id": "t-1"}}
 
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake):
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
         agent = BaseAgent.from_config(cfg)
         agent.invoke("q1", config=thread)
         agent.invoke("q2", config=thread)
@@ -134,7 +134,7 @@ def test_sqlite_checkpointer_persists_state_across_agents(tmp_path, isolate_llm_
     cfg = _cfg(checkpointer="sqlite", checkpoint_path=str(db))
     thread: RunnableConfig = {"configurable": {"thread_id": "t-rt"}}
 
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake):
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
         with BaseAgent.from_config(cfg) as agent_a:
             agent_a.invoke("hello", config=thread)
 
@@ -146,7 +146,9 @@ def test_sqlite_checkpointer_persists_state_across_agents(tmp_path, isolate_llm_
 
 def test_lazy_loading_and_dedup_minimize_load_calls(isolate_llm_cache):
     fake = FakeListChatModel(responses=["x"] * 10)
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake) as mock:
+    with patch(
+        "mmore.privacy.agents.base._build_chat_model", return_value=fake
+    ) as mock:
         agent_x = BaseAgent.from_config(_cfg(name="x"))
         agent_y = BaseAgent.from_config(_cfg(name="y"))
         assert mock.call_count == 0
@@ -174,7 +176,9 @@ def test_same_model_different_params_share_one_instance(isolate_llm_cache):
         llm=LLMConfig(llm_name="gpt-4o-mini", temperature=0.1, max_new_tokens=32),
     )
 
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake) as mock:
+    with patch(
+        "mmore.privacy.agents.base._build_chat_model", return_value=fake
+    ) as mock:
         BaseAgent.from_config(hot).invoke("q")
         BaseAgent.from_config(cold).invoke("q")
         assert mock.call_count == 1
@@ -196,7 +200,7 @@ def test_hf_generation_params_are_bound_as_pipeline_kwargs(isolate_llm_cache):
     fake = Capturing(responses=["ok"])
     cfg = _cfg(llm=LLMConfig(llm_name="gpt2", temperature=0.3, max_new_tokens=16))
 
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake):
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
         BaseAgent.from_config(cfg).invoke("q")
 
     assert captured[0].get("pipeline_kwargs") == {
@@ -207,7 +211,9 @@ def test_hf_generation_params_are_bound_as_pipeline_kwargs(isolate_llm_cache):
 
 def test_clear_llm_cache(isolate_llm_cache):
     fake = FakeListChatModel(responses=["x"] * 10)
-    with patch("mmore.privacy.agents.base.LLM.from_config", return_value=fake) as mock:
+    with patch(
+        "mmore.privacy.agents.base._build_chat_model", return_value=fake
+    ) as mock:
         agent = BaseAgent.from_config(_cfg())
         agent.invoke("q")
         assert mock.call_count == 1
@@ -220,3 +226,59 @@ def test_clear_llm_cache(isolate_llm_cache):
         new_agent = BaseAgent.from_config(_cfg())
         new_agent.invoke("q")
         assert mock.call_count == 2
+
+
+# --------------------------------------------------------------------------
+# BaseAgent as a generalized pipeline-node base
+# --------------------------------------------------------------------------
+
+
+class _PipeState(TypedDict, total=False):
+    value: int
+    doubled: int
+
+
+class _DoublerAgent(BaseAgent):
+    """An LLM-less agent on a custom state schema."""
+
+    state_schema = _PipeState
+    node_name = "doubler"
+
+    def _node(self, state: _PipeState) -> Dict[str, Any]:
+        return {"doubled": state["value"] * 2}
+
+
+def test_subclass_runs_with_custom_state_schema_and_no_llm():
+    agent = _DoublerAgent(config=object(), llm_config=None)
+
+    out = agent.graph.invoke({"value": 21})
+
+    assert out["doubled"] == 42
+
+
+def test_node_name_class_attr_is_used_as_graph_node_id():
+    agent = _DoublerAgent(config=object())
+
+    assert agent.name == "doubler"
+    assert "doubler" in agent.graph.get_graph().nodes
+
+
+def test_default_name_falls_back_to_agent_config_name():
+    fake = FakeListChatModel(responses=["ok"])
+    with patch("mmore.privacy.agents.base._build_chat_model", return_value=fake):
+        agent = BaseAgent.from_config(_cfg(name="answerer"))
+
+    assert agent.name == "answerer"
+
+
+def test_llm_access_without_config_raises_clear_error():
+    agent = _DoublerAgent(config=object(), llm_config=None)
+
+    with pytest.raises(ValueError, match="LLM"):
+        _ = agent.llm
+
+
+def test_node_property_exposes_bound_node_for_composition():
+    agent = _DoublerAgent(config=object())
+
+    assert agent.node({"value": 5}) == {"doubled": 10}
