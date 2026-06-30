@@ -107,7 +107,7 @@ class _EngineSelectSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
     engine_guidance: str = dspy.InputField(desc=_DETECTION_GUIDANCE_DESC)
-    engine: Literal["presidio", "gliner", "openai", "llm"] = dspy.OutputField(
+    engine: Literal["presidio", "gliner", "openai_filter", "llm"] = dspy.OutputField(
         desc=_ENGINE_OUTPUT_DESC
     )
 
@@ -161,7 +161,7 @@ class _LLMDetectionParamsSignature(dspy.Signature):
 _PARAM_SIGNATURES: Dict[str, type[dspy.Signature]] = {
     "presidio": _PresidioParamsSignature,
     "gliner": _GLiNERParamsSignature,
-    "openai": _OpenAIFilterParamsSignature,
+    "openai_filter": _OpenAIFilterParamsSignature,
     "llm": _LLMDetectionParamsSignature,
 }
 

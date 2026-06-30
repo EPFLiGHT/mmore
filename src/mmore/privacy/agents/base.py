@@ -140,7 +140,7 @@ class BaseAgent:
         """
         if self._llm is None:
             if self._llm_config is None:
-                raise ValueError(f"{type(self).__name__} has no LLM configured ")
+                raise ValueError(f"{type(self).__name__} has no LLM configured.")
             self._llm = _get_or_load_llm(self._llm_config)
         return self._llm
 

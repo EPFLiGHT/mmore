@@ -29,7 +29,7 @@ DEFAULT_CONFIDENCE_THRESHOLD = THRESHOLD_LEVELS["medium"]
 DETECTION_TOOL_NAMES = {
     "presidio": "detect_pii_presidio",
     "gliner": "detect_pii_gliner",
-    "openai": "detect_pii_openai",
+    "openai_filter": "detect_pii_openai_filter",
     "llm": "detect_pii_llm",
 }
 
@@ -45,7 +45,7 @@ DETECTION_GUIDANCE: Dict[str, str] = {
         "GLiNER: zero-shot transformer NER over an arbitrary label set "
         "(default: nvidia/gliner-PII). "
     ),
-    "openai": (
+    "openai_filter": (
         "openai/privacy-filter: HuggingFace token-classification model from "
         "OpenAI for PII. "
     ),
@@ -84,7 +84,7 @@ class LLMDetectionParams(BaseDetectionParams):
 DETECTION_DEFAULT_PARAMS: Dict[str, BaseDetectionParams] = {
     "presidio": PresidioParams(),
     "gliner": GLiNERParams(),
-    "openai": OpenAIFilterParams(),
+    "openai_filter": OpenAIFilterParams(),
     "llm": LLMDetectionParams(),
 }
 
@@ -107,7 +107,7 @@ DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
         f"{_CONFIDENCE_THRESHOLD_GUIDANCE}\n"
         "- multi_label: true allows overlapping labels; false picks one label per span."
     ),
-    "openai": (
+    "openai_filter": (
         "openai/privacy-filter (HF token-classification).\n"
         f"{_CONFIDENCE_THRESHOLD_GUIDANCE}"
     ),

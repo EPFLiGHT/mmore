@@ -92,6 +92,6 @@ def detect_pii_openai_filter(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
     """Detect PII spans in ``text`` using an openai/privacy-filter engine
     configured from ``policy``."""
     if policy.sensitive_entities:
-        logger.debug("OpenAi Filter has a fixed sensitive label lists.")
+        logger.debug("OpenAI privacy-filter has a fixed sensitive label lists.")
     engine = OpenAIFilterEngine(**policy.detection_params)
     return engine.detect(text)
