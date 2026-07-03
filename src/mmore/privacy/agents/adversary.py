@@ -326,6 +326,8 @@ class AdversarialAgent(BaseAgent):
 
     def _node(self, state: PrivacyState) -> PrivacyState:
         """Graph node: write the verdict (with its report on a leak) and the safety flag."""
+        if not self._adversary_cfg.enabled:
+            return PrivacyState(verdict=SAFE_VERDICT, safe=True)
         policy = state.get("policy")
         if policy is None:
             raise ValueError("AdversarialAgent requires 'policy' in the state.")

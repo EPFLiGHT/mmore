@@ -58,6 +58,7 @@ class SanitizationConfig:
 
 @dataclass
 class LeakageAdversaryConfig:
+    enabled: bool = True
     max_iterations: int = 3
     leakage_threshold: float = 0.1
     strategies: List[AttackVector] = field(default_factory=lambda: list(AttackVector))
