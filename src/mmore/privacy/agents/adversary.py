@@ -7,7 +7,7 @@ Writes:    verdict, safe
 The trust-boundary probe: it attacks the sanitized context for residual PII and
 quasi-identifiers before anything leaves for the cloud answer model. It runs one
 adversarial probe per configured attack vector, keeps the strongest signal, and
-treats a probe whose confidence reaches the threashold as a leak.
+treats a probe whose confidence reaches the threshold as a leak.
 """
 
 import logging
@@ -173,14 +173,14 @@ class AdversarialAgent(BaseAgent):
                 )
         except Exception as e:
             logger.warning(
-                "Leakage probe '%s' failed (%s); treating as no leak", vector.value, e
+                "Leakage probe '%s' failed (%s), treating as a leak", vector.value, e
             )
             return LeakageVerdict(
-                leaked=False,
+                leaked=True,
                 vector=vector,
                 entity_type=None,
-                evidence="",
-                confidence=0.0,
+                evidence="probe_failed",
+                confidence=1.0,
             )
         confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
         entity = str(getattr(prediction, "entity_type", "")).strip()

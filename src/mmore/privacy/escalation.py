@@ -55,11 +55,11 @@ def apply_entity_guidance(
     ]
     prompt = policy.domain_prompt
     if _ESCALATION_NOTE not in prompt:
-        prompt = prompt + _ESCALATION_NOTE
+        prompt += " " + _ESCALATION_NOTE
     if context_note:
-        guidance = f" Human guidance: {context_note}"
+        guidance = f"Human guidance: {context_note}"
         if guidance not in prompt:
-            prompt = prompt + guidance
+            prompt += " " + guidance
     return replace(policy, sensitive_entities=entities, domain_prompt=prompt)
 
 

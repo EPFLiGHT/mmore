@@ -464,7 +464,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
                     query=state.get("query", ""),
                     context="\n\n".join(state.get("raw_chunks", [])),
                     current_entities=current,
-                    leak_vector=verdict.vector,
+                    leak_vector=verdict.vector if verdict.vector else "none",
                     leak_entity_type=verdict.entity_type,
                     leak_evidence=verdict.evidence,
                 )

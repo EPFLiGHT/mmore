@@ -39,7 +39,6 @@ _GATE_CHOICES: List[Tuple[GateDecision, str]] = [
     (GateDecision.REJECT, "Reject: abort the request"),
 ]
 _CHOICE_BY_NUMBER = {i + 1: decision for i, (decision, _) in enumerate(_GATE_CHOICES)}
-_DECISION_BY_VALUE = {decision.value: decision for decision, _ in _GATE_CHOICES}
 
 
 def _gate_options() -> List[dict]:
@@ -52,6 +51,8 @@ def _gate_options() -> List[dict]:
 
 def _as_choice_number(value: object) -> Optional[int]:
     """Read a menu number from an int or numeric string."""
+    if isinstance(value, bool):
+        return None
     if isinstance(value, int):
         return value
     if isinstance(value, str) and value.strip().isdigit():
@@ -61,13 +62,17 @@ def _as_choice_number(value: object) -> Optional[int]:
 
 def _interpret_decision(decision: object) -> Optional[GateDecision]:
     """Map a resume value (a menu number, an action name, or a dict) to a decision."""
+    if isinstance(decision, dict):
+        return _interpret_decision(decision.get("choice") or decision.get("action"))
+
     number = _as_choice_number(decision)
     if number is not None:
         return _CHOICE_BY_NUMBER.get(number)
     if isinstance(decision, str):
-        return _DECISION_BY_VALUE.get(decision.strip().lower())
-    if isinstance(decision, dict):
-        return _interpret_decision(decision.get("choice"))
+        try:
+            return GateDecision(decision.strip().lower())
+        except ValueError:
+            return None
     return None
 
 
