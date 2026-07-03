@@ -498,13 +498,22 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             and self.config.detection.confidence_threshold is not None
         )
         updates: Dict[str, object] = {}
+        params = dict(policy.detection_params)
+        params_changed = False
         if engine in DETECTION_TOOL_NAMES and not engine_pinned:
             updates["detection_engine"] = engine
+            if engine != policy.detection_engine:
+                current_threshold = params.get("confidence_threshold")
+                params = asdict(DETECTION_DEFAULT_PARAMS[engine])
+                if current_threshold is not None:
+                    params["confidence_threshold"] = current_threshold
+                params_changed = True
         if strategy in SANITIZATION_TOOL_NAMES and not strategy_pinned:
             updates["sanitization_strategy"] = strategy
         if threshold in THRESHOLD_LEVELS and not threshold_pinned:
-            params = dict(policy.detection_params)
             params["confidence_threshold"] = THRESHOLD_LEVELS[threshold]
+            params_changed = True
+        if params_changed:
             updates["detection_params"] = params
         return replace(policy, **updates) if updates else policy
 

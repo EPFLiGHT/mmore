@@ -132,11 +132,11 @@ DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
 
 DEFAULT_ENTITIES = [
     "PERSON",
-    "PHONE",
-    "EMAIL",
+    "PHONE_NUMBER",
+    "EMAIL_ADDRESS",
     "MRN",
-    "DATE",
+    "DATE_TIME",
     "LOCATION",
-    "SSN",
+    "US_SSN",
     "INSURANCE_ID",
 ]

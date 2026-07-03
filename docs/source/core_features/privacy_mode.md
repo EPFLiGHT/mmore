@@ -22,7 +22,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 2. The **detector** runs the policy's PII engine over each raw chunk.
 3. The **sanitizer** rewrites the chunks using the chosen strategy.
 4. The **leakage adversary** attacks the sanitized context. If it finds a leak, it loops back to the analyzer to tighten the policy (limited by `leakage_adversary.max_iterations`).
-5. The **HITL gate** is the trust boundary. With `interactive: false` (batch or local) it approves automatically and the graph finishes in one pass. With `interactive: true` it pauses for human approval before any context leaves for the answer model.
+5. The **HITL gate** is the trust boundary. With `interactive: false` it approves automatically and the graph finishes in one pass. With `interactive: true` it pauses before any context leaves for the answer model: in `local` mode a terminal prompt shows the PII-free summary and asks to approve, revise (with optional feedback), or reject; in `api` mode there is no approval endpoint yet, so the gate auto-approves with a startup warning.
 6. The **answer model** sees only the sanitized context, the query, and the domain prompt. It never reads the raw chunks.
 7. The **verifier** checks the answer for leftover PII and faithfulness, and raises type and count warnings. It is advisory only: it warns but does not loop back.
 
@@ -31,7 +31,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 `privacy.yaml` is loaded directly as `PrivacyConfig`, so its fields sit at the top level (no `privacy:` wrapper). See `examples/rag/privacy.yaml` for a full example. Main fields:
 
 - `domain`: `global`, `healthcare`, or `humanitarian`. Leave it out to let the analyzer guess it.
-- `interactive`: the HITL gate. Set `false` for batch or local runs.
+- `interactive`: the HITL gate. In `local` mode it prompts in the terminal (queries run one at a time); in `api` mode it auto-approves with a warning. Set `false` for unattended runs.
 - `detection.engine`: one engine, either `presidio`, `gliner`, `llm`, or `openai_filter`.
 - `sanitization.strategy`: `token_masking`, `entity_replacement`, `synthetic_rewrite`, or `presidio`.
 - `answer.llm`: any `LLMConfig` backend (API or self-hosted/vLLM).

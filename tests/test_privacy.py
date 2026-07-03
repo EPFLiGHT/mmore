@@ -285,3 +285,141 @@ def test_node_property_exposes_bound_node_for_composition():
     agent = _DoublerAgent(config=object())
 
     assert agent.node({"value": 5}) == {"doubled": 10}
+
+
+# --------------------------------------------------------------------------
+# HITL gate resume loop (run_privacy_query + terminal_approver)
+# --------------------------------------------------------------------------
+
+
+def _interactive_gate_graph():
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from mmore.privacy.agents.gate import HITLGateAgent
+    from mmore.privacy.config import PrivacyConfig
+
+    config = PrivacyConfig(interactive=True)
+    return HITLGateAgent(config, checkpointer=MemorySaver()).graph
+
+
+class _ScriptedApprover:
+    """Approver that replays canned answers and records the payloads it saw."""
+
+    def __init__(self, answers):
+        self._answers = iter(answers)
+        self.payloads = []
+
+    def __call__(self, payload: dict) -> object:
+        self.payloads.append(payload)
+        return next(self._answers)
+
+
+def test_run_privacy_query_resumes_gate_on_approve():
+    from mmore.privacy.report import PreCloudOutcome
+    from mmore.privacy.runner import run_privacy_query
+
+    approver = _ScriptedApprover(["1"])
+    result = run_privacy_query(
+        _interactive_gate_graph(), "q", ["chunk"], approver=approver
+    )
+
+    assert result.outcome == PreCloudOutcome.APPROVED
+    assert len(approver.payloads) == 1
+    payload = approver.payloads[0]
+    assert "summary" in payload and payload["options"][0]["choice"] == 1
+
+
+def test_run_privacy_query_reprompts_on_invalid_choice():
+    from mmore.privacy.report import PreCloudOutcome
+    from mmore.privacy.runner import run_privacy_query
+
+    approver = _ScriptedApprover(["9", "approve"])
+    result = run_privacy_query(
+        _interactive_gate_graph(), "q", ["chunk"], approver=approver
+    )
+
+    assert result.outcome == PreCloudOutcome.APPROVED
+    assert len(approver.payloads) == 2
+    assert "error" in approver.payloads[1]
+
+
+def test_run_privacy_query_resumes_gate_on_reject():
+    from mmore.privacy.report import PreCloudOutcome
+    from mmore.privacy.runner import run_privacy_query
+
+    approver = _ScriptedApprover(["3"])
+    result = run_privacy_query(
+        _interactive_gate_graph(), "q", ["chunk"], approver=approver
+    )
+
+    assert result.outcome == PreCloudOutcome.REJECTED
+
+
+def test_run_privacy_query_without_approver_raises_on_interrupt():
+    from mmore.privacy.runner import run_privacy_query
+
+    with pytest.raises(RuntimeError, match="interactive"):
+        run_privacy_query(_interactive_gate_graph(), "q", ["chunk"])
+
+
+_GATE_PAYLOAD = {
+    "summary": "Pre-cloud privacy review\n- Domain: healthcare",
+    "options": [
+        {"choice": 1, "action": "approve", "label": "Approve: clear the context"},
+        {"choice": 2, "action": "retry", "label": "Revise: tighten and retry"},
+        {"choice": 3, "action": "reject", "label": "Reject: abort the request"},
+    ],
+}
+
+
+def test_terminal_approver_approve_prints_summary_and_menu(monkeypatch, capsys):
+    from mmore.privacy.runner import terminal_approver
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "1")
+
+    assert terminal_approver(_GATE_PAYLOAD) == "1"
+    out = capsys.readouterr().out
+    assert "Pre-cloud privacy review" in out
+    assert "[1]" in out and "[3]" in out
+
+
+def test_terminal_approver_revise_collects_optional_feedback(monkeypatch):
+    from mmore.privacy.runner import terminal_approver
+
+    answers = iter(["2", "also mask job titles"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    resume = terminal_approver(_GATE_PAYLOAD)
+
+    assert resume == {"choice": "2", "feedback": "also mask job titles"}
+
+
+def test_terminal_approver_revise_without_feedback_returns_choice(monkeypatch):
+    from mmore.privacy.runner import terminal_approver
+
+    answers = iter(["retry", ""])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert terminal_approver(_GATE_PAYLOAD) == "retry"
+
+
+def test_terminal_approver_reprompt_payload_prints_error(monkeypatch, capsys):
+    from mmore.privacy.runner import terminal_approver
+
+    monkeypatch.setattr("builtins.input", lambda _prompt: "1")
+
+    terminal_approver({**_GATE_PAYLOAD, "error": "Unrecognized choice: 1, 2, or 3."})
+    out = capsys.readouterr().out
+    assert "Unrecognized choice" in out
+
+
+def test_terminal_approver_without_tty_raises_clear_error(monkeypatch):
+    from mmore.privacy.runner import terminal_approver
+
+    def _eof(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _eof)
+
+    with pytest.raises(RuntimeError, match="interactive: false"):
+        terminal_approver(_GATE_PAYLOAD)

@@ -179,20 +179,29 @@ def create_api(rag: RAGPipeline, endpoint: str):
     return app
 
 
-def _build_privacy_graph(privacy_config_file: str):
-    """Load + validate the privacy config and compile its pipeline graph.
+def _setup_privacy(privacy_config_file: str, mode: str):
+    """Load + validate the privacy config and compile its pipeline graph."""
+    from dataclasses import replace
 
-    Errors (missing answer.llm, unknown domain, unregistered engine) surface
-    here, eagerly, before any query runs.
-    """
     from langgraph.checkpoint.memory import MemorySaver
 
     from mmore.privacy.pipeline import build_privacy_pipeline
-    from mmore.privacy.runner import load_privacy_config
+    from mmore.privacy.runner import load_privacy_config, terminal_approver
 
     privacy_config = load_privacy_config(privacy_config_file)
+    privacy_approver = None
+    if privacy_config.interactive:
+        if mode == "api":
+            logger.warning(
+                "The interactive privacy gate is not supported in api mode; "
+                "auto-approving at the gate. Set 'interactive: false' to "
+                "silence this warning."
+            )
+            privacy_config = replace(privacy_config, interactive=False)
+        else:
+            privacy_approver = terminal_approver
     # One checkpointer for the graph; the runner threads each request by id.
-    return build_privacy_pipeline(privacy_config, MemorySaver())
+    return build_privacy_pipeline(privacy_config, MemorySaver()), privacy_approver
 
 
 @profile_function()
@@ -218,13 +227,17 @@ def rag(config_file, privacy_config_file: Optional[str] = None):
         fields,
     )
 
-    privacy_graph = None
+    privacy_graph, privacy_approver = None, None
     if privacy_config_file is not None:
         logger.debug("Privacy mode enabled, building the privacy pipeline...")
-        privacy_graph = _build_privacy_graph(privacy_config_file)
+        privacy_graph, privacy_approver = _setup_privacy(
+            privacy_config_file, config.mode
+        )
 
     logger.debug("Creating the RAG Pipeline...")
-    rag_pp = RAGPipeline.from_config(config.rag, privacy_graph=privacy_graph)
+    rag_pp = RAGPipeline.from_config(
+        config.rag, privacy_graph=privacy_graph, privacy_approver=privacy_approver
+    )
     logger.debug("RAG pipeline initialized!")
 
     if config.mode == "local":
@@ -233,6 +246,8 @@ def rag(config_file, privacy_config_file: Optional[str] = None):
         queries = read_queries(config_args.input_file)
         rag_pp.retriever.pop_timings()  # reset accumulators before this run
 
+        # Sequential on purpose: the privacy gate prompts read stdin, so batching
+        # the queries would let concurrent prompts interleave.
         results = []
         with progress(total=len(queries), desc="Answering", unit="") as bar:
             stage_labels = {

@@ -5,7 +5,7 @@ Integrates Milvus retrieval with HuggingFace text generation.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
@@ -36,6 +36,9 @@ Context:
 # PII-free: a structured report record and an advisory type+count summary.
 PRIVACY_OUTPUT_KEYS = ("privacy_report", "privacy_warnings")
 
+# Answers the privacy gate's interrupt payloads (see mmore.privacy.runner.Approver).
+PrivacyApprover = Callable[[dict], object]
+
 
 @dataclass
 class RAGConfig:
@@ -61,14 +64,16 @@ class RAGPipeline:
         llm: BaseChatModel,
         judge: Optional[LLMJudge] = None,
         privacy_graph: Optional[Any] = None,
+        privacy_approver: Optional[PrivacyApprover] = None,
     ):
         # Get modules
         self.retriever = retriever
         self.prompt = prompt_template
         self.llm = llm
         self.judge = judge
-        # Compiled privacy pipeline; when set, it replaces the answer step.
         self.privacy_graph = privacy_graph
+        # Answers the gate's interrupts when the privacy config is interactive
+        self.privacy_approver = privacy_approver
 
         # Build the rag chain
         self.rag_chain = RAGPipeline._build_chain(
@@ -78,13 +83,19 @@ class RAGPipeline:
             self.llm,
             self.judge,
             self.privacy_graph,
+            self.privacy_approver,
         )
 
     def __str__(self):
         return str(self.rag_chain)
 
     @classmethod
-    def from_config(cls, config: str | RAGConfig, privacy_graph: Optional[Any] = None):
+    def from_config(
+        cls,
+        config: str | RAGConfig,
+        privacy_graph: Optional[Any] = None,
+        privacy_approver: Optional[PrivacyApprover] = None,
+    ):
         if isinstance(config, str):
             config = load_config(config, RAGConfig)
 
@@ -99,7 +110,9 @@ class RAGPipeline:
             [("system", config.system_prompt), ("human", "{input}")]
         )
 
-        return cls(retriever, chat_template, llm, judge, privacy_graph)
+        return cls(
+            retriever, chat_template, llm, judge, privacy_graph, privacy_approver
+        )
 
     @staticmethod
     def format_docs(docs: List[Document]) -> str:
@@ -110,7 +123,13 @@ class RAGPipeline:
 
     @staticmethod
     def _build_chain(
-        retriever, format_docs, prompt, llm, judge=None, privacy_graph=None
+        retriever,
+        format_docs,
+        prompt,
+        llm,
+        judge=None,
+        privacy_graph=None,
+        privacy_approver=None,
     ) -> Runnable:
         validate_input = RunnableLambda(
             lambda x: MMOREInput.model_validate(x).model_dump()
@@ -147,7 +166,7 @@ class RAGPipeline:
             # Privacy mode swaps only the answer step: the verified answer comes
             # from the privacy graph driven over the retrieved chunks.
             answer_step: Runnable = RunnableLambda(
-                RAGPipeline._privacy_answer_step(privacy_graph)
+                RAGPipeline._privacy_answer_step(privacy_graph, privacy_approver)
             )
             core_chain = with_context | answer_step
         else:
@@ -156,7 +175,7 @@ class RAGPipeline:
         return validate_input | core_chain | validate_output
 
     @staticmethod
-    def _privacy_answer_step(privacy_graph):
+    def _privacy_answer_step(privacy_graph, privacy_approver=None):
         """Answer step that routes the retrieved chunks through the privacy graph.
 
         Returns the chain state updated with the verified ``answer`` and the
@@ -169,7 +188,9 @@ class RAGPipeline:
         def step(x: Dict[str, Any]) -> Dict[str, Any]:
             docs: List[Document] = x["docs"]
             raw_chunks = [doc.page_content for doc in docs]
-            result = run_privacy_query(privacy_graph, x["input"], raw_chunks)
+            result = run_privacy_query(
+                privacy_graph, x["input"], raw_chunks, approver=privacy_approver
+            )
             updated = dict(x)
             updated["answer"] = result.answer
             if result.record is not None:

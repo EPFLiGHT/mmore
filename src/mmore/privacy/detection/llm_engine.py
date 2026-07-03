@@ -65,7 +65,7 @@ def _build_demos() -> List[dspy.Example]:
             entity_types=list(DEFAULT_ENTITIES),
             spans=[
                 _DetectedSpan(text="John Doe", label="PERSON", score=0.95),
-                _DetectedSpan(text="555-1234", label="PHONE", score=0.95),
+                _DetectedSpan(text="555-1234", label="PHONE_NUMBER", score=0.95),
                 _DetectedSpan(text="87654321", label="MRN", score=0.95),
             ],
         ).with_inputs("text", "entity_types"),
@@ -74,8 +74,10 @@ def _build_demos() -> List[dspy.Example]:
             entity_types=list(DEFAULT_ENTITIES),
             spans=[
                 _DetectedSpan(text="123 Main St", label="LOCATION", score=0.9),
-                _DetectedSpan(text="jane@example.com", label="EMAIL", score=0.95),
-                _DetectedSpan(text="2024-01-15", label="DATE", score=0.9),
+                _DetectedSpan(
+                    text="jane@example.com", label="EMAIL_ADDRESS", score=0.95
+                ),
+                _DetectedSpan(text="2024-01-15", label="DATE_TIME", score=0.9),
             ],
         ).with_inputs("text", "entity_types"),
     ]

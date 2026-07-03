@@ -34,13 +34,13 @@ def clear_faker_cache() -> None:
 def _build_label_map(faker: "Faker") -> Dict[str, Callable[[], str]]:
     return {
         "PERSON": faker.name,
-        "EMAIL": faker.email,
-        "PHONE": faker.phone_number,
-        "DATE": lambda: faker.date(),
+        "EMAIL_ADDRESS": faker.email,
+        "PHONE_NUMBER": faker.phone_number,
+        "DATE_TIME": lambda: faker.date(),
         "HOSPITAL_DATE": lambda: faker.date(),
         "LOCATION": faker.city,
         "GPS_COORDINATES": lambda: f"{faker.latitude()}, {faker.longitude()}",
-        "SSN": faker.ssn,
+        "US_SSN": faker.ssn,
         "MRN": lambda: f"MRN{faker.random_number(digits=8, fix_len=True)}",
         "INSURANCE_ID": lambda: faker.bothify(text="??########").upper(),
         "ETHNICITY": faker.word,

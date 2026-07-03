@@ -3,9 +3,10 @@
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 from langchain_core.runnables import RunnableConfig
+from langgraph.types import Command
 
 from ..utils import load_config
 from .agents.detector import _resolve_engine_tool
@@ -26,6 +27,36 @@ class PrivacyResult:
     outcome: PreCloudOutcome | None
 
 
+# Answers one gate interrupt payload and resumes the graph
+Approver = Callable[[dict], object]
+
+_RETRY_CHOICES = {"2", "retry"}
+
+
+def terminal_approver(payload: dict) -> object:
+    """Answer the gate's interrupt payload with a stdin prompt."""
+    error = payload.get("error")
+    if error:
+        print(error)
+    else:
+        print(payload.get("summary", ""))
+    print()
+    for option in payload.get("options", []):
+        print(f"  [{option['choice']}] {option['label']}")
+    try:
+        choice = input("Gate > ").strip()
+        if choice.lower() in _RETRY_CHOICES:
+            feedback = input("Feedback (optional, Enter to skip) > ").strip()
+            if feedback:
+                return {"choice": choice, "feedback": feedback}
+        return choice
+    except EOFError:
+        raise RuntimeError(
+            "The privacy gate needs an interactive terminal to ask for approval, "
+            "but stdin is closed. Set 'interactive: false' in the privacy config."
+        ) from None
+
+
 def validate_privacy_config(config: PrivacyConfig) -> None:
     if config.answer is None:
         raise ValueError("Answer model requires 'answer.llm' in the privacy config.")
@@ -42,6 +73,7 @@ def run_privacy_query(
     *,
     request_id: Optional[str] = None,
     timestamp: Optional[str] = None,
+    approver: Optional[Approver] = None,
 ) -> PrivacyResult:
     """Run the privacy pipeline for one query and return its verified result."""
     request_id = request_id or uuid.uuid4().hex
@@ -56,12 +88,15 @@ def run_privacy_query(
     )
     final = graph.invoke(initial, config=thread)
 
-    if "__interrupt__" in final:
-        raise RuntimeError(
-            "Privacy gate paused for human approval, which the batch RAG path "
-            "cannot handle. Set 'interactive: false' in the privacy config to "
-            "auto-decide, or run via the API to approve interactively."
-        )
+    while "__interrupt__" in final:
+        if approver is None:
+            raise RuntimeError(
+                "Privacy gate paused for human approval but no approver is "
+                "available on this path. Set 'interactive: false' in the "
+                "privacy config to auto-decide."
+            )
+        payload = final["__interrupt__"][0].value
+        final = graph.invoke(Command(resume=approver(payload)), config=thread)
 
     report = final.get("report") or []
     return PrivacyResult(

@@ -35,11 +35,11 @@ _HEALTHCARE_ENTITIES = [
     "PERSON",
     "MRN",
     "HOSPITAL_DATE",
-    "DATE",
+    "DATE_TIME",
     "INSURANCE_ID",
-    "SSN",
-    "PHONE",
-    "EMAIL",
+    "US_SSN",
+    "PHONE_NUMBER",
+    "EMAIL_ADDRESS",
     "LOCATION",
 ]
 
@@ -79,9 +79,9 @@ _HUMANITARIAN_ENTITIES = [
     "LEGAL_STATUS",
     "DISPLACEMENT_STATUS",
     "HOUSEHOLD_ID",
-    "PHONE",
-    "EMAIL",
-    "DATE",
+    "PHONE_NUMBER",
+    "EMAIL_ADDRESS",
+    "DATE_TIME",
 ]
 
 
