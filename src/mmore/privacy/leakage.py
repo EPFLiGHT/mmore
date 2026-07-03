@@ -20,6 +20,7 @@ class EscalationRecord:
     from_human_feedback: bool = False
     vector: Optional[AttackVector] = None
     entity_type: Optional[str] = None
+    report: Optional[str] = None  # the guidance text for the escalation
 
 
 @dataclass
@@ -31,6 +32,7 @@ class LeakageVerdict:
     entity_type: Optional[str]
     evidence: str
     confidence: float
+    recommendation: Optional[str] = None
 
 
 # Verdict for a context with nothing to attack

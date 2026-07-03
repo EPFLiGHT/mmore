@@ -7,10 +7,13 @@ Writes:    verdict, safe
 The trust-boundary probe: it attacks the sanitized context for residual PII and
 quasi-identifiers before anything leaves for the cloud answer model. It runs one
 adversarial probe per configured attack vector, keeps the strongest signal, and
-treats a probe whose confidence reaches the threshold as a leak.
+treats a probe whose confidence reaches the threshold as a leak. On a leak it
+also emits a PII-free remediation report the analyzer applies like human gate
+feedback: which engine, strategy, threshold, or entity labels to change.
 """
 
 import logging
+from dataclasses import replace
 from typing import List, Optional, Union
 
 import dspy
@@ -20,9 +23,11 @@ from typing_extensions import Self
 from ...rag.llm import LLMConfig
 from ...utils import load_config
 from ..config import AttackVector, PrivacyConfig
+from ..detection.constants import DETECTION_GUIDANCE, DETECTION_PARAM_GUIDANCE
 from ..dspy_llm import build_dspy_lm
 from ..leakage import SAFE_VERDICT, LeakageVerdict
 from ..policy import PrivacyPolicy
+from ..sanitization.constants import SANITIZATION_GUIDANCE
 from .base import BaseAgent
 from .state import PrivacyState
 
@@ -97,6 +102,73 @@ class _LeakageProbeSignature(dspy.Signature):
 
 def _build_probe_predictor() -> dspy.Predict:
     return dspy.Predict(_LeakageProbeSignature.with_instructions(_PROBE_INSTRUCTION))
+
+
+# ========================================================================
+# Remediation report (emitted on a leak, applied by the analyzer)
+# ========================================================================
+
+_CURRENT_POLICY_DESC = (
+    "the policy the leaking pass ran under: detection engine, sanitization "
+    "strategy, confidence threshold, and sensitive-entity labels"
+)
+_ENGINE_GUIDANCE_DESC = "per-engine guidance: pros, cons, and when to prefer each"
+_STRATEGY_GUIDANCE_DESC = "per-strategy guidance: what each sanitization strategy does"
+_PARAM_GUIDANCE_DESC = "per-engine guidance for each tunable parameter"
+_FIXED_FIELDS_DESC = (
+    "policy fields pinned by the user config that must not be changed, or 'none'"
+)
+_PREVIOUS_REPORTS_DESC = "your remediation reports from earlier iterations, or 'none'"
+_RECOMMENDATION_DESC = (
+    "concise PII-free remediation report for the next pass: which detection "
+    "engine, sanitization strategy, or threshold level (low/medium/high) to "
+    "use, and any sensitive-entity labels to add"
+)
+
+_REMEDIATION_INSTRUCTION = (
+    "You are a privacy red-team adversary reporting back to the policy analyzer "
+    "after a successful attack on the sanitized context. Using the tool guidance, "
+    "write a short remediation report for the next pass: recommend a detection "
+    "engine, sanitization strategy, threshold level, and/or additional "
+    "sensitive-entity labels that would close the leak. Never recommend changing "
+    "a field listed as fixed by the user. Compare the current policy against "
+    "your previous reports: if an earlier recommendation was not applied, say so "
+    "and restate it. Do not echo raw personal values."
+)
+
+
+class _RemediationSignature(dspy.Signature):
+    context: str = dspy.InputField(desc=_CONTEXT_DESC)
+    attack: str = dspy.InputField(desc="the attack that succeeded and how it works")
+    entity_type: str = dspy.InputField(desc="the entity type that leaked, or NONE")
+    evidence: str = dspy.InputField(desc="the probe's PII-free justification")
+    current_policy: str = dspy.InputField(desc=_CURRENT_POLICY_DESC)
+    engine_guidance: str = dspy.InputField(desc=_ENGINE_GUIDANCE_DESC)
+    strategy_guidance: str = dspy.InputField(desc=_STRATEGY_GUIDANCE_DESC)
+    param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
+    fixed_fields: str = dspy.InputField(desc=_FIXED_FIELDS_DESC)
+    previous_reports: str = dspy.InputField(desc=_PREVIOUS_REPORTS_DESC)
+    recommendation: str = dspy.OutputField(desc=_RECOMMENDATION_DESC)
+
+
+def _build_remediation_predictor() -> dspy.Predict:
+    return dspy.Predict(
+        _RemediationSignature.with_instructions(_REMEDIATION_INSTRUCTION)
+    )
+
+
+def _describe_policy(policy: PrivacyPolicy) -> str:
+    threshold = policy.detection_params.get("confidence_threshold", "default")
+    return (
+        f"engine={policy.detection_engine}, "
+        f"strategy={policy.sanitization_strategy}, "
+        f"threshold={threshold}, "
+        f"entities={', '.join(policy.sensitive_entities) or 'none'}"
+    )
+
+
+def _format_guidance(guidance: dict) -> str:
+    return "\n".join(f"- {name}: {desc}" for name, desc in guidance.items())
 
 
 def _clamp_confidence(value: object) -> float:
@@ -208,10 +280,64 @@ class AdversarialAgent(BaseAgent):
         ]
         return max(verdicts, key=lambda v: v.confidence)
 
+    def _fixed_policy_fields(self) -> str:
+        """List the policy fields the user pinned in the config."""
+        fixed = []
+        if self.config.detection.engine:
+            fixed.append(f"detection engine ({self.config.detection.engine.value})")
+        if self.config.detection.confidence_threshold is not None:
+            fixed.append(
+                f"confidence threshold ({self.config.detection.confidence_threshold})"
+            )
+        if self.config.sanitization.strategy:
+            fixed.append(
+                f"sanitization strategy ({self.config.sanitization.strategy.value})"
+            )
+        return "; ".join(fixed) or "none"
+
+    def recommend(
+        self,
+        policy: PrivacyPolicy,
+        context: str,
+        verdict: LeakageVerdict,
+        previous_reports: List[str],
+    ) -> Optional[str]:
+        """Write the remediation report for a leaking verdict, or None on failure."""
+        predictor = _build_remediation_predictor()
+        try:
+            with dspy.context(lm=self._ensure_dspy_lm()):
+                prediction = predictor(
+                    context=context,
+                    attack=_VECTOR_GUIDANCE[verdict.vector] if verdict.vector else "",
+                    entity_type=verdict.entity_type or "NONE",
+                    evidence=verdict.evidence,
+                    current_policy=_describe_policy(policy),
+                    engine_guidance=_format_guidance(DETECTION_GUIDANCE),
+                    strategy_guidance=_format_guidance(SANITIZATION_GUIDANCE),
+                    param_guidance=_format_guidance(DETECTION_PARAM_GUIDANCE),
+                    fixed_fields=self._fixed_policy_fields(),
+                    previous_reports="\n---\n".join(previous_reports) or "none",
+                )
+        except Exception as e:
+            logger.warning("Remediation report failed (%s), escalating without one", e)
+            return None
+        report = str(getattr(prediction, "recommendation", "")).strip()
+        return report or None
+
     def _node(self, state: PrivacyState) -> PrivacyState:
-        """Graph node: write the leakage verdict and the safety flag to state."""
+        """Graph node: write the verdict (with its report on a leak) and the safety flag."""
         policy = state.get("policy")
         if policy is None:
             raise ValueError("AdversarialAgent requires 'policy' in the state.")
-        verdict = self.probe(policy, list(state.get("sanitized_chunks", [])))
+        chunks = list(state.get("sanitized_chunks", []))
+        verdict = self.probe(policy, chunks)
+        if verdict.leaked:
+            previous = [
+                r.report
+                for r in state.get("escalation_log", [])
+                if r.report and not r.from_human_feedback
+            ]
+            context = "\n\n".join(c for c in chunks if c).strip()
+            report = self.recommend(policy, context, verdict, previous)
+            verdict = replace(verdict, recommendation=report)
         return PrivacyState(verdict=verdict, safe=not verdict.leaked)

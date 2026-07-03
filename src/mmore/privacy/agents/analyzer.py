@@ -30,7 +30,7 @@ from ..detection.constants import (
 )
 from ..domains.profile import DOMAIN_PROFILES, get_domain_profile
 from ..dspy_llm import build_dspy_lm
-from ..escalation import apply_entity_guidance, escalate_policy
+from ..escalation import apply_entity_guidance
 from ..leakage import EscalationRecord
 from ..policy import PrivacyPolicy
 from ..sanitization.constants import SANITIZATION_GUIDANCE, SANITIZATION_TOOL_NAMES
@@ -71,26 +71,19 @@ _LABEL_EXPAND_INSTRUCTION = (
     "Return an empty list if the current set already covers everything."
 )
 
-_LEAK_LABEL_EXPAND_INSTRUCTION = (
-    "A leakage adversary recovered or inferred a protected identifier from the "
-    "sanitized context via the described attack. Propose additional "
-    "sensitive-entity labels that would catch this identifier and related "
-    "quasi-identifiers on the next detection pass, beyond the current set. "
-    "Return them as uppercase identifiers like GPS_COORDINATES, RARE_DIAGNOSIS, "
-    "JOB_TITLE. Return an empty list if the current set already covers it."
-)
-
 _FEEDBACK_LABEL_EXPAND_INSTRUCTION = (
-    "A human reviewer rejected the sanitized context and gave the feedback "
-    "below. Propose additional sensitive-entity labels that act on that "
-    "feedback, beyond the current set. Return them as uppercase identifiers "
-    "like GPS_COORDINATES, RARE_DIAGNOSIS, JOB_TITLE. Return an empty list if "
-    "the current set already covers the feedback."
+    "A reviewer (the human at the gate or the leakage adversary) rejected the "
+    "sanitized context and gave the feedback below. Propose additional "
+    "sensitive-entity labels that act on that feedback, beyond the current "
+    "set. Return them as uppercase identifiers like GPS_COORDINATES, "
+    "RARE_DIAGNOSIS, JOB_TITLE. Return an empty list if the current set "
+    "already covers the feedback."
 )
 
 _FEEDBACK_POLICY_INSTRUCTION = (
-    "A human reviewer gave the feedback below. Decide whether it calls for a "
-    "different detection engine or sanitization strategy, either by naming one "
+    "A reviewer (the human at the gate or the leakage adversary) gave the "
+    "feedback below. Decide whether it calls for a different detection engine, "
+    "sanitization strategy, or detection threshold level, either by naming one "
     "explicitly or by describing what they want (use the guidance to map the "
     "description to the best fitting option). Return the chosen value from the "
     "available options, or 'keep' for a field the feedback does not affect."
@@ -113,16 +106,19 @@ _ADDITIONAL_ENTITIES_DESC = (
     "JSON array of uppercase identifier strings, e.g. "
     '["PASSPORT_NUMBER", "BANK_ACCOUNT"]. Empty array if nothing extra is needed.'
 )
-_LEAK_VECTOR_DESC = "the attack vector that leaked, e.g. quasi_identifier"
-_LEAK_ENTITY_TYPE_DESC = "the entity type the adversary recovered, or NONE"
-_LEAK_EVIDENCE_DESC = "the adversary's justification for the leak (PII-free)"
-_HUMAN_FEEDBACK_DESC = "the human reviewer's free-text guidance at the gate"
+_FEEDBACK_DESC = (
+    "the reviewer's free-text guidance: human gate feedback or the adversary's "
+    "remediation report"
+)
 _STRATEGY_GUIDANCE_DESC = "per-strategy guidance: what each sanitization strategy does"
 _AVAILABLE_ENGINES_DESC = "the detection engines you may choose from"
 _AVAILABLE_STRATEGIES_DESC = "the sanitization strategies you may choose from"
 _REQUESTED_ENGINE_DESC = "one of the available engines, or 'keep' to leave it unchanged"
 _REQUESTED_STRATEGY_DESC = (
     "one of the available strategies, or 'keep' to leave it unchanged"
+)
+_REQUESTED_THRESHOLD_DESC = (
+    "one of: low, medium, high, or 'keep' to leave the detection threshold unchanged"
 )
 
 _MAX_ADDITIONAL_ENTITIES = 8
@@ -158,32 +154,23 @@ class _LabelExpandSignature(dspy.Signature):
     additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
 
 
-class _LeakLabelExpandSignature(dspy.Signature):
-    query: str = dspy.InputField(desc=_QUERY_DESC)
-    context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
-    leak_vector: str = dspy.InputField(desc=_LEAK_VECTOR_DESC)
-    leak_entity_type: str = dspy.InputField(desc=_LEAK_ENTITY_TYPE_DESC)
-    leak_evidence: str = dspy.InputField(desc=_LEAK_EVIDENCE_DESC)
-    additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
-
-
 class _FeedbackLabelExpandSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
     current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
-    human_feedback: str = dspy.InputField(desc=_HUMAN_FEEDBACK_DESC)
+    feedback: str = dspy.InputField(desc=_FEEDBACK_DESC)
     additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
 
 
 class _FeedbackPolicySignature(dspy.Signature):
-    human_feedback: str = dspy.InputField(desc=_HUMAN_FEEDBACK_DESC)
+    feedback: str = dspy.InputField(desc=_FEEDBACK_DESC)
     engine_guidance: str = dspy.InputField(desc=_DETECTION_GUIDANCE_DESC)
     strategy_guidance: str = dspy.InputField(desc=_STRATEGY_GUIDANCE_DESC)
     available_engines: List[str] = dspy.InputField(desc=_AVAILABLE_ENGINES_DESC)
     available_strategies: List[str] = dspy.InputField(desc=_AVAILABLE_STRATEGIES_DESC)
     requested_engine: str = dspy.OutputField(desc=_REQUESTED_ENGINE_DESC)
     requested_strategy: str = dspy.OutputField(desc=_REQUESTED_STRATEGY_DESC)
+    requested_threshold: str = dspy.OutputField(desc=_REQUESTED_THRESHOLD_DESC)
 
 
 class _PresidioParamsSignature(dspy.Signature):
@@ -256,12 +243,6 @@ def _build_label_expansion_predictor() -> dspy.Predict:
     )
 
 
-def _build_leak_label_expansion_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _LeakLabelExpandSignature.with_instructions(_LEAK_LABEL_EXPAND_INSTRUCTION)
-    )
-
-
 def _build_feedback_label_expansion_predictor() -> dspy.Predict:
     return dspy.Predict(
         _FeedbackLabelExpandSignature.with_instructions(
@@ -303,6 +284,23 @@ def _build_param_predictor(engine: str) -> dspy.Predict | None:
     if sig is None:
         return None
     return dspy.Predict(sig.with_instructions(_PARAM_SELECT_INSTRUCTION))
+
+
+def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
+    """Short escalation-log label for what the guidance actually changed."""
+    changes: List[str] = []
+    if new.detection_engine != old.detection_engine:
+        changes.append(f"engine->{new.detection_engine}")
+    if new.sanitization_strategy != old.sanitization_strategy:
+        changes.append(f"strategy->{new.sanitization_strategy}")
+    old_threshold = old.detection_params.get("confidence_threshold")
+    new_threshold = new.detection_params.get("confidence_threshold")
+    if new_threshold != old_threshold:
+        changes.append(f"threshold->{new_threshold}")
+    added_labels = len(new.sensitive_entities) - len(old.sensitive_entities)
+    if added_labels:
+        changes.append(f"+{added_labels}_labels")
+    return " ".join(changes) if changes else "note_only"
 
 
 def _format_engine_guidance() -> str:
@@ -446,41 +444,10 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             getattr(prediction, "additional_entities", None), current
         )
 
-    def _expand_labels_for_leak(
-        self, state: PrivacyState, policy: PrivacyPolicy
-    ) -> List[str]:
-        """Propose leak-targeted sensitive labels via DSPy, biased by the verdict."""
-        if self._llm_config is None:
-            return []
-        verdict = state.get("verdict")
-        if verdict is None or not verdict.leaked:
-            return []
-        current = list(policy.sensitive_entities)
-        self._ensure_dspy_lm()
-        predictor = _build_leak_label_expansion_predictor()
-        try:
-            with dspy.context(lm=self._dspy_lm, adapter=dspy.JSONAdapter()):
-                prediction = predictor(
-                    query=state.get("query", ""),
-                    context="\n\n".join(state.get("raw_chunks", [])),
-                    current_entities=current,
-                    leak_vector=verdict.vector if verdict.vector else "none",
-                    leak_entity_type=verdict.entity_type,
-                    leak_evidence=verdict.evidence,
-                )
-        except Exception as e:
-            logger.warning(
-                "Leak-targeted label expansion failed (%s), using fallback list", e
-            )
-            return []
-        return _sanitize_label_additions(
-            getattr(prediction, "additional_entities", None), current
-        )
-
     def _expand_labels_from_feedback(
         self, state: PrivacyState, policy: PrivacyPolicy, feedback: str
     ) -> List[str]:
-        """Propose sensitive labels that act on the human's gate feedback."""
+        """Propose sensitive labels that act on the reviewer's guidance."""
         if self._llm_config is None or not feedback:
             return []
         current = list(policy.sensitive_entities)
@@ -492,7 +459,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
                     query=state.get("query", ""),
                     context="\n\n".join(state.get("raw_chunks", [])),
                     current_entities=current,
-                    human_feedback=feedback,
+                    feedback=feedback,
                 )
         except Exception as e:
             logger.warning("Feedback-driven label expansion failed (%s)", e)
@@ -502,10 +469,9 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         )
 
     def _apply_feedback_overrides(
-        self, policy: PrivacyPolicy, feedback: str
+        self, policy: PrivacyPolicy, feedback: str, respect_config_pins: bool
     ) -> PrivacyPolicy:
-        """Switch the detection engine / sanitization strategy when the human
-        feedback names or describes one, otherwise leave the policy as-is."""
+        """Switch engine/strategy/threshold per the guidance; pins bind the adversary only."""
         if self._llm_config is None or not feedback:
             return policy
         self._ensure_dspy_lm()
@@ -513,7 +479,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         try:
             with dspy.context(lm=self._dspy_lm):
                 prediction = predictor(
-                    human_feedback=feedback,
+                    feedback=feedback,
                     engine_guidance=_format_engine_guidance(),
                     strategy_guidance=_format_strategy_guidance(),
                     available_engines=list(DETECTION_TOOL_NAMES),
@@ -524,11 +490,22 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             return policy
         engine = str(getattr(prediction, "requested_engine", "")).strip().lower()
         strategy = str(getattr(prediction, "requested_strategy", "")).strip().lower()
-        updates: Dict[str, str] = {}
-        if engine in DETECTION_TOOL_NAMES:
+        threshold = str(getattr(prediction, "requested_threshold", "")).strip().lower()
+        engine_pinned = respect_config_pins and self.config.detection.engine
+        strategy_pinned = respect_config_pins and self.config.sanitization.strategy
+        threshold_pinned = (
+            respect_config_pins
+            and self.config.detection.confidence_threshold is not None
+        )
+        updates: Dict[str, object] = {}
+        if engine in DETECTION_TOOL_NAMES and not engine_pinned:
             updates["detection_engine"] = engine
-        if strategy in SANITIZATION_TOOL_NAMES:
+        if strategy in SANITIZATION_TOOL_NAMES and not strategy_pinned:
             updates["sanitization_strategy"] = strategy
+        if threshold in THRESHOLD_LEVELS and not threshold_pinned:
+            params = dict(policy.detection_params)
+            params["confidence_threshold"] = THRESHOLD_LEVELS[threshold]
+            updates["detection_params"] = params
         return replace(policy, **updates) if updates else policy
 
     def _select_params(
@@ -607,45 +584,63 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             sanitizer_system_prompt=profile.sanitizer_system_prompt,
         )
 
+    def _apply_guidance(
+        self,
+        state: PrivacyState,
+        policy: PrivacyPolicy,
+        guidance: str,
+        note_label: str,
+        respect_config_pins: bool,
+    ) -> PrivacyPolicy:
+        """Act on a reviewer's guidance text; note-only hardening without one."""
+        if not guidance:
+            return apply_entity_guidance(policy)
+        extra_entities = self._expand_labels_from_feedback(state, policy, guidance)
+        new_policy = apply_entity_guidance(
+            policy, extra_entities or None, guidance, note_label=note_label
+        )
+        return self._apply_feedback_overrides(new_policy, guidance, respect_config_pins)
+
     def _escalate(self, state: PrivacyState, policy: PrivacyPolicy) -> PrivacyState:
-        """Re-entry path: adjust the policy after a leak or a gate rejection."""
+        """Re-entry path: harden the policy from the adversary report or gate feedback."""
         iteration = state.get("iteration", 0)
         leak_iterations = state.get("leak_iterations", 0)
         verdict = state.get("verdict")
-        feedback = state.get("human_feedback")
         trigger_vector, trigger_entity = None, None
-        label, from_human_feedback = None, False
+        from_human_feedback = False
         if verdict is not None and verdict.leaked:
-            # Automatic leak escalation with ladder
-            extra_entities = self._expand_labels_for_leak(state, policy)
-            new_policy, label = escalate_policy(
-                policy, iteration, extra_entities or None
+            report = (verdict.recommendation or "").strip()
+            new_policy = self._apply_guidance(
+                state,
+                policy,
+                report,
+                note_label="Adversary guidance",
+                respect_config_pins=True,
             )
             trigger_vector, trigger_entity = verdict.vector, verdict.entity_type
             leak_iterations += 1  # only leak escalations count toward the budget
-        elif state.get("approved") is False and feedback:
-            # Human revise with guidance: apply exactly what they asked, no ladder
-            extra_entities = self._expand_labels_from_feedback(state, policy, feedback)
-            new_policy = apply_entity_guidance(policy, extra_entities or None, feedback)
-            new_policy = self._apply_feedback_overrides(new_policy, feedback)
-            from_human_feedback = True
         elif state.get("approved") is False:
-            # Human revise without guidance: use the ladder
-            new_policy, label = escalate_policy(policy, iteration)
+            report = (state.get("human_feedback") or "").strip()
+            new_policy = self._apply_guidance(
+                state,
+                policy,
+                report,
+                note_label="Human guidance",
+                respect_config_pins=False,
+            )
+            from_human_feedback = bool(report)
         else:
             raise ValueError("escalate called without a leak or rejection")
+        label = _describe_policy_changes(policy, new_policy)
         record = EscalationRecord(
             iteration=iteration + 1,
             escalation=label,
             from_human_feedback=from_human_feedback,
             vector=trigger_vector,
             entity_type=trigger_entity,
+            report=report or None,
         )
-        logger.info(
-            "Policy escalation %d: %s",
-            iteration + 1,
-            "human feedback" if from_human_feedback else label,
-        )
+        logger.info("Policy escalation %d: %s", iteration + 1, label)
         return PrivacyState(
             policy=new_policy,
             iteration=iteration + 1,
