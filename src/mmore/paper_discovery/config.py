@@ -33,7 +33,10 @@ class PaperDiscoveryConfig:
                                lists of canonical `word`s from the
                                synonym file.
       sources:                 Which source adapters to enable.
-      output_file:             Where to write the final papers.json.
+      output_file:             Where to write the final JSONL of
+                               `Paper` records (one paper per line).
+                               Convention: end the filename in
+                               `.jsonl`.
       download_pdfs:           If True, download PDFs and extract text.
       pdf_dir:                 Directory under which downloaded PDFs are
                                cached.
@@ -78,10 +81,10 @@ class PaperDiscoveryConfig:
                                    fast.
       force_redownload:        If True, ignore the on-disk PDF cache.
       multimodal_output_file:  Optional path. If set, in addition to
-                               the plain `papers.json`, the pipeline
-                               also writes a JSONL of
-                               `MultimodalSample` records (mmore's
-                               canonical processed-document shape).
+                               the `papers.jsonl` output, the pipeline
+                               also writes a JSONL of `MultimodalSample`
+                               records (mmore's canonical
+                               processed-document shape).
                                That file plugs directly into
                                `mmore process` post-processing,
                                `mmore index`, and the RAG pipeline

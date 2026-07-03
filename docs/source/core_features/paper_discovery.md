@@ -43,7 +43,7 @@ Stage 1: build boolean queries (pure, offline)
 Stage 2: fetch from each source, dedupe, optionally download PDFs
         │
         ▼
-   papers.json
+   papers.jsonl
 ```
 
 Stage 1 doesn't touch the network — it just turns your synonyms + categories into search queries. Stage 2 is where everything network-related happens: hitting each source, respecting their rate limits, downloading PDFs, retrying when things go wrong.
@@ -98,20 +98,13 @@ Press **Ctrl+C** at any time — the pipeline catches the interrupt and writes w
 
 ## 📦 Output
 
-A JSON array of `Paper` records:
+A JSONL file — one `Paper` record per line. Example line:
 
 ```json
-{
-  "title": "A foundation model for humanitarian response",
-  "authors": "Ada Lovelace, Alan Turing",
-  "url": "https://arxiv.org/pdf/2401.00001.pdf",
-  "abstract": "We introduce …",
-  "year": 2024,
-  "extracted_text": "<full PDF text>",
-  "source": "arxiv",
-  "search_category": "Humanitarian AI Search"
-}
+{"title": "A foundation model for humanitarian response", "authors": "Ada Lovelace, Alan Turing", "url": "https://arxiv.org/pdf/2401.00001.pdf", "abstract": "We introduce …", "year": 2024, "extracted_text": "<full PDF text>", "source": "arxiv", "search_category": "Humanitarian AI Search"}
 ```
+
+Line-per-record makes the file streamable (read one paper at a time), diff-friendly, and easy to append to. Any JSONL-aware tool (`jq`, `pandas.read_json(lines=True)`, mmore's `MultimodalSample.from_jsonl`) can consume it directly.
 
 Fields are **nullable on purpose** — sources differ in what they return. `null` means "we don't know."
 
@@ -217,7 +210,7 @@ Every paper is converted to a `MultimodalSample`:
 - **`metadata.processor_type`** — always `"paper_discovery"`, so downstream filters can recognise the source.
 - **`metadata.extra`** — carries the paper-specific fields (title, authors, year, source, url, search_category, abstract).
 
-The resulting JSONL is a drop-in input for the post-process, index, and RAG pipelines. `papers.json` is still written the same way for anyone who was already consuming it.
+The resulting JSONL is a drop-in input for the post-process, index, and RAG pipelines. The default `papers.jsonl` output is still written the same way alongside it.
 
 ## 🐍 Programmatic use
 

@@ -6,7 +6,7 @@ synonyms_path: examples/paper_discovery/synonyms.jsonl
 # sets without touching the rest of the pipeline config.
 categories_path: examples/paper_discovery/categories.yaml
 
-output_file: examples/paper_discovery/papers.json
+output_file: examples/paper_discovery/papers.jsonl
 pdf_dir: examples/paper_discovery/pdf_cache
 
 # Optional. If set, the pipeline ALSO writes results as JSONL of

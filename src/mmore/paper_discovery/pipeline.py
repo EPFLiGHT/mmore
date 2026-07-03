@@ -180,8 +180,9 @@ class PaperDiscoveryPipeline:
         cfg = self.config
         out_path = Path(cfg.output_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
-        data = [p.to_dict() for p in papers]
-        out_path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        with open(out_path, "w", encoding="utf-8") as f:
+            for paper in papers:
+                f.write(json.dumps(paper.to_dict(), ensure_ascii=False) + "\n")
         logger.info("Wrote %d papers to %s", len(papers), out_path)
 
         if cfg.multimodal_output_file:
