@@ -552,7 +552,7 @@ class WebsearchPipeline:
         bar = progress(total=len(data), desc="Web search", unit="")
         for i, rec in enumerate(data, 1):
             question = str(rec.get("input", ""))
-            bar.print_above(f"[{Color.BRAND}]Q{i}/{len(data)}[/] {escape(question)}")
+            bar.print_above(f"[{Color.MMORE}]Q{i}/{len(data)}[/] {escape(question)}")
             outputs.append(
                 self.process_record(
                     rec,

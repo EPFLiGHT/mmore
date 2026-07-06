@@ -15,33 +15,31 @@ from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
+from mmore.ux import DECORATION, Color
+
 console = Console()
 
-# Palette
-BRAND = "#f7cb46"
-ACCENT = "bright_cyan"
-ACCENT2 = "magenta"
-MUTED = "grey58"
-OK = "bold green"
-WARN = "yellow"
-ERR = "bold red"
+# Role styles derived from the shared palette (mmore.ux.Color)
+ACCENT = Color.ACCENT
+ACCENT2 = Color.ACCENT2
+MUTED = Color.GRAY
+OK = f"bold {Color.GREEN}"
+WARN = str(Color.YELLOW)
+ERR = f"bold {Color.RED}"
 
 QSTYLE = Style(
     [
-        ("qmark", "fg:#5fd7ff bold"),
+        ("qmark", f"fg:{ACCENT} bold"),
         ("question", "bold"),
-        ("answer", f"fg:{BRAND} bold"),
-        ("pointer", "fg:#5fd7ff bold"),
-        ("highlighted", "fg:#5fd7ff bold"),
-        ("selected", f"fg:{BRAND}"),
-        ("instruction", "fg:#808080 italic"),
-        ("disabled", "fg:#ffaf00 italic"),
+        ("answer", f"fg:{Color.MMORE} bold"),
+        ("pointer", f"fg:{ACCENT} bold"),
+        ("highlighted", f"fg:{ACCENT} bold"),
+        ("selected", f"fg:{Color.MMORE}"),
+        ("instruction", f"fg:{MUTED} italic"),
+        ("disabled", f"fg:{Color.ORANGE} italic"),
     ]
 )
 QMARK = "▸"
-
-# Strip the leading decoration (emoji, ★, ▶ ...) up to the first word/path char
-_DECORATION = re.compile(r"^[^\w/~.]+\s*")
 
 
 def _choice_title(value: Any, choices: Sequence[Any]) -> str:
@@ -63,7 +61,7 @@ def _choice_title(value: Any, choices: Sequence[Any]) -> str:
 def _clean_answer(title: str) -> str:
     """Reduce a menu label to a compact text."""
     text = re.sub(r"\s{2,}", " ", title.strip())
-    text = _DECORATION.sub("", text)
+    text = DECORATION.sub("", text)
     text = re.sub(r"\s*\(recommended\)$", "", text)
     home = str(Path.home())
     if text.startswith(home):
@@ -93,7 +91,7 @@ def select(
             answer = _clean_answer(_choice_title(value, choices))
         console.print(
             f"[{ACCENT}]{QMARK}[/] [bold]{escape(question)}[/] "
-            f"[bold {BRAND}]{escape(answer)}[/]"
+            f"[bold {Color.MMORE}]{escape(answer)}[/]"
         )
     return value
 
@@ -138,7 +136,7 @@ def _mmore_logo(text: str) -> Text:
                     out.append(ch)
 
         _emit(left)
-        out.append(mid, style=f"bold {BRAND}")
+        out.append(mid, style=f"bold {Color.MMORE}")
         _emit(right)
         out.append("\n")
     return out

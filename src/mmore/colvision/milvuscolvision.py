@@ -7,7 +7,7 @@ import numpy as np
 import pandas as pd
 from pymilvus import DataType, MilvusClient
 
-from ..ux import is_verbose, progress
+from ..ux import progress
 
 logger = logging.getLogger(__name__)
 
@@ -231,7 +231,6 @@ class MilvusColvisionManager:
                 concurrent.futures.as_completed(futures),
                 total=len(futures),
                 desc="Reranking",
-                disable=not is_verbose(),
             ):
                 try:
                     score, pdf_path, page_number = f.result()

@@ -5,6 +5,7 @@ import itertools
 import logging
 import os
 import random
+import re
 import sys
 import threading
 import time
@@ -39,6 +40,9 @@ PROCESS_EMOJI = "🚀"
 
 # Set MMORE_VERBOSE=1 to unquiet everything
 VERBOSE_ENV = "MMORE_VERBOSE"
+
+# Strip the leading decoration (emoji, ★, ▶ ...) up to the first word/path char
+DECORATION = re.compile(r"^[^\w/~.]+\s*")
 
 # Third-party loggers names
 _NOISY_LIBS = [
@@ -124,11 +128,14 @@ def init_worker(name: str = PROCESS_NAME, emoji: str = PROCESS_EMOJI) -> None:
 
 
 class Color(StrEnum):
-    BRAND = "#f7cb46"  # TODO: change once Malo finishes the new logo
+    MMORE = "#f7cb46"  # TODO: change once Malo finishes the new logo
+    ACCENT = "#5fd7ff"
+    ACCENT2 = "#ff79c6"
     RED = "#ff5555"
     GREEN = "#50fa7b"
     YELLOW = "#f1fa8c"
     BLUE = "#6cb6ff"
+    ORANGE = "#ffaf00"
     GRAY = "#888888"
 
 
@@ -161,7 +168,7 @@ def str_green(text: str | int, bold: bool = False) -> str:
 
 
 def str_brand(text: str | int, bold: bool = False) -> str:
-    return str_in_color(text, Color.BRAND, bold=bold)
+    return str_in_color(text, Color.MMORE, bold=bold)
 
 
 # --------------------------------- Spinner --------------------------------- #
@@ -223,7 +230,7 @@ class Spinner:
                 word = random.choice(SPINNER_WORDS)
                 word_start = now
             status = f"{next(frames)} {word}... ({int(now - start)}s)"
-            sys.stdout.write(f"\r\033[K{str_in_color(status, Color.BRAND)}")
+            sys.stdout.write(f"\r\033[K{str_in_color(status, Color.MMORE)}")
             sys.stdout.flush()
             time.sleep(0.1)
 
@@ -263,12 +270,12 @@ def _console() -> Console:
         _CONSOLE = Console(
             theme=Theme(
                 {
-                    "bar.complete": Color.BRAND,
-                    "bar.finished": Color.BRAND,
-                    "bar.pulse": Color.BRAND,
+                    "bar.complete": Color.MMORE,
+                    "bar.finished": Color.MMORE,
+                    "bar.pulse": Color.MMORE,
                     "bar.back": "grey30",
-                    "progress.percentage": f"bold {Color.BRAND}",
-                    "progress.download": "grey58",
+                    "progress.percentage": f"bold {Color.MMORE}",
+                    "progress.download": Color.GRAY,
                     "progress.elapsed": "grey46",
                 }
             )
@@ -287,9 +294,9 @@ def step_intro(
     setup_logging(step, emoji)
     _INTRO_FIELDS[step] = list(fields) if fields else []
 
-    line = f"[bold {Color.BRAND}]▸ {escape(step)} {emoji}[/]  {escape(about)}"
+    line = f"[bold {Color.MMORE}]▸ {escape(step)} {emoji}[/]  {escape(about)}"
     if fields:
-        line += f" [dim]·[/] [{Color.BRAND}]{escape(fields[0])}[/]"
+        line += f" [dim]·[/] [{Color.MMORE}]{escape(fields[0])}[/]"
     _console().print(line)
 
 
@@ -320,7 +327,7 @@ def step_summary(
             table,
             title=f"[bold]mmore[/] ▸ {step} {emoji} · done in {elapsed:.1f}s",
             title_align="left",
-            border_style=Color.BRAND,
+            border_style=Color.MMORE,
             expand=False,
         )
     )
@@ -336,9 +343,9 @@ def _ensure_progress() -> Progress:
     global _PROGRESS
     if _PROGRESS is None:
         _PROGRESS = Progress(
-            SpinnerColumn(style=Color.BRAND),
+            SpinnerColumn(style=Color.MMORE),
             TextColumn("{task.description}"),
-            BarColumn(complete_style=Color.BRAND, finished_style=Color.BRAND),
+            BarColumn(complete_style=Color.MMORE, finished_style=Color.MMORE),
             MofNCompleteColumn(),
             TextColumn("[dim]{task.fields[unit]}"),
             TaskProgressColumn(),

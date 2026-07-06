@@ -13,7 +13,7 @@ from rich.text import Text
 
 from mmore.tui.commands import REGISTRY, check_stage_available
 from mmore.tui.config_builder import _ask, _confirm, _prompt, _select
-from mmore.tui.theme import ACCENT, ACCENT2, MUTED, OK, QMARK, QSTYLE, console
+from mmore.tui.theme import ACCENT, ACCENT2, ERR, MUTED, OK, QMARK, QSTYLE, console
 
 # ---------------------------------------------------------------------------
 # Stage → extras mapping
@@ -28,7 +28,6 @@ _STAGE_EXTRAS: dict[str, list[str]] = {
     "websearch": ["websearch"],
     "colvision-process": ["colvision"],
     "colvision-index": ["colvision"],
-    "colvision-retrieve": ["colvision", "api"],
 }
 
 _COMPUTE_EXTRAS = [
@@ -134,7 +133,7 @@ def _install_deps(stages: list[str], compute: str) -> bool:
     if result.returncode == 0:
         console.print(f"  [{OK}]✓[/] Dependencies installed successfully")
         return True
-    console.print("  [bold red]✗[/] Installation failed — check output above")
+    console.print(f"  [{ERR}]✗[/] Installation failed — check output above")
     return False
 
 

@@ -26,7 +26,17 @@ from rich.text import Text
 from mmore.tui.commands import CommandSpec
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default, repo_root, resolve_example
-from mmore.tui.theme import ACCENT, ACCENT2, QMARK, QSTYLE, console, section, select
+from mmore.tui.theme import (
+    ACCENT,
+    ACCENT2,
+    ERR,
+    QMARK,
+    QSTYLE,
+    console,
+    section,
+    select,
+)
+from mmore.ux import Color
 
 
 def _ask(prompt_obj: Any) -> Any:
@@ -692,7 +702,7 @@ def _validate_with_spinner(path: str, spec: CommandSpec) -> Optional[str]:
     can take several seconds (heavy transitive imports), making the TUI look
     frozen otherwise."""
     spinner = Spinner(
-        "dots", text=Text(f"  Validating {spec.name} config…", style="cyan")
+        "dots", text=Text(f"  Validating {spec.name} config…", style=ACCENT)
     )
     result: dict[str, Optional[str]] = {}
     with Live(spinner, console=console, refresh_per_second=12, transient=True):
@@ -705,10 +715,10 @@ def _show_error_panel(path: str, err: str) -> None:
         Panel(
             Text.assemble(
                 (f"{path}\n\n", "bold"),
-                (err, "red"),
+                (err, str(Color.RED)),
             ),
-            title="[bold red]invalid config[/]",
-            border_style="red",
+            title=f"[{ERR}]invalid config[/]",
+            border_style=Color.RED,
             padding=(1, 2),
         )
     )

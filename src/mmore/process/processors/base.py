@@ -220,16 +220,15 @@ class Processor(ABC):
         """Run process_func over files on the pool, updating one progress line
         with the current file."""
         results = []
-        bar = progress(total=len(files_paths), desc=step, unit="file")
-        if files_paths:
-            bar.set_postfix_str(os.path.basename(files_paths[0]))
-        for i, res in enumerate(pool.imap(process_func, files_paths)):
-            results.append(res)
-            bar.update(1)
-            # Once all files processed we don't show names next to the progress bars
-            if i + 1 < len(files_paths):
-                bar.set_postfix_str(os.path.basename(files_paths[i + 1]))
-        bar.close()
+        with progress(total=len(files_paths), desc=step, unit="file") as bar:
+            if files_paths:
+                bar.set_postfix_str(os.path.basename(files_paths[0]))
+            for i, res in enumerate(pool.imap(process_func, files_paths)):
+                results.append(res)
+                bar.update(1)
+                # Once all files processed we don't show names next to the progress bars
+                if i + 1 < len(files_paths):
+                    bar.set_postfix_str(os.path.basename(files_paths[i + 1]))
         return results
 
     def __del__(self):

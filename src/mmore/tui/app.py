@@ -19,9 +19,11 @@ from mmore.tui.pipeline import run_full_pipeline, run_pipeline_with_configs
 from mmore.tui.theme import (
     ACCENT,
     ACCENT2,
+    ERR,
     MUTED,
     QMARK,
     QSTYLE,
+    WARN,
     console,
     run_step,
     section,
@@ -59,10 +61,10 @@ def _show_missing_extras(spec_name: str, hint: str) -> None:
         Panel(
             Text.assemble(
                 (f"Stage `{spec_name}` can't run.\n\n", "bold"),
-                (hint, "yellow"),
+                (hint, WARN),
             ),
-            title="[bold yellow]missing dependencies[/]",
-            border_style="yellow",
+            title=f"[bold {WARN}]missing dependencies[/]",
+            border_style=WARN,
             padding=(1, 2),
         )
     )
@@ -85,13 +87,13 @@ def _missing_extras_notice() -> Panel | None:
         if i > 0:
             body.append("\n")
         body.append(", ".join(stages), style="bold white")
-        body.append("  →  ", style="yellow")
-        body.append(cmd, style="cyan")
+        body.append("  →  ", style=WARN)
+        body.append(cmd, style=ACCENT)
 
     return Panel(
         body,
-        title="[bold yellow]⚠  missing extras[/]",
-        border_style="yellow",
+        title=f"[bold {WARN}]⚠  missing extras[/]",
+        border_style=WARN,
         padding=(0, 1),
     )
 
@@ -159,7 +161,7 @@ def _run_spec(name: str) -> None:
             return
         kwargs["input_data"] = input_data
 
-    interactive = name in {"ragcli", "rag", "colvision-retrieve"}
+    interactive = name in {"ragcli", "rag"}
     if interactive:
         spec.run(**kwargs)
     else:
@@ -246,7 +248,7 @@ def _main_menu() -> str | None:
     pipeline_label = "🚀 Run full pipeline  (process → postprocess → index)"
     wizard_label = "🧙 Build a full pipeline config (guided wizard)"
     chat_label = "💬 Chat with indexed documents"
-    colvision_label = "🖼  ColVision  (process → index → retrieve)"
+    colvision_label = "🖼  ColVision"
 
     pipeline_choice = questionary.Choice(
         _disabled_label(pipeline_label) if pipeline_hint else pipeline_label,
@@ -272,7 +274,7 @@ def _main_menu() -> str | None:
     return select(
         "What do you want to do?",
         choices=[
-            questionary.Separator("Default pipeline (text-based) ──"),
+            questionary.Separator("Default pipeline ──"),
             questionary.Choice("🟢 Run a single command", value="single"),
             pipeline_choice,
             wizard_choice,
@@ -322,7 +324,7 @@ def run() -> None:
             console.print("[white]cancelled — back to menu.[/]")
             continue
         except Exception as e:  # noqa: BLE001
-            console.print(f"[bold red]error:[/] {e}")
+            console.print(f"[{ERR}]error:[/] {e}")
             try:
                 cont = questionary.confirm(
                     "Continue?", default=True, style=QSTYLE

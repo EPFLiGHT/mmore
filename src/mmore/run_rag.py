@@ -222,7 +222,7 @@ def rag(config_file):
         loading_start = model_loading_seconds()
         for i, query in enumerate(queries, 1):
             question = str(query.get("input", ""))
-            bar.print_above(f"[{Color.BRAND}]Q{i}/{len(queries)}[/] {escape(question)}")
+            bar.print_above(f"[{Color.MMORE}]Q{i}/{len(queries)}[/] {escape(question)}")
             results.append(
                 rag_pp.rag_chain.invoke(query, config={"callbacks": [timer]})
             )

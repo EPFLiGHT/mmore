@@ -37,7 +37,7 @@ class RagCLI:
     def launch_cli(self):
         quiet_noisy_libs(hide_info=True)
         print_in_color(
-            "Welcome to this RAG command-line interface! 🧠", Color.BRAND, bold=True
+            "Welcome to this RAG command-line interface! 🧠", Color.MMORE, bold=True
         )
         print(
             f"\nPress {str_brand('Enter', bold=True)} to start asking questions about your documents.\n"
@@ -176,7 +176,7 @@ class RagCLI:
                 )
                 return
             self.modified = False
-            print_in_color("RAG pipeline ready! Ask your questions.", Color.BRAND)
+            print_in_color("RAG pipeline ready! Ask your questions.", Color.MMORE)
         print(str_in_color("Type /bye to exit.\n", Color.GRAY))
         while True:
             query = input(str_in_color("RAG > ", Color.RED, bold=True))

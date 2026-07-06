@@ -7,6 +7,7 @@ from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.type import MultimodalSample
 from mmore.utils import load_config
 from mmore.ux import (
+    DECORATION,
     model_loading_seconds,
     quiet_noisy_libs,
     setup_logging,
@@ -41,7 +42,7 @@ def postprocess(config_file, input_data):
     if len(samples) == 0:
         logger.warning("⚠️ Found no file to postprocess")
 
-    steps = ", ".join(p.name for p in pipeline.post_processors)
+    steps = ", ".join(DECORATION.sub("", p.name) for p in pipeline.post_processors)
     step_intro(
         PP_NAME,
         PP_EMOJI,

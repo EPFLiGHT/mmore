@@ -97,12 +97,6 @@ def _colvision_index(config_file: str, **_):
     index(config_file)
 
 
-def _colvision_retrieve(config_file: str, **_):
-    from mmore.colvision.run_retriever import run_api
-
-    run_api(config_file, "0.0.0.0", 8001)
-
-
 # Lazy dataclass importers — keeps heavy deps out of TUI startup.
 def _dc_process():
     from mmore.run_process import ProcessInference
@@ -224,14 +218,5 @@ REGISTRY: dict[str, CommandSpec] = {
         config_globs=["examples/colvision/**/*.yaml", "examples/colvision/**/*.yml"],
         required_extras=["colvision", "cpu"],
         canary_imports=["colpali_engine", "pymilvus"],
-    ),
-    "colvision-retrieve": CommandSpec(
-        name="colvision-retrieve",
-        description="Run ColVision retriever API",
-        example_config="examples/colvision/config_retrieval.yml",
-        run=_colvision_retrieve,
-        config_globs=["examples/colvision/**/*.yaml", "examples/colvision/**/*.yml"],
-        required_extras=["colvision", "api", "cpu"],
-        canary_imports=["colpali_engine", "pymilvus", "fastapi"],
     ),
 }
