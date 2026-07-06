@@ -278,7 +278,8 @@ def _console() -> Console:
                     "progress.download": Color.GRAY,
                     "progress.elapsed": "grey46",
                 }
-            )
+            ),
+            highlight=False,
         )
     return _CONSOLE
 

@@ -17,7 +17,7 @@ from rich.text import Text
 
 from mmore.ux import DECORATION, Color
 
-console = Console()
+console = Console(highlight=False)
 
 # Role styles derived from the shared palette (mmore.ux.Color)
 ACCENT = Color.ACCENT
