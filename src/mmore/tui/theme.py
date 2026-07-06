@@ -2,20 +2,16 @@
 
 from __future__ import annotations
 
-import re
 import time
-from pathlib import Path
-from typing import Any, Callable, Sequence
+from typing import Any, Callable
 
-import questionary
 from questionary import Style
 from rich.align import Align
 from rich.console import Console, Group
-from rich.markup import escape
 from rich.panel import Panel
 from rich.text import Text
 
-from mmore.ux import DECORATION, Color
+from mmore.ux import Color
 
 console = Console(highlight=False)
 
@@ -40,60 +36,6 @@ QSTYLE = Style(
     ]
 )
 QMARK = "▸"
-
-
-def _choice_title(value: Any, choices: Sequence[Any]) -> str:
-    """The display title of the chosen value, joining formatted-text titles."""
-    for c in choices:
-        if isinstance(c, questionary.Choice):
-            if c.value == value:
-                title = c.title
-                if isinstance(title, str):
-                    return title
-                if title is None:
-                    return str(value)
-                return "".join(tok[1] for tok in title)
-        elif c == value:
-            return str(c)
-    return str(value)
-
-
-def _clean_answer(title: str) -> str:
-    """Reduce a menu label to a compact text."""
-    text = re.sub(r"\s{2,}", " ", title.strip())
-    text = DECORATION.sub("", text)
-    text = re.sub(r"\s*\(recommended\)$", "", text)
-    home = str(Path.home())
-    if text.startswith(home):
-        text = "~" + text[len(home) :]
-    return text.strip()
-
-
-def select(
-    question: str,
-    choices: Sequence[Any],
-    answer_labels: dict[Any, str] | None = None,
-    **kwargs: Any,
-) -> Any:
-    """Themed `questionary.select` with a uniform answer echo."""
-    value = questionary.select(
-        question,
-        choices=choices,
-        style=QSTYLE,
-        qmark=QMARK,
-        erase_when_done=True,
-        **kwargs,
-    ).ask()
-    if value is not None:
-        if answer_labels and value in answer_labels:
-            answer = answer_labels[value]
-        else:
-            answer = _clean_answer(_choice_title(value, choices))
-        console.print(
-            f"[{ACCENT}]{QMARK}[/] [bold]{escape(question)}[/] "
-            f"[bold {Color.MMORE}]{escape(answer)}[/]"
-        )
-    return value
 
 
 BANNER = r"""

@@ -204,32 +204,34 @@ def rag(config_file):
         rag_pp.retriever.pop_timings()  # reset accumulators before this run
 
         results = []
-        bar = progress(total=len(queries), desc="Answering", unit="")
-
-        stage_labels = {
-            "retrieve": "retrieving",
-            "rerank": "reranking",
-            "generate": "generating",
-        }
-        rag_pp.retriever.set_stage_callback(
-            lambda stage: bar.set_unit(stage_labels.get(stage, stage))
-        )
-        timer = BatchGenerationTimer(
-            on_generate_start=lambda: bar.set_unit(stage_labels["generate"])
-        )
-
-        start = time.time()
-        loading_start = model_loading_seconds()
-        for i, query in enumerate(queries, 1):
-            question = str(query.get("input", ""))
-            bar.print_above(f"[{Color.MMORE}]Q{i}/{len(queries)}[/] {escape(question)}")
-            results.append(
-                rag_pp.rag_chain.invoke(query, config={"callbacks": [timer]})
+        with progress(total=len(queries), desc="Answering", unit="") as bar:
+            stage_labels = {
+                "retrieve": "retrieving",
+                "rerank": "reranking",
+                "generate": "generating",
+            }
+            rag_pp.retriever.set_stage_callback(
+                lambda stage: bar.set_unit(stage_labels.get(stage, stage))
             )
-            bar.update(1)
-        rag_pp.retriever.set_stage_callback(None)
-        bar.set_unit("")
-        bar.close()
+            timer = BatchGenerationTimer(
+                on_generate_start=lambda: bar.set_unit(stage_labels["generate"])
+            )
+
+            start = time.time()
+            loading_start = model_loading_seconds()
+            try:
+                for i, query in enumerate(queries, 1):
+                    question = str(query.get("input", ""))
+                    bar.print_above(
+                        f"[{Color.MMORE}]Q{i}/{len(queries)}[/] {escape(question)}"
+                    )
+                    results.append(
+                        rag_pp.rag_chain.invoke(query, config={"callbacks": [timer]})
+                    )
+                    bar.update(1)
+            finally:
+                rag_pp.retriever.set_stage_callback(None)
+            bar.set_unit("")
 
         elapsed = time.time() - start - (model_loading_seconds() - loading_start)
         save_results(results, config_args.output_file)

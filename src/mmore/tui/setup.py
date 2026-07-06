@@ -12,7 +12,7 @@ from rich.table import Table
 from rich.text import Text
 
 from mmore.tui.commands import REGISTRY, check_stage_available
-from mmore.tui.config_builder import _ask, _confirm, _prompt, _select
+from mmore.tui.prompts import ask, confirm, prompt, select
 from mmore.tui.theme import ACCENT, ACCENT2, ERR, MUTED, OK, QMARK, QSTYLE, console
 
 # ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ def _pick_stages() -> list[str]:
             questionary.Choice(label, value=name, checked=not installed[name])
         )
 
-    selected = _ask(
+    selected = ask(
         questionary.checkbox(
             "Which stages do you want to set up?",
             choices=choices,
@@ -103,7 +103,7 @@ def _pick_compute() -> str:
         questionary.Choice(f"{name:<6} — {desc}", value=name)
         for name, desc in _COMPUTE_EXTRAS
     ]
-    return _select(
+    return select(
         "Compute backend",
         choices=choices,
         answer_labels={name: name for name, _ in _COMPUTE_EXTRAS},
@@ -167,14 +167,14 @@ def _collect_env_vars(stages: list[str]) -> dict[str, str]:
         # Check if already set in environment
         current = os.environ.get(var_name, "")
         hint = f" [dim](current: {current[:20]}…)[/dim]" if current else ""
-        value = _prompt(f"{var_name} — {description}{hint}", default=current or default)
+        value = prompt(f"{var_name} — {description}{hint}", default=current or default)
         if value:
             env_vars[var_name] = value
 
     # Optionally add profiling vars
-    if _confirm("Configure profiling settings?", default=False):
+    if confirm("Configure profiling settings?", default=False):
         for var_name, description, default in _PROFILING_VARS:
-            value = _prompt(f"{var_name} — {description}", default=default)
+            value = prompt(f"{var_name} — {description}", default=default)
             if value:
                 env_vars[var_name] = value
 
@@ -258,9 +258,9 @@ def run_setup_wizard() -> None:
             padding=(0, 2),
         )
     )
-    if _confirm("Install dependencies now?", default=True):
+    if confirm("Install dependencies now?", default=True):
         if not _install_deps(stages, compute):
-            if not _confirm(
+            if not confirm(
                 "Continue to env var setup despite install failure?", default=False
             ):
                 return

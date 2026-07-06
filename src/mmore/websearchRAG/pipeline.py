@@ -549,19 +549,20 @@ class WebsearchPipeline:
         start = time.time()
         time_loading = model_loading_seconds()
         outputs = []
-        bar = progress(total=len(data), desc="Web search", unit="")
-        for i, rec in enumerate(data, 1):
-            question = str(rec.get("input", ""))
-            bar.print_above(f"[{Color.MMORE}]Q{i}/{len(data)}[/] {escape(question)}")
-            outputs.append(
-                self.process_record(
-                    rec,
-                    on_status=bar.set_postfix_str,
-                    on_excerpt=lambda e: bar.print_above(f"   [dim]{escape(e)}[/]"),
+        with progress(total=len(data), desc="Web search", unit="") as bar:
+            for i, rec in enumerate(data, 1):
+                question = str(rec.get("input", ""))
+                bar.print_above(
+                    f"[{Color.MMORE}]Q{i}/{len(data)}[/] {escape(question)}"
                 )
-            )
-            bar.update(1)
-        bar.close()
+                outputs.append(
+                    self.process_record(
+                        rec,
+                        on_status=bar.set_postfix_str,
+                        on_excerpt=lambda e: bar.print_above(f"   [dim]{escape(e)}[/]"),
+                    )
+                )
+                bar.update(1)
 
         # save
         output_path = Path(self.config.output_file)

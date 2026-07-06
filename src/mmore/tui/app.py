@@ -16,6 +16,7 @@ from mmore.tui.config_builder import (
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default
 from mmore.tui.pipeline import run_full_pipeline, run_pipeline_with_configs
+from mmore.tui.prompts import select
 from mmore.tui.theme import (
     ACCENT,
     ACCENT2,
@@ -27,7 +28,6 @@ from mmore.tui.theme import (
     console,
     run_step,
     section,
-    select,
     show_banner,
 )
 
@@ -136,9 +136,7 @@ def _select_and_run(specs, display_name, prompt: str) -> None:
             console.print(notice)
         return
 
-    name = select(prompt, choices, answer_labels=displays)
-    if name is not None:
-        _run_spec(name)
+    _run_spec(select(prompt, choices, answer_labels=displays))
 
 
 def _run_spec(name: str) -> None:
@@ -297,10 +295,10 @@ def run() -> None:
         # cancels and returns here.
         try:
             mode = _main_menu()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, UserCancelledError):
             console.print(f"\n[{ACCENT}]bye![/]")
             return
-        if mode in (None, "quit"):
+        if mode == "quit":
             console.print(f"[{ACCENT}]bye![/]")
             return
 

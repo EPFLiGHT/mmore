@@ -126,19 +126,18 @@ class MediaProcessor(Processor):
         file_chunks = self.evenly_split_across_gpus(files_paths, len(self.devices))
 
         results = []
-        bar = progress(
+        with progress(
             total=len(files_paths), desc=self.__class__.__name__, unit="file"
-        )
-        for pipeline, chunk in zip(self.pipelines, file_chunks):
-            for file in chunk:
-                bar.set_postfix_str(os.path.basename(file))
-                try:
-                    result = self._process_file(file, pipeline, fast_mode)
-                    results.append(result)
-                except Exception as e:
-                    logger.error(f"Error processing {file}: {e}")
-                bar.update(1)
-        bar.close()
+        ) as bar:
+            for pipeline, chunk in zip(self.pipelines, file_chunks):
+                for file in chunk:
+                    bar.set_postfix_str(os.path.basename(file))
+                    try:
+                        result = self._process_file(file, pipeline, fast_mode)
+                        results.append(result)
+                    except Exception as e:
+                        logger.error(f"Error processing {file}: {e}")
+                    bar.update(1)
         return results
 
     def _process_file(self, file_path, pipeline, fast_mode):

@@ -11,13 +11,12 @@ import threading
 import time
 import warnings
 from contextlib import contextmanager
-from enum import StrEnum
 from functools import lru_cache
 from typing import Iterable, Iterator, Optional, Sized
 
 from rich.color import Color as RichColor
 from rich.color import ColorSystem
-from rich.console import Console
+from rich.console import COLOR_SYSTEMS, Console
 from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import (
@@ -127,7 +126,7 @@ def init_worker(name: str = PROCESS_NAME, emoji: str = PROCESS_EMOJI) -> None:
 # ----------------------------- Colored output ------------------------------ #
 
 
-class Color(StrEnum):
+class Color:
     MMORE = "#f7cb46"  # TODO: change once Malo finishes the new logo
     ACCENT = "#5fd7ff"
     ACCENT2 = "#ff79c6"
@@ -147,7 +146,7 @@ _BOLD = "\033[1m"
 @lru_cache(maxsize=None)
 def _ansi_for(color: str) -> str:
     """ANSI translation for a `#rrggbb` hex (cached to not recompute each time)."""
-    system = _console()._color_system or ColorSystem.STANDARD
+    system = COLOR_SYSTEMS.get(_console().color_system or "", ColorSystem.STANDARD)
     codes = RichColor.parse(color).downgrade(system).get_ansi_codes(foreground=True)
     return "\033[" + ";".join(codes) + "m"
 
@@ -348,10 +347,10 @@ def _ensure_progress() -> Progress:
             TextColumn("{task.description}"),
             BarColumn(complete_style=Color.MMORE, finished_style=Color.MMORE),
             MofNCompleteColumn(),
-            TextColumn("[dim]{task.fields[unit]}"),
+            TextColumn("{task.fields[unit]}", style="dim", markup=False),
             TaskProgressColumn(),
             TimeElapsedColumn(),
-            TextColumn("[dim]{task.fields[postfix]}"),
+            TextColumn("{task.fields[postfix]}", style="dim", markup=False),
             console=_console(),
         )
         _PROGRESS.start()
