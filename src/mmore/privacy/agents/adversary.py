@@ -31,7 +31,10 @@ from ..detection.constants import (
 from ..dspy_llm import build_dspy_lm
 from ..leakage import SAFE_VERDICT, LeakageVerdict
 from ..policy import PrivacyPolicy
-from ..sanitization.constants import SANITIZATION_GUIDANCE
+from ..sanitization.constants import (
+    PRESIDIO_OPERATOR_GUIDANCE,
+    SANITIZATION_GUIDANCE,
+)
 from .base import BaseAgent
 from .state import PrivacyState
 
@@ -121,6 +124,9 @@ _CURRENT_POLICY_DESC = (
 )
 _ENGINE_GUIDANCE_DESC = "per-engine guidance: pros, cons, and when to prefer each"
 _STRATEGY_GUIDANCE_DESC = "per-strategy guidance: what each sanitization strategy does"
+_OPERATOR_GUIDANCE_DESC = (
+    "per-operator guidance: what each presidio anonymization operator does"
+)
 _PARAM_GUIDANCE_DESC = "per-engine guidance for each tunable parameter"
 _FIXED_FIELDS_DESC = (
     "policy fields pinned by the user config that must not be changed, or 'none'"
@@ -128,19 +134,21 @@ _FIXED_FIELDS_DESC = (
 _PREVIOUS_REPORTS_DESC = "your remediation reports from earlier iterations, or 'none'"
 _RECOMMENDATION_DESC = (
     "concise PII-free remediation report for the next pass: which detection "
-    "engine, sanitization strategy, or threshold level (low/medium/high) to "
-    "use, and any sensitive-entity labels to add"
+    "engine, sanitization strategy, presidio anonymization operator, or "
+    "threshold level (low/medium/high) to use, how the rewritten text should "
+    "read, and any sensitive-entity labels to add"
 )
 
 _REMEDIATION_INSTRUCTION = (
     "You are a privacy red-team adversary reporting back to the policy analyzer "
     "after a successful attack on the sanitized context. Using the tool guidance, "
     "write a short remediation report for the next pass: recommend a detection "
-    "engine, sanitization strategy, threshold level, and/or additional "
-    "sensitive-entity labels that would close the leak. Never recommend changing "
-    "a field listed as fixed by the user. Compare the current policy against "
-    "your previous reports: if an earlier recommendation was not applied, say so "
-    "and restate it. Do not echo raw personal values."
+    "engine, sanitization strategy, presidio anonymization operator, threshold "
+    "level, rewrite instruction, and/or additional sensitive-entity labels that "
+    "would close the leak. Never recommend changing a field listed as fixed by "
+    "the user. Compare the current policy against your previous reports: if an "
+    "earlier recommendation was not applied, say so and restate it. Do not echo "
+    "raw personal values."
 )
 
 
@@ -152,6 +160,7 @@ class _RemediationSignature(dspy.Signature):
     current_policy: str = dspy.InputField(desc=_CURRENT_POLICY_DESC)
     engine_guidance: str = dspy.InputField(desc=_ENGINE_GUIDANCE_DESC)
     strategy_guidance: str = dspy.InputField(desc=_STRATEGY_GUIDANCE_DESC)
+    operator_guidance: str = dspy.InputField(desc=_OPERATOR_GUIDANCE_DESC)
     param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
     fixed_fields: str = dspy.InputField(desc=_FIXED_FIELDS_DESC)
     previous_reports: str = dspy.InputField(desc=_PREVIOUS_REPORTS_DESC)
@@ -336,6 +345,7 @@ class AdversarialAgent(BaseAgent):
                     current_policy=_describe_policy(policy),
                     engine_guidance=_format_guidance(DETECTION_GUIDANCE),
                     strategy_guidance=_format_guidance(SANITIZATION_GUIDANCE),
+                    operator_guidance=_format_guidance(PRESIDIO_OPERATOR_GUIDANCE),
                     param_guidance=_format_guidance(DETECTION_PARAM_GUIDANCE),
                     fixed_fields=self._fixed_policy_fields(),
                     previous_reports="\n---\n".join(previous_reports) or "none",

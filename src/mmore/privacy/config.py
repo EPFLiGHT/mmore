@@ -62,6 +62,7 @@ class SanitizationConfig:
     strategy: Optional[SanitizationStrategyType] = None
     consistency: Optional[bool] = None
     llm: Optional[LLMConfig] = None
+    encryption_key: Optional[str] = None
 
 
 @dataclass

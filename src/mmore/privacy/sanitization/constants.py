@@ -23,7 +23,18 @@ SANITIZATION_GUIDANCE: Dict[str, str] = {
     ),
     "synthetic_rewrite": (
         "an LLM rewrites the passage so it carries no identifiers while "
-        "preserving the domain meaning"
+        "preserving the domain meaning; the most flexible strategy, it can "
+        "follow custom instructions on how the sanitized text should read"
     ),
     "presidio": "apply Presidio's built-in anonymization operators to detected spans",
+}
+
+
+# Per-operator guidance so the analyzer can map descriptive feedback to a choice
+PRESIDIO_OPERATOR_GUIDANCE: Dict[str, str] = {
+    "replace": "swap each value for its entity label, e.g. <PERSON>",
+    "redact": "delete each value entirely, leaving no placeholder",
+    "mask": "overwrite each value with a masking character like ***",
+    "hash": "replace each value with its hash, irreversible but consistent",
+    "encrypt": "AES-encrypt each value, recoverable with the key",
 }

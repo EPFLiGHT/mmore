@@ -11,6 +11,7 @@ the per-request PrivacyPolicy the next agents consume.
 
 import logging
 import re
+import secrets
 from dataclasses import asdict, replace
 from typing import Dict, List, Literal, Optional, Union
 
@@ -33,7 +34,11 @@ from ..dspy_llm import TolerantJSONAdapter, build_dspy_lm
 from ..escalation import apply_entity_guidance
 from ..leakage import EscalationRecord
 from ..policy import PrivacyPolicy
-from ..sanitization.constants import SANITIZATION_GUIDANCE, SANITIZATION_TOOL_NAMES
+from ..sanitization.constants import (
+    PRESIDIO_OPERATOR_GUIDANCE,
+    SANITIZATION_GUIDANCE,
+    SANITIZATION_TOOL_NAMES,
+)
 from .base import BaseAgent
 from .registry import tool_registry
 from .state import PreCloudOutcome, PrivacyState
@@ -83,10 +88,16 @@ _FEEDBACK_LABEL_EXPAND_INSTRUCTION = (
 _FEEDBACK_POLICY_INSTRUCTION = (
     "A reviewer (the human at the gate or the leakage adversary) gave the "
     "feedback below. Decide whether it calls for a different detection engine, "
-    "sanitization strategy, or detection threshold level, either by naming one "
+    "sanitization strategy, detection threshold level, presidio anonymization "
+    "operator, or a custom rewrite instruction, either by naming one "
     "explicitly or by describing what they want (use the guidance to map the "
-    "description to the best fitting option). Return the chosen value from the "
-    "available options, or 'keep' for a field the feedback does not affect."
+    "description to the best fitting option). When the feedback describes an "
+    "anonymization technique (masking characters, hashing, encryption), choose "
+    "the presidio strategy and the matching operator. When it describes how "
+    "the sanitized text should read, choose synthetic_rewrite and distill a "
+    "short rewrite instruction. Return the chosen value from the available "
+    "options, 'keep' for a field the feedback does not affect, and 'none' for "
+    "no rewrite instruction."
 )
 
 
@@ -119,6 +130,16 @@ _REQUESTED_STRATEGY_DESC = (
 )
 _REQUESTED_THRESHOLD_DESC = (
     "one of: low, medium, high, or 'keep' to leave the detection threshold unchanged"
+)
+_OPERATOR_GUIDANCE_DESC = (
+    "per-operator guidance: what each presidio anonymization operator does"
+)
+_REQUESTED_OPERATOR_DESC = (
+    "one of the presidio operators, or 'keep' to leave anonymization unchanged"
+)
+_REWRITE_INSTRUCTION_DESC = (
+    "concise PII-free instruction for the rewrite LLM distilled from the "
+    "feedback, or 'none'"
 )
 
 _MAX_ADDITIONAL_ENTITIES = 8
@@ -166,11 +187,14 @@ class _FeedbackPolicySignature(dspy.Signature):
     feedback: str = dspy.InputField(desc=_FEEDBACK_DESC)
     engine_guidance: str = dspy.InputField(desc=_DETECTION_GUIDANCE_DESC)
     strategy_guidance: str = dspy.InputField(desc=_STRATEGY_GUIDANCE_DESC)
+    operator_guidance: str = dspy.InputField(desc=_OPERATOR_GUIDANCE_DESC)
     available_engines: List[str] = dspy.InputField(desc=_AVAILABLE_ENGINES_DESC)
     available_strategies: List[str] = dspy.InputField(desc=_AVAILABLE_STRATEGIES_DESC)
     requested_engine: str = dspy.OutputField(desc=_REQUESTED_ENGINE_DESC)
     requested_strategy: str = dspy.OutputField(desc=_REQUESTED_STRATEGY_DESC)
     requested_threshold: str = dspy.OutputField(desc=_REQUESTED_THRESHOLD_DESC)
+    requested_operator: str = dspy.OutputField(desc=_REQUESTED_OPERATOR_DESC)
+    rewrite_instruction: str = dspy.OutputField(desc=_REWRITE_INSTRUCTION_DESC)
 
 
 class _PresidioParamsSignature(dspy.Signature):
@@ -297,6 +321,12 @@ def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
     new_threshold = new.detection_params.get("confidence_threshold")
     if new_threshold != old_threshold:
         changes.append(f"threshold->{new_threshold}")
+    old_operator = old.sanitization_params.get("operator")
+    new_operator = new.sanitization_params.get("operator")
+    if new_operator != old_operator:
+        changes.append(f"operator->{new_operator}")
+    if new.sanitizer_system_prompt != old.sanitizer_system_prompt:
+        changes.append("rewrite_prompt")
     added_labels = len(new.sensitive_entities) - len(old.sensitive_entities)
     if added_labels:
         changes.append(f"+{added_labels}_labels")
@@ -311,6 +341,22 @@ def _format_strategy_guidance() -> str:
     return "\n".join(
         f"- {name}: {desc}" for name, desc in SANITIZATION_GUIDANCE.items()
     )
+
+
+def _format_operator_guidance() -> str:
+    return "\n".join(
+        f"- {name}: {desc}" for name, desc in PRESIDIO_OPERATOR_GUIDANCE.items()
+    )
+
+
+def _pin_rewrite_instruction(prompt: str, instruction: str) -> str:
+    """Append the reviewer's rewrite instruction to the prompt, idempotently."""
+    if not instruction or instruction.lower() in ("none", "keep"):
+        return prompt
+    note = f"Reviewer instruction: {instruction}"
+    if note in prompt:
+        return prompt
+    return f"{prompt} {note}".strip()
 
 
 def _parse_param_prediction(
@@ -482,6 +528,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
                     feedback=feedback,
                     engine_guidance=_format_engine_guidance(),
                     strategy_guidance=_format_strategy_guidance(),
+                    operator_guidance=_format_operator_guidance(),
                     available_engines=list(DETECTION_TOOL_NAMES),
                     available_strategies=list(SANITIZATION_TOOL_NAMES),
                 )
@@ -491,6 +538,8 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         engine = str(getattr(prediction, "requested_engine", "")).strip().lower()
         strategy = str(getattr(prediction, "requested_strategy", "")).strip().lower()
         threshold = str(getattr(prediction, "requested_threshold", "")).strip().lower()
+        operator = str(getattr(prediction, "requested_operator", "")).strip().lower()
+        instruction = str(getattr(prediction, "rewrite_instruction", "")).strip()
         engine_pinned = respect_config_pins and self.config.detection.engine
         strategy_pinned = respect_config_pins and self.config.sanitization.strategy
         threshold_pinned = (
@@ -515,7 +564,35 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             params_changed = True
         if params_changed:
             updates["detection_params"] = params
+        # Operator and rewrite instruction only apply under their own strategy
+        final = updates.get("sanitization_strategy", policy.sanitization_strategy)
+        if final == "presidio" and operator in PRESIDIO_OPERATOR_GUIDANCE:
+            updates["sanitization_params"] = {
+                "operator": operator,
+                "operator_params": self._operator_params(operator),
+            }
+        if final == "synthetic_rewrite":
+            prompt = _pin_rewrite_instruction(
+                policy.sanitizer_system_prompt, instruction
+            )
+            if prompt != policy.sanitizer_system_prompt:
+                updates["sanitizer_system_prompt"] = prompt
         return replace(policy, **updates) if updates else policy
+
+    def _operator_params(self, operator: str) -> Dict[str, object]:
+        """Default params for a presidio operator."""
+        if operator == "mask":
+            return {"masking_char": "*", "chars_to_mask": 128, "from_end": False}
+        if operator == "encrypt":
+            key = self.config.sanitization.encryption_key
+            if not key:
+                key = secrets.token_hex(16)
+                logger.warning(
+                    "No sanitization.encryption_key configured: using an "
+                    "ephemeral key, encrypted values are unrecoverable."
+                )
+            return {"key": key}
+        return {}
 
     def _select_params(
         self, engine: str, query: str, chunks: List[str]

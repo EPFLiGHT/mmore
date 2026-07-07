@@ -22,7 +22,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 2. The **detector** runs the policy's PII engine over each raw chunk.
 3. The **sanitizer** rewrites the chunks using the chosen strategy.
 4. The **leakage adversary** attacks the sanitized context. If it finds a leak, it loops back to the analyzer to tighten the policy (limited by `leakage_adversary.max_iterations`).
-5. The **HITL gate** is the trust boundary. With `interactive: false` it approves automatically and the graph finishes in one pass. With `interactive: true` it pauses before any context leaves for the answer model: in `local` mode a terminal prompt shows the PII-free summary and asks to approve, revise (with optional feedback), or reject; in `api` mode there is no approval endpoint yet, so the gate auto-approves with a startup warning.
+5. The **HITL gate** is the trust boundary. With `interactive: false` it approves automatically and the graph finishes in one pass. With `interactive: true` it pauses before any context leaves for the answer model: in `local` mode a terminal prompt shows the PII-free summary and asks to approve, revise (with optional feedback), or reject; in `api` mode there is no approval endpoint yet, so the gate auto-approves with a startup warning. Revise feedback can be descriptive: the analyzer maps it onto the available tools (detection engine, sanitization strategy, threshold level, presidio anonymization operator, or a custom rewrite instruction for the synthetic-rewrite LLM) using a concise per-tool guidance catalog.
 6. The **answer model** sees only the sanitized context, the query, and the domain prompt. It never reads the raw chunks.
 7. The **verifier** checks the answer for leftover PII and faithfulness, and raises type and count warnings. It is advisory only: it warns but does not loop back.
 
@@ -34,6 +34,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 - `interactive`: the HITL gate. In `local` mode it prompts in the terminal (queries run one at a time); in `api` mode it auto-approves with a warning. Set `false` for unattended runs.
 - `detection.engine`: one engine, either `presidio`, `gliner`, `llm`, or `openai_filter`.
 - `sanitization.strategy`: `token_masking`, `entity_replacement`, `synthetic_rewrite`, or `presidio`.
+- `sanitization.encryption_key`: AES key used when the `presidio` strategy runs its `encrypt` operator (e.g. after gate feedback asks for encryption). Unlike masking or hashing, encryption is reversible: whoever holds this key can decrypt the values in the sanitized context later. Without it a random key is generated per run and discarded, so the encrypted values are as unrecoverable as a hash.
 - `answer.llm`: any `LLMConfig` backend (API or self-hosted/vLLM).
 - `verifier.checks` and `verifier.warn_threshold`: the advisory checks run over the answer.
 
@@ -41,7 +42,7 @@ Config errors are reported at startup: a missing `answer.llm`, an unknown `domai
 
 ## Report schema (for operators)
 
-Each request adds one PII-free `ReportRecord`, shown on the RAG output as `privacy_report` (plus `privacy_warnings`, the advisory type and count summary). It records types and counts only, never raw content or PII:
+Each request adds one PII-free `ReportRecord`, shown on the RAG output as `privacy_report` (plus `privacy_warnings`, the advisory type and count summary, and `sanitized_context`, the sanitized text the answer model actually received; the `context` field keeps the raw retrieval). The record itself holds types and counts only, never raw content or PII:
 
 | Field | Meaning |
 | --- | --- |
