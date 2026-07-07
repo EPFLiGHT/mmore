@@ -160,9 +160,11 @@ def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
         summary = _text(entry, "atom:summary")
         pub = _text(entry, "atom:published")
         year = _coerce_year(pub)
-        authors = ", ".join(
-            _text(a, "atom:name") or "" for a in entry.findall("atom:author", NS)
-        ).strip(", ")
+        authors = [
+            name
+            for a in entry.findall("atom:author", NS)
+            if (name := _text(a, "atom:name"))
+        ]
         pdf_url = None
         for link in entry.findall("atom:link", NS):
             if link.attrib.get("type") == "application/pdf":

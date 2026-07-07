@@ -12,6 +12,7 @@ from mmore.paper_discovery.sources.arxiv import (
     _build_simplified_queries,
     _extract_terms,
 )
+from mmore.paper_discovery.sources.europepmc import _parse_authors
 from mmore.paper_discovery.sources.openalex import OpenAlexAdapter, _rebuild_abstract
 
 # ---------------------------------------------------------------------------
@@ -90,7 +91,7 @@ class TestOpenAlexAdapter:
         assert isinstance(p, Paper)
         assert p.title == "A Paper"
         assert p.year == 2024
-        assert p.authors == "Ada Lovelace"
+        assert p.authors == ["Ada Lovelace"]
         assert p.url == "http://x/p.pdf"
         assert p.abstract == "hi"
         assert p.source == "openalex"
@@ -127,6 +128,27 @@ class TestArxivSimplification:
 # ---------------------------------------------------------------------------
 # Synonym loading: JSONL / quote sanitization
 # ---------------------------------------------------------------------------
+
+
+class TestEuropePmcParseAuthors:
+    def test_prefers_structured_author_list(self):
+        entry = {
+            "authorList": {
+                "author": [
+                    {"fullName": "Ada Lovelace"},
+                    {"fullName": "Alan Turing"},
+                ]
+            },
+            "authorString": "Lovelace A, Turing A",
+        }
+        assert _parse_authors(entry) == ["Ada Lovelace", "Alan Turing"]
+
+    def test_falls_back_to_author_string_when_structured_missing(self):
+        entry = {"authorString": "Lovelace A, Turing A"}
+        assert _parse_authors(entry) == ["Lovelace A", "Turing A"]
+
+    def test_returns_none_when_both_missing(self):
+        assert _parse_authors({}) is None
 
 
 class TestLoadSynonyms:

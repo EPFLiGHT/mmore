@@ -101,7 +101,7 @@ Press **Ctrl+C** at any time — the pipeline catches the interrupt and writes w
 A JSONL file — one `Paper` record per line. Example line:
 
 ```json
-{"title": "A foundation model for humanitarian response", "authors": "Ada Lovelace, Alan Turing", "url": "https://arxiv.org/pdf/2401.00001.pdf", "abstract": "We introduce …", "year": 2024, "extracted_text": "<full PDF text>", "source": "arxiv", "search_category": "Humanitarian AI Search"}
+{"title": "A foundation model for humanitarian response", "authors": ["Ada Lovelace", "Alan Turing"], "url": "https://arxiv.org/pdf/2401.00001.pdf", "abstract": "We introduce …", "year": 2024, "extracted_text": "<full PDF text>", "source": "arxiv", "search_category": "Humanitarian AI Search"}
 ```
 
 Line-per-record makes the file streamable (read one paper at a time), diff-friendly, and easy to append to. Any JSONL-aware tool (`jq`, `pandas.read_json(lines=True)`, mmore's `MultimodalSample.from_jsonl`) can consume it directly.

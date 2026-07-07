@@ -59,11 +59,11 @@ class OpenAlexAdapter(SourceAdapter):
         return papers
 
     def _to_paper(self, work: dict, category_title: str) -> Paper:
-        authors = ", ".join(
-            a.get("author", {}).get("display_name", "")
+        authors = [
+            a["author"]["display_name"]
             for a in work.get("authorships", [])
             if a.get("author", {}).get("display_name")
-        )
+        ]
         loc = work.get("primary_location") or {}
         pdf_url = loc.get("pdf_url")
         landing = loc.get("landing_page_url") or work.get("id")

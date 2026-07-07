@@ -26,7 +26,7 @@ class Paper:
     """One academic paper, normalized across all sources."""
 
     title: Optional[str] = None
-    authors: Optional[str] = None
+    authors: Optional[List[str]] = None
     url: Optional[str] = None
     abstract: Optional[str] = None
     year: Optional[int] = None

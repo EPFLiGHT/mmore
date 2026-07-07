@@ -46,7 +46,7 @@ class GoogleScholarAdapter(SourceAdapter):
                 papers.append(
                     Paper(
                         title=bib.get("title"),
-                        authors=", ".join(bib.get("author", []) or []) or None,
+                        authors=list(bib.get("author") or []) or None,
                         url=item.get("pub_url") or item.get("eprint_url"),
                         abstract=bib.get("abstract"),
                         year=_safe_year(bib.get("pub_year")),

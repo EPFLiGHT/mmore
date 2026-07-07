@@ -71,13 +71,30 @@ class EuropePmcAdapter(SourceAdapter):
 
         return Paper(
             title=entry.get("title"),
-            authors=entry.get("authorString"),
+            authors=_parse_authors(entry),
             url=pdf_url or landing,
             abstract=entry.get("abstractText"),
             year=year,
             source="europepmc",
             search_category=category_title,
         )
+
+
+def _parse_authors(entry: dict) -> Optional[List[str]]:
+    """Prefer the structured `authorList.author[].fullName` (available with
+    `resultType=core`). Fall back to naively splitting the pre-joined
+    `authorString` when the structured shape is missing - imperfect
+    (some names contain commas) but better than dropping the field.
+    """
+    author_list = (entry.get("authorList") or {}).get("author") or []
+    names = [a["fullName"] for a in author_list if a.get("fullName")]
+    if names:
+        return names
+    raw = entry.get("authorString")
+    if not raw:
+        return None
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    return parts or None
 
 
 def _coerce_year(entry: dict) -> Optional[int]:
