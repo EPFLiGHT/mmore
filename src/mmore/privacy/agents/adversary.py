@@ -291,10 +291,15 @@ class AdversarialAgent(BaseAgent):
 
         predictor = _build_probe_predictor()
         entities = list(policy.sensitive_entities)
-        verdicts = [
-            self._probe_vector(predictor, context, entities, vector)
-            for vector in self.strategies
-        ]
+        verdicts = []
+        for number, vector in enumerate(self.strategies, 1):
+            logger.info(
+                "Adversary probe (LLM): %s (%d/%d)",
+                vector.value,
+                number,
+                len(self.strategies),
+            )
+            verdicts.append(self._probe_vector(predictor, context, entities, vector))
         return max(verdicts, key=lambda v: v.confidence)
 
     def _fixed_policy_fields(self) -> str:

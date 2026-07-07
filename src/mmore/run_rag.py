@@ -152,9 +152,9 @@ class RAGOutput(BaseModel):
     hit_max_corrective_steps: Optional[float] = None
     retrieval_metrics: Optional[Dict[str, float]] = None
     retrieval_corrections: Optional[List[Dict[str, Any]]] = None
-    # Privacy mode only: PII-free report record and advisory type+count summary.
     privacy_report: Optional[Dict[str, Any]] = None
     privacy_warnings: Optional[List[Dict[str, Any]]] = None
+    sanitized_context: Optional[str] = None
 
 
 def create_api(rag: RAGPipeline, endpoint: str):
@@ -200,7 +200,7 @@ def _setup_privacy(privacy_config_file: str, mode: str):
             privacy_config = replace(privacy_config, interactive=False)
         else:
             privacy_approver = terminal_approver
-    # One checkpointer for the graph; the runner threads each request by id.
+
     return build_privacy_pipeline(privacy_config, MemorySaver()), privacy_approver
 
 

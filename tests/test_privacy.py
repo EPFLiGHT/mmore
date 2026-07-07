@@ -423,3 +423,74 @@ def test_terminal_approver_without_tty_raises_clear_error(monkeypatch):
 
     with pytest.raises(RuntimeError, match="interactive: false"):
         terminal_approver(_GATE_PAYLOAD)
+
+
+# --------------------------------------------------------------------------
+# Gate "view" command: colorized sanitized-context inspection
+# --------------------------------------------------------------------------
+
+_RED, _GREEN, _RESET = "\033[31m", "\033[32m", "\033[0m"
+
+
+def test_render_chunk_diff_colors_replacements():
+    from mmore.privacy.runner import _render_chunk_diff
+
+    raw = "Call John Doe at 555-1234."
+    sanitized = "Call [PERSON] at [PHONE_NUMBER]."
+
+    rendered = _render_chunk_diff(raw, sanitized)
+
+    assert rendered.startswith("Call ")  # unchanged text stays plain
+    assert f"{_RED}John Doe{_RESET}" in rendered  # flagged PII in red
+    assert f"{_GREEN}[PERSON]{_RESET}" in rendered  # its replacement in green
+    assert f"{_GREEN}[PHONE_NUMBER].{_RESET}" in rendered
+
+
+def test_render_chunk_diff_plain_when_nothing_changed():
+    from mmore.privacy.runner import _render_chunk_diff
+
+    rendered = _render_chunk_diff("no pii here", "no pii here")
+
+    assert rendered == "no pii here"
+
+
+def test_terminal_approver_view_prints_chunks_then_resumes(monkeypatch, capsys):
+    from mmore.privacy.runner import terminal_approver
+
+    payload = {
+        **_GATE_PAYLOAD,
+        "chunks": [{"raw": "Call John Doe.", "sanitized": "Call [PERSON]."}],
+    }
+    answers = iter(["v", "1"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert terminal_approver(payload) == "1"
+    out = capsys.readouterr().out
+    assert "Chunk 1" in out
+    assert _RED in out and _GREEN in out
+    assert out.count("[1]") == 2  # menu shown again after the view
+
+
+def test_terminal_approver_view_without_chunks_prints_notice(monkeypatch, capsys):
+    from mmore.privacy.runner import terminal_approver
+
+    answers = iter(["view", "3"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert terminal_approver(_GATE_PAYLOAD) == "3"
+    assert "No sanitized context" in capsys.readouterr().out
+
+
+def test_gate_payload_carries_raw_and_sanitized_chunks():
+    from mmore.privacy.runner import run_privacy_query
+
+    approver = _ScriptedApprover(["1"])
+    run_privacy_query(
+        _interactive_gate_graph(),
+        "q",
+        ["raw one", "raw two"],
+        approver=approver,
+    )
+
+    # The single-node gate graph has no sanitizer: chunks pair with what exists.
+    assert approver.payloads[0]["chunks"] == []

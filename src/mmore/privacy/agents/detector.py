@@ -16,10 +16,12 @@ from typing import Callable, Dict, List, Optional
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from typing_extensions import Self
 
+from ...rag.llm import LLMConfig
 from ...utils import load_config
 from ..config import PrivacyConfig
 from ..detection.base import PIISpan
 from ..detection.constants import DETECTION_TOOL_NAMES
+from ..detection.llm_engine import LLMDetectionEngine
 from ..policy import PrivacyPolicy
 from ..risk import RiskAssessment
 from .base import BaseAgent
@@ -109,9 +111,10 @@ class DetectorAgent(BaseAgent):
     def __init__(
         self,
         config: PrivacyConfig,
+        llm_config: Optional[LLMConfig] = None,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ):
-        super().__init__(config, llm_config=None, checkpointer=checkpointer)
+        super().__init__(config, llm_config=llm_config, checkpointer=checkpointer)
 
     @classmethod
     def from_config(
@@ -121,16 +124,38 @@ class DetectorAgent(BaseAgent):
     ) -> Self:
         if not isinstance(config, PrivacyConfig):
             config = load_config(config, PrivacyConfig)
-        return cls(config, checkpointer=checkpointer)
+        llm_config = config.detection.llm
+        if llm_config is None and config.context_analyzer:
+            llm_config = config.context_analyzer.llm
+        return cls(config, llm_config, checkpointer=checkpointer)
+
+    def _resolve_tool(
+        self, policy: PrivacyPolicy
+    ) -> Callable[[str, PrivacyPolicy], List[PIISpan]]:
+        """The engine callable for ``policy`` according to the LLM config."""
+        if policy.detection_engine == "llm" and self._llm_config is not None:
+            engine = LLMDetectionEngine(
+                self._llm_config,
+                sensitive_entities=policy.sensitive_entities or None,
+                **policy.detection_params,
+            )
+            return lambda chunk, _policy: engine.detect(chunk)
+        return _resolve_engine_tool(policy.detection_engine)
 
     def detect(
         self, policy: PrivacyPolicy, chunks: List[str]
     ) -> tuple[List[List[PIISpan]], RiskAssessment]:
         """Run the policy's engine over each chunk and assess overall risk."""
-        tool = _resolve_engine_tool(policy.detection_engine)
+        tool = self._resolve_tool(policy)
 
         spans_per_chunk: List[List[PIISpan]] = []
-        for chunk in chunks:
+        for number, chunk in enumerate(chunks, 1):
+            logger.info(
+                "Detection (%s): chunk %d/%d",
+                policy.detection_engine,
+                number,
+                len(chunks),
+            )
             raw = tool(chunk, policy)
             spans_per_chunk.append(_dedupe_spans(raw))
 

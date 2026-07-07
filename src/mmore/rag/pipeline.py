@@ -32,11 +32,11 @@ Context:
 {context}
 """
 
-# Privacy fields surfaced alongside the answer when privacy mode is on. Both are
-# PII-free: a structured report record and an advisory type+count summary.
-PRIVACY_OUTPUT_KEYS = ("privacy_report", "privacy_warnings")
+# Privacy-mode output fields: report record, advisory warnings, and the
+# sanitized context the answer model received
+PRIVACY_OUTPUT_KEYS = ("privacy_report", "privacy_warnings", "sanitized_context")
 
-# Answers the privacy gate's interrupt payloads (see mmore.privacy.runner.Approver).
+# Answers the privacy gate's interrupt payloads
 PrivacyApprover = Callable[[dict], object]
 
 
@@ -193,6 +193,9 @@ class RAGPipeline:
             )
             updated = dict(x)
             updated["answer"] = result.answer
+            updated["sanitized_context"] = "\n\n".join(
+                chunk for chunk in result.sanitized_chunks if chunk
+            ).strip()
             if result.record is not None:
                 updated["privacy_report"] = asdict(result.record)
                 updated["privacy_warnings"] = [

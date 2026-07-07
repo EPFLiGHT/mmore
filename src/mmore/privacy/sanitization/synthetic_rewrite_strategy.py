@@ -73,11 +73,12 @@ class SyntheticRewriteStrategy(SanitizationStrategy):
     ) -> List[str]:
         predictor = _build_rewrite_predictor()
         out: List[str] = []
-        for chunk, spans in zip(chunks, spans_per_chunk):
+        for number, (chunk, spans) in enumerate(zip(chunks, spans_per_chunk), 1):
             if not spans:
                 # No PII detected hence nothing to rewrite
                 out.append(chunk)
                 continue
+            logger.info("Synthetic rewrite (LLM): chunk %d/%d", number, len(chunks))
             try:
                 prediction = predictor(
                     system_prompt=policy.sanitizer_system_prompt,

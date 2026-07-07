@@ -99,6 +99,7 @@ def build_gate_summary(state: PrivacyState) -> str:
     escalation_log = state.get("escalation_log") or []
 
     domain = policy.domain if policy else "unknown"
+    engine = policy.detection_engine if policy else "unknown"
     strategy = policy.sanitization_strategy if policy else "unknown"
 
     if risk and risk.entity_counts:
@@ -129,6 +130,7 @@ def build_gate_summary(state: PrivacyState) -> str:
         [
             "Pre-cloud privacy review",
             f"- Domain: {domain}",
+            f"- Detection engine: {engine}",
             f"- Detected (type: count): {detection}",
             f"- Total sensitive spans: {total}",
             f"- Sanitization strategy: {strategy}",
@@ -169,7 +171,16 @@ class HITLGateAgent(BaseAgent):
             return PrivacyState(
                 summary=summary, approved=True, outcome=PreCloudOutcome.APPROVED
             )
-        base = {"summary": summary, "options": _gate_options()}
+        base = {
+            "summary": summary,
+            "options": _gate_options(),
+            "chunks": [
+                {"raw": raw, "sanitized": sanitized}
+                for raw, sanitized in zip(
+                    state.get("raw_chunks", []), state.get("sanitized_chunks", [])
+                )
+            ],
+        }
         payload = base
         resume = None
         decision = None
