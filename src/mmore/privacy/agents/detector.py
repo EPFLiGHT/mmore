@@ -167,6 +167,9 @@ class DetectorAgent(BaseAgent):
         policy = state.get("policy")
         if policy is None:
             raise ValueError("DetectorAgent requires 'policy' in the state.")
+        if state.get("skip_detection") and state.get("spans") is not None:
+            logger.info("Skipping detection during escalation")
+            return PrivacyState(skip_detection=False)
         chunks = list(state.get("raw_chunks", []))
         spans_per_chunk, risk = self.detect(policy, chunks)
         return PrivacyState(spans=spans_per_chunk, risk=risk)

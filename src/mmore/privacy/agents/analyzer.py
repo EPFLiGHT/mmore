@@ -349,6 +349,15 @@ def _format_operator_guidance() -> str:
     )
 
 
+def _detection_unchanged(old: PrivacyPolicy, new: PrivacyPolicy) -> bool:
+    """True when the escalation left every detection-relevant field untouched."""
+    return (
+        new.detection_engine == old.detection_engine
+        and new.detection_params == old.detection_params
+        and set(new.sensitive_entities) == set(old.sensitive_entities)
+    )
+
+
 def _pin_rewrite_instruction(prompt: str, instruction: str) -> str:
     """Append the reviewer's rewrite instruction to the prompt, idempotently."""
     if not instruction or instruction.lower() in ("none", "keep"):
@@ -734,6 +743,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             escalation_log=list(state.get("escalation_log", [])) + [record],
             outcome=PreCloudOutcome.RE_LOOPED,
             human_feedback=None,  # was taken into account already
+            skip_detection=_detection_unchanged(policy, new_policy),
         )
 
     def _node(self, state: PrivacyState) -> PrivacyState:

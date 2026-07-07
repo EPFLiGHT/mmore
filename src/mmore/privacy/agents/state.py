@@ -38,6 +38,7 @@ class PrivacyState(NodeOutput, total=False):
     iteration: int  # total escalations
     leak_iterations: int  # leak-driven escalations only
     escalation_log: List[EscalationRecord]
+    skip_detection: bool
 
     # Pre-cloud HITL gate
     summary: str
