@@ -67,7 +67,7 @@ def _route_after_adversary(state: PrivacyState, max_iterations: int) -> _Route:
     """
     if state.get("safe", False):
         return _Route.PROCEED
-    if state.get("leak_iterations", 0) >= max_iterations:
+    if state.get("adversary_escalations", 0) >= max_iterations:
         return _Route.UNSAFE
     return _Route.ESCALATE
 

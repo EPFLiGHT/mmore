@@ -698,8 +698,8 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
 
     def _escalate(self, state: PrivacyState, policy: PrivacyPolicy) -> PrivacyState:
         """Re-entry path: harden the policy from the adversary report or gate feedback."""
-        iteration = state.get("iteration", 0)
-        leak_iterations = state.get("leak_iterations", 0)
+        total_escalations = state.get("total_escalations", 0)
+        adversary_escalations = state.get("adversary_escalations", 0)
         verdict = state.get("verdict")
         trigger_vector, trigger_entity = None, None
         from_human_feedback = False
@@ -713,7 +713,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
                 respect_config_pins=True,
             )
             trigger_vector, trigger_entity = verdict.vector, verdict.entity_type
-            leak_iterations += 1  # only leak escalations count toward the budget
+            adversary_escalations += 1
         elif state.get("approved") is False:
             report = (state.get("human_feedback") or "").strip()
             new_policy = self._apply_guidance(
@@ -728,18 +728,18 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             raise ValueError("escalate called without a leak or rejection")
         label = _describe_policy_changes(policy, new_policy)
         record = EscalationRecord(
-            iteration=iteration + 1,
+            iteration=total_escalations + 1,
             escalation=label,
             from_human_feedback=from_human_feedback,
             vector=trigger_vector,
             entity_type=trigger_entity,
             report=report or None,
         )
-        logger.info("Policy escalation %d: %s", iteration + 1, label)
+        logger.info("Policy escalation %d: %s", total_escalations + 1, label)
         return PrivacyState(
             policy=new_policy,
-            iteration=iteration + 1,
-            leak_iterations=leak_iterations,
+            total_escalations=total_escalations + 1,
+            adversary_escalations=adversary_escalations,
             escalation_log=list(state.get("escalation_log", [])) + [record],
             outcome=PreCloudOutcome.RE_LOOPED,
             human_feedback=None,  # was taken into account already

@@ -52,7 +52,7 @@ Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report
 | `detection_engine` | engine used |
 | `detection` | span count and per-entity-type counts |
 | `sanitization_strategy` | strategy applied |
-| `escalation_iterations`, `gate_iterations` | escalation-loop and gate counters |
+| `adversary_iterations`, `human_iterations` | policy escalations triggered by the adversary agent vs. by the user |
 | `gate_outcome` | `approved`, `re-looped`, `aborted`, or `rejected` |
 | `answer_backend`, `answer_model` | which model answered |
 | `advisory_warnings` | verifier warnings as kind and count |

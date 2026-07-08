@@ -1,7 +1,7 @@
 """Pre-cloud HITL approval gate.
 
 Pipeline:  ... -> sanitizer -> leakage_adversary -> [gate] -> ...
-Reads:     policy, risk, verdict, iteration, escalation_log
+Reads:     policy, risk, verdict, total_escalations, escalation_log
 Writes:    summary, approved, outcome, hitl_events, human_feedback
 
 The last step before the trust boundary: once the adversary clears the
@@ -104,7 +104,7 @@ def build_gate_summary(state: PrivacyState) -> str:
     policy = state.get("policy")
     risk = state.get("risk")
     verdict = state.get("verdict")
-    iteration = state.get("iteration", 0)
+    total_escalations = state.get("total_escalations", 0)
     escalation_log = state.get("escalation_log") or []
 
     domain = policy.domain if policy else "unknown"
@@ -143,7 +143,7 @@ def build_gate_summary(state: PrivacyState) -> str:
             f"- Detected (type: count): {detection}",
             f"- Total sensitive spans: {total}",
             f"- Sanitization strategy: {strategy}",
-            f"- Escalation iterations: {iteration} ({escalations})",
+            f"- Escalation iterations: {total_escalations} ({escalations})",
             f"- Gate verdict: {gate_verdict}",
         ]
     )

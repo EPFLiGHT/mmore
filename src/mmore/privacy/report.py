@@ -65,9 +65,9 @@ class ReportRecord:
     detection_engine: DetectionEngineType
     detection: RiskAssessment  # the detector's own span count + entity-type counts
     sanitization_strategy: SanitizationStrategyType
-    escalation_iterations: int
+    adversary_iterations: int
+    human_iterations: int
     gate_outcome: PreCloudOutcome
-    gate_iterations: int
     answer_backend: Optional[str]
     answer_model: Optional[str]
     advisory_warnings: List[WarningSummary]

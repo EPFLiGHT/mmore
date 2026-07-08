@@ -54,9 +54,10 @@ def build_report_record(state: PrivacyState) -> ReportRecord:
         detection_engine=DetectionEngineType(policy.detection_engine),
         detection=state.get("risk") or RiskAssessment(count=0),
         sanitization_strategy=SanitizationStrategyType(policy.sanitization_strategy),
-        escalation_iterations=state.get("iteration", 0),
+        adversary_iterations=state.get("adversary_escalations", 0),
+        human_iterations=state.get("total_escalations", 0)
+        - state.get("adversary_escalations", 0),
         gate_outcome=gate_outcome,
-        gate_iterations=state.get("leak_iterations", 0),
         answer_backend=state.get("answer_backend"),
         answer_model=state.get("answer_model"),
         advisory_warnings=_warning_summaries(verdict),

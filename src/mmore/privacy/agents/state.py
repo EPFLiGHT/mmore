@@ -35,8 +35,8 @@ class PrivacyState(NodeOutput, total=False):
     # Leakage adversary + escalation loop
     verdict: Optional[LeakageVerdict]
     safe: bool
-    iteration: int  # total escalations
-    leak_iterations: int  # leak-driven escalations only
+    total_escalations: int  # all policy escalations (adversary + human)
+    adversary_escalations: int
     escalation_log: List[EscalationRecord]
     skip_detection: bool
 
