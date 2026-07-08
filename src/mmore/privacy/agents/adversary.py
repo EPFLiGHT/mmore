@@ -95,7 +95,7 @@ _PROBE_INSTRUCTION = (
     "can actually be recovered or confidently inferred. Report a leak only "
     "when a specific individual's identifier genuinely remains recoverable; "
     "masked, generic, or non-identifying content is not a leak. Calibrate the "
-    "confidence to the true strength of the residual signal. Do not have raw "
+    "confidence to the true strength of the residual signal. Do not include raw "
     "personal values in your evidence."
 )
 

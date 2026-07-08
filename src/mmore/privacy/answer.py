@@ -4,10 +4,10 @@ Pipeline:  ... -> gate -> [answer] -> verifier -> report
 Reads:     query, policy (domain prompt), sanitized_chunks
 Writes:    answer, answer_backend, answer_model
 
-It receives nly the sanitized context that passed the pre-cloud gate
+It receives only the sanitized context that passed the pre-cloud gate
 plus the query and the selected domain prompt.
 
-It must never reads the raw chunks.
+It must never read the raw chunks.
 """
 
 import logging

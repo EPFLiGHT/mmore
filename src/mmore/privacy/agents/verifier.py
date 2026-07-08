@@ -24,6 +24,7 @@ from typing_extensions import Self
 from ...rag.llm import LLMConfig
 from ...utils import load_config
 from ..config import PrivacyConfig, VerifierCheck
+from ..detection.constants import DEFAULT_LLM_CONFIG
 from ..dspy_llm import build_dspy_lm
 from ..verification import CLEAN_VERDICT, VerifierVerdict, VerifierWarning, WarningKind
 from .base import BaseAgent
@@ -147,7 +148,10 @@ class AdvisoryVerifierAgent(BaseAgent):
     ) -> Self:
         if not isinstance(config, PrivacyConfig):
             config = load_config(config, PrivacyConfig)
-        return cls(config, config.verifier.llm, checkpointer=checkpointer)
+        llm_config = config.verifier.llm
+        if llm_config is None and config.context_analyzer:
+            llm_config = config.context_analyzer.llm
+        return cls(config, llm_config, checkpointer=checkpointer)
 
     @property
     def checks(self) -> List[VerifierCheck]:
@@ -160,9 +164,11 @@ class AdvisoryVerifierAgent(BaseAgent):
     def _ensure_dspy_lm(self) -> dspy.BaseLM:
         if self._dspy_lm is None:
             if self._llm_config is None:
-                raise ValueError(
-                    "Advisory verifier requires an LLM to check the answer."
+                logger.warning(
+                    "No verifier LLM configured, falling back to default LLM %r",
+                    DEFAULT_LLM_CONFIG.llm_name,
                 )
+                self._llm_config = DEFAULT_LLM_CONFIG
             self._dspy_lm = build_dspy_lm(self._llm_config)
         return self._dspy_lm
 
