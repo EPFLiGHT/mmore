@@ -11,7 +11,7 @@ from typing import List, Optional
 from ..detection.base import PIISpan
 from ..leakage import EscalationRecord, LeakageVerdict
 from ..policy import PrivacyPolicy
-from ..report import PreCloudOutcome, ReportRecord
+from ..report import HITLEvent, PreCloudOutcome, ReportRecord
 from ..risk import RiskAssessment
 from ..verification import VerifierVerdict
 from .base import NodeOutput
@@ -45,6 +45,7 @@ class PrivacyState(NodeOutput, total=False):
     approved: Optional[bool]
     outcome: Optional[PreCloudOutcome]
     human_feedback: Optional[str]
+    hitl_events: List[HITLEvent]
 
     # Request metadata for the report
     request_id: str

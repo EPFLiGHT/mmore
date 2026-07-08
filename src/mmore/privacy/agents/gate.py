@@ -2,7 +2,7 @@
 
 Pipeline:  ... -> sanitizer -> leakage_adversary -> [gate] -> ...
 Reads:     policy, risk, verdict, iteration, escalation_log
-Writes:    summary, approved, outcome
+Writes:    summary, approved, outcome, hitl_events, human_feedback
 
 The last step before the trust boundary: once the adversary clears the
 sanitized context, the gate builds a concise, PII-free summary of everything
@@ -20,10 +20,19 @@ from typing_extensions import Self
 from ...utils import load_config
 from ..config import PrivacyConfig
 from ..leakage import SAFE_VERDICT
+from ..report import HITLDecision, HITLEvent
 from .base import BaseAgent
 from .state import PreCloudOutcome, PrivacyState
 
 logger = logging.getLogger(__name__)
+
+
+def _appended_events(
+    state: PrivacyState, decision: HITLDecision, feedback: Optional[str] = None
+) -> List[HITLEvent]:
+    """Append one human gate decision to the run's accumulated event list."""
+    event = HITLEvent(decision=decision, human_feedback=feedback)
+    return list(state.get("hitl_events", [])) + [event]
 
 
 class GateDecision(str, Enum):
@@ -194,17 +203,25 @@ class HITLGateAgent(BaseAgent):
                 }
         if decision is GateDecision.APPROVE:
             return PrivacyState(
-                summary=summary, approved=True, outcome=PreCloudOutcome.APPROVED
+                summary=summary,
+                approved=True,
+                outcome=PreCloudOutcome.APPROVED,
+                hitl_events=_appended_events(state, HITLDecision.APPROVE),
             )
         if decision is GateDecision.REJECT:
             return PrivacyState(
-                summary=summary, approved=False, outcome=PreCloudOutcome.REJECTED
+                summary=summary,
+                approved=False,
+                outcome=PreCloudOutcome.REJECTED,
+                hitl_events=_appended_events(state, HITLDecision.REJECT),
             )
 
         # Else re-enter the privacy pipeline with Analyzer next
+        feedback = _extract_feedback(resume)
         return PrivacyState(
             summary=summary,
             approved=False,
             outcome=PreCloudOutcome.RE_LOOPED,
-            human_feedback=_extract_feedback(resume),
+            human_feedback=feedback,
+            hitl_events=_appended_events(state, HITLDecision.RETRY, feedback),
         )

@@ -49,11 +49,10 @@ class WarningSummary:
 
 @dataclass
 class HITLEvent:
-    """The pre-cloud HITL gate event."""
+    """A pre-cloud HITL gate event."""
 
-    fired: bool
-    decision: Optional[HITLDecision] = None
-    response_hash: Optional[str] = None
+    decision: HITLDecision
+    human_feedback: Optional[str] = None
 
 
 @dataclass
@@ -72,5 +71,5 @@ class ReportRecord:
     answer_backend: Optional[str]
     answer_model: Optional[str]
     advisory_warnings: List[WarningSummary]
-    hitl: HITLEvent
+    hitl_events: List[HITLEvent]
     outcome: ReportOutcome

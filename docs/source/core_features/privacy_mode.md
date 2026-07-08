@@ -35,14 +35,15 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 - `detection.engine`: one engine, either `presidio`, `gliner`, `llm`, or `openai_filter`.
 - `sanitization.strategy`: `token_masking`, `entity_replacement`, `synthetic_rewrite`, or `presidio`.
 - `sanitization.encryption_key`: AES key used when the `presidio` strategy runs its `encrypt` operator (e.g. after gate feedback asks for encryption). Unlike masking or hashing, encryption is reversible: whoever holds this key can decrypt the values in the sanitized context later. Without it a random key is generated per run and discarded, so the encrypted values are as unrecoverable as a hash.
+- `leakage_adversary.strategies`: which attack vectors the adversary probes. Omit to run all (`residual_span`, `quasi_identifier`, `structural_reid`, `context_reconstruction`, `membership_inference`). Pass a subset (e.g. `[residual_span, quasi_identifier]`) to narrow and speed up the probe.
 - `answer.llm`: any `LLMConfig` backend (API or self-hosted/vLLM).
-- `verifier.checks` and `verifier.warn_threshold`: the advisory checks run over the answer.
+- `verifier.checks` and `verifier.warn_threshold`: the advisory checks run over the answer. Omit `checks` to run all (`residual_leakage`, `faithfulness`). You can also pass a subset.
 
 Config errors are reported at startup: a missing `answer.llm`, an unknown `domain`, or an unregistered detection engine fail before any query runs.
 
 ## Report schema (for operators)
 
-Each request adds one PII-free `ReportRecord`, shown on the RAG output as `privacy_report` (plus `privacy_warnings`, the advisory type and count summary, and `sanitized_context`, the sanitized text the answer model actually received; the `context` field keeps the raw retrieval). The record itself holds types and counts only, never raw content or PII:
+Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report`:
 
 | Field | Meaning |
 | --- | --- |
@@ -55,7 +56,7 @@ Each request adds one PII-free `ReportRecord`, shown on the RAG output as `priva
 | `gate_outcome` | `approved`, `re-looped`, `aborted`, or `rejected` |
 | `answer_backend`, `answer_model` | which model answered |
 | `advisory_warnings` | verifier warnings as kind and count |
-| `hitl` | gate event (fired, decision, hashed feedback) |
+| `hitl_events` | list of gate interactions, one per human decision (each with its decision and any written revise feedback) |
 | `outcome` | `returned`, `returned-with-warnings`, or `aborted-unsafe` |
 
 ## See also

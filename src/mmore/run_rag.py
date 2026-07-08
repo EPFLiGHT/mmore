@@ -113,7 +113,7 @@ def _to_public_output(pipeline_result: Dict[str, Any]) -> Dict[str, Any]:
     """Bridge pipeline dict (internal keys like docs) to the public RAGOutput / JSON schema."""
     out = {key: pipeline_result[key] for key in _RAG_KEYS if key in pipeline_result}
     out.update(extract_judge_output(pipeline_result))
-    # Privacy mode surfaces a PII-free report record + advisory summary, if present.
+    # Privacy mode surfaces a PII-free report record + advisory summary, if present
     for key in PRIVACY_OUTPUT_KEYS:
         if key in pipeline_result:
             out[key] = pipeline_result[key]

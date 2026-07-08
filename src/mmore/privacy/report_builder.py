@@ -1,6 +1,5 @@
 """Builder for the final report."""
 
-import hashlib
 import json
 from collections import Counter
 from dataclasses import asdict
@@ -9,7 +8,6 @@ from typing import List, Optional
 from .agents.state import PrivacyState
 from .config import DetectionEngineType, SanitizationStrategyType
 from .report import (
-    HITLDecision,
     HITLEvent,
     PreCloudOutcome,
     ReportOutcome,
@@ -21,12 +19,6 @@ from .verification import VerifierVerdict
 
 _ABORTED_OUTCOMES = (PreCloudOutcome.ABORTED, PreCloudOutcome.REJECTED)
 
-_HITL_DECISIONS = {
-    PreCloudOutcome.APPROVED: HITLDecision.APPROVE,
-    PreCloudOutcome.REJECTED: HITLDecision.REJECT,
-    PreCloudOutcome.RE_LOOPED: HITLDecision.RETRY,
-}
-
 
 def _warning_summaries(verdict: Optional[VerifierVerdict]) -> List[WarningSummary]:
     """Aggregate the advisory warnings to type + count, dropping any content."""
@@ -34,17 +26,9 @@ def _warning_summaries(verdict: Optional[VerifierVerdict]) -> List[WarningSummar
     return [WarningSummary(kind=kind, count=count) for kind, count in counts.items()]
 
 
-def _hitl_event(state: PrivacyState) -> HITLEvent:
-    """Derive the gate event from state."""
-    outcome = state.get("outcome")
-    decision = _HITL_DECISIONS.get(outcome) if outcome is not None else None
-    feedback = state.get("human_feedback")
-    response_hash = (
-        hashlib.sha256(feedback.encode("utf-8")).hexdigest() if feedback else None
-    )
-    return HITLEvent(
-        fired=decision is not None, decision=decision, response_hash=response_hash
-    )
+def _hitl_events(state: PrivacyState) -> List[HITLEvent]:
+    """The human gate interactions recorded during the run (empty if none)."""
+    return list(state.get("hitl_events") or [])
 
 
 def _outcome(state: PrivacyState, verdict: Optional[VerifierVerdict]) -> ReportOutcome:
@@ -76,7 +60,7 @@ def build_report_record(state: PrivacyState) -> ReportRecord:
         answer_backend=state.get("answer_backend"),
         answer_model=state.get("answer_model"),
         advisory_warnings=_warning_summaries(verdict),
-        hitl=_hitl_event(state),
+        hitl_events=_hitl_events(state),
         outcome=_outcome(state, verdict),
     )
 
