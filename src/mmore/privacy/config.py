@@ -68,7 +68,7 @@ class LeakageAdversaryConfig:
 @dataclass
 class PrivacyConfig:
     domain: Optional[str] = None
-    interactive: Optional[bool] = None
+    interactive: bool = False
     context_analyzer: Optional[AnalyzerConfig] = None
     detection: DetectionConfig = field(default_factory=DetectionConfig)
     sanitization: SanitizationConfig = field(default_factory=SanitizationConfig)

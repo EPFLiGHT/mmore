@@ -5,10 +5,7 @@ from typing import List, Optional
 
 from .policy import PrivacyPolicy
 
-_ESCALATION_NOTE = (
-    "Escalation: a prior sanitization pass leaked: treat every quasi-identifier "
-    "and rare attribute as sensitive and redact aggressively."
-)
+_ESCALATION_NOTE = "Escalation: a prior sanitization pass leaked, or was not in line with the user's needs."
 
 
 def apply_entity_guidance(
@@ -17,10 +14,11 @@ def apply_entity_guidance(
     context_note: Optional[str] = None,
     note_label: str = "Human guidance",
 ) -> PrivacyPolicy:
-    """Merge entity labels; pin the escalation note and guidance into the prompt."""
-    entities = list(policy.sensitive_entities) + [
-        e for e in (extra_entities or []) if e not in policy.sensitive_entities
-    ]
+    """Merge entity labels, add the escalation note and guidance into the prompt."""
+    entities = list(policy.sensitive_entities)
+    for e in extra_entities or []:
+        if e not in entities:
+            entities.append(e)
     prompt = policy.domain_prompt
     if _ESCALATION_NOTE not in prompt:
         prompt += " " + _ESCALATION_NOTE

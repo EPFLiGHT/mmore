@@ -23,7 +23,11 @@ from typing_extensions import Self
 from ...rag.llm import LLMConfig
 from ...utils import load_config
 from ..config import AttackVector, PrivacyConfig
-from ..detection.constants import DETECTION_GUIDANCE, DETECTION_PARAM_GUIDANCE
+from ..detection.constants import (
+    DEFAULT_LLM_CONFIG,
+    DETECTION_GUIDANCE,
+    DETECTION_PARAM_GUIDANCE,
+)
 from ..dspy_llm import build_dspy_lm
 from ..leakage import SAFE_VERDICT, LeakageVerdict
 from ..policy import PrivacyPolicy
@@ -200,6 +204,16 @@ class AdversarialAgent(BaseAgent):
     ):
         self._dspy_lm: Optional[dspy.BaseLM] = None
         self._adversary_cfg = config.leakage_adversary
+        if self._adversary_cfg.enabled and llm_config is None:
+            llm_config = (
+                config.context_analyzer.llm
+                if config.context_analyzer
+                else DEFAULT_LLM_CONFIG
+            )
+            logger.warning(
+                "No leakage_adversary.llm configured, falling back to %s",
+                llm_config.llm_name,
+            )
         super().__init__(config, llm_config=llm_config, checkpointer=checkpointer)
 
     @classmethod
@@ -235,7 +249,7 @@ class AdversarialAgent(BaseAgent):
         entities: List[str],
         vector: AttackVector,
     ) -> LeakageVerdict:
-        """Run one attack vector; confidence 0.0 if the probe errors out."""
+        """Run one attack vector, if we get an error it's considered as a leak."""
         try:
             with dspy.context(lm=self._ensure_dspy_lm()):
                 prediction = predictor(

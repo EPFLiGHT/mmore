@@ -143,7 +143,7 @@ class HITLGateAgent(BaseAgent):
         config: PrivacyConfig,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ):
-        self._interactive = bool(config.interactive)
+        self._interactive = config.interactive
         super().__init__(config, llm_config=None, checkpointer=checkpointer)
 
     @classmethod
