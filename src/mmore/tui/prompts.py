@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, List, Optional
 
 import questionary
 from rich.markup import escape
@@ -17,7 +17,7 @@ from mmore.tui.theme import ACCENT, QMARK, QSTYLE, console
 from mmore.ux import DECORATION, Color
 
 
-def ask(prompt_obj: Any) -> Any:
+def ask(prompt_obj: questionary.Question) -> Any:
     """Call .ask() and translate Ctrl-C / Esc into UserCancelledError.
 
     questionary raises KeyboardInterrupt on Ctrl-C and returns None on Esc.
@@ -32,7 +32,7 @@ def ask(prompt_obj: Any) -> Any:
     return answer
 
 
-def _choice_title(value: Any, choices: Sequence[Any]) -> str:
+def _choice_title(value: Any, choices: List[Any]) -> str:
     """The display title of the chosen value, joining formatted-text titles."""
     for c in choices:
         if isinstance(c, questionary.Choice):
@@ -61,7 +61,7 @@ def _clean_answer(title: str) -> str:
 
 def select(
     question: str,
-    choices: Sequence[Any],
+    choices: List[Any],
     default: Optional[str] = None,
     answer_labels: Optional[dict[str, str]] = None,
 ) -> str:
