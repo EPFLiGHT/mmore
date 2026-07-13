@@ -23,8 +23,8 @@ class DomainProfile:
     name: str
     sensitive_entities: List[str]
     analyzer_system_prompt: str
-    sanitizer_system_prompt: str  # TODO: remove as sanitizer can be not llm based
     domain_prompt: str
+    sanitizer_system_prompt: str = ""
     default_engine: str = "presidio"
     default_confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     default_strategy: str = "token_masking"
@@ -101,8 +101,6 @@ GLOBAL_PROFILE = DomainProfile(
         "General-purpose context: protect personally identifiable information "
         "(names, contact details, identifiers, locations, dates)."
     ),
-    default_engine="presidio",  # TODO: After the experiments adjust these
-    default_strategy="token_masking",  # TODO: After the experiments adjust these
 )
 
 HEALTHCARE_PROFILE = DomainProfile(
@@ -123,8 +121,6 @@ HEALTHCARE_PROFILE = DomainProfile(
         "Clinical context: protected health information is highly sensitive; "
         "preserve clinically relevant facts but never patient identity."
     ),
-    default_engine="presidio",  # TODO: After the experiments adjust these
-    default_strategy="token_masking",  # TODO: After the experiments adjust these
 )
 
 HUMANITARIAN_PROFILE = DomainProfile(
@@ -146,8 +142,6 @@ HUMANITARIAN_PROFILE = DomainProfile(
         "people or households is highly sensitive; preserve aggregate "
         "operational facts only."
     ),
-    default_engine="presidio",  # TODO: After the experiments adjust these
-    default_strategy="token_masking",  # TODO: After the experiments adjust these
 )
 
 

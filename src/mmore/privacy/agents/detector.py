@@ -1,6 +1,6 @@
 """Detector.
 
-Pipeline:  analyzer  ->  [detector]  ->  sanitizer  ->  ... TODO: complete once implemented
+Pipeline:  analyzer  ->  [detector]  ->  sanitizer  ->  adversarial -> ...
 Reads:     policy, raw_chunks
 Writes:    spans, risk
 
@@ -34,7 +34,6 @@ logger = logging.getLogger(__name__)
 # ========================================================================
 
 # Density = total_spans / total_characters across all chunks
-# TODO: Adjust after experiments
 _RISK_DENSITY_MEDIUM = 0.005
 _RISK_DENSITY_HIGH = 0.02
 

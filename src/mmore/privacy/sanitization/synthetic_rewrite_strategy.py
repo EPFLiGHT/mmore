@@ -24,9 +24,9 @@ logger = logging.getLogger(__name__)
 _REWRITE_INSTRUCTION = (
     "Rewrite the chunk so it carries no sensitive personal identifiers while "
     "preserving the factual and topical content needed downstream. Follow the "
-    "domain-specific sanitization guidance in the system prompt. The "
-    "detected_entities list flags PII already found in the chunk: remove or "
-    "generalize each one."
+    "domain-specific sanitization guidance in the system prompt when one is "
+    "given. The detected_entities list flags PII already found in the chunk: "
+    "remove or generalize each one."
 )
 
 
@@ -37,7 +37,7 @@ _REWRITE_INSTRUCTION = (
 
 class _RewriteSignature(dspy.Signature):
     system_prompt: str = dspy.InputField(
-        desc="domain-specific sanitization guidance for the rewrite"
+        desc="domain-specific sanitization guidance for the rewrite, may be empty"
     )
     detected_entities: str = dspy.InputField(
         desc="newline-separated 'LABEL: text' of PII already detected in the chunk"

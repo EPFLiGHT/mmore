@@ -35,23 +35,37 @@ DETECTION_TOOL_NAMES = {
 
 
 # Per-engine guidance for the analyzer's engine selector
-# TODO: refine after experiments with pros and cons
 DETECTION_GUIDANCE: Dict[str, str] = {
     "presidio": (
         "Presidio: rule-based detection + spaCy NER, augmented with the "
-        "clinical recognizers shipped."
+        "clinical recognizers shipped. Precise but cautious, and the weakest of "
+        "the precise engines. Good on common structured identifiers, poor on "
+        "rare free-text attributes. Pick it when the text is well-formatted and "
+        "predictable, or when no model can be loaded."
     ),
     "gliner": (
         "GLiNER: zero-shot transformer NER over an arbitrary label set "
-        "(default: nvidia/gliner-PII). "
+        "(default: nvidia/gliner-PII). Precise on the entity types it knows "
+        "well, but cautious, and it degrades on rare attribute types and on "
+        "text unlike its training data. Pick it when false positives are costly "
+        "and the expected entity types are common."
     ),
     "openai_filter": (
         "openai/privacy-filter: HuggingFace token-classification model from "
-        "OpenAI for PII. "
+        "OpenAI for PII. Trades precision for recall: its token-level tagger "
+        "over-predicts and splits each identifier into sub-word spans, so its "
+        "output needs merging. Strong on names, dates and account numbers, weak "
+        "on attributes expressed in words rather than in a fixed pattern. Pick "
+        "it when a miss is worse than a false alarm."
     ),
     "llm": (
         "LLM-backed detection via DSPy typed structured output (uses the "
-        "configured LLM with a constrained schema). "
+        "configured LLM with a constrained schema). The most even across entity "
+        "types, and the one that holds up best on the rare, domain-specific "
+        "identifiers the other engines miss. Slowest and costliest. Pick it for "
+        "heterogeneous text, and whenever the user states very specific "
+        "detection needs: it is the only engine that can be steered by the "
+        "request itself."
     ),
 }
 
@@ -96,7 +110,6 @@ _CONFIDENCE_THRESHOLD_GUIDANCE = (
 )
 
 # Per-engine guidance for the analyzer's engine parameter selector
-# TODO: refine after experiments
 DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
     "presidio": (
         "Presidio (rule-based + spaCy NER + clinical recognizers).\n"
@@ -117,7 +130,6 @@ DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
     ),
 }
 
-# TODO: Later add new entities to the list
 DEFAULT_ENTITIES = [
     "PERSON",
     "PHONE",

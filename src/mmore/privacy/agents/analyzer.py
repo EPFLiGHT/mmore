@@ -1,6 +1,6 @@
 """Context/Policy Analyzer.
 
-Pipeline:  [analyzer]  ->  detector  ->  sanitizer  ->  ... TODO: complete once implemented
+Pipeline:  [analyzer]  ->  detector  ->  sanitizer  ->  adversarial -> ...
 Reads:     query, raw_chunks
 Writes:    policy
 
@@ -222,7 +222,7 @@ def _format_engine_guidance() -> str:
     return "\n".join(f"- {name}: {desc}" for name, desc in DETECTION_GUIDANCE.items())
 
 
-def _parse_param_prediction(  # TODO: check once final implemented new parameters to add
+def _parse_param_prediction(
     engine: str, prediction: dspy.Prediction
 ) -> Dict[str, Union[float, bool]] | None:
     """Parse and validate the generated engine parameters."""

@@ -1,6 +1,6 @@
 """Sanitizer.
 
-Pipeline:  analyzer  ->  detector  ->  [sanitizer]  ->  ... TODO: complete once implemented
+Pipeline:  analyzer  ->  detector  ->  [sanitizer]  ->  adversarial -> ...
 Reads:     policy, raw_chunks, spans
 Writes:    sanitized_chunks
 
