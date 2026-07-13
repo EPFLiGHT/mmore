@@ -29,8 +29,10 @@ class PrivacyState(NodeOutput, total=False):
     raw_chunks: List[str]
     policy: Optional[PrivacyPolicy]
     spans: List[List[PIISpan]]
+    query_spans: List[PIISpan]
     risk: Optional[RiskAssessment]
     sanitized_chunks: List[str]
+    sanitized_query: str
 
     # Leakage adversary + escalation loop
     verdict: Optional[LeakageVerdict]

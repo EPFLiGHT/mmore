@@ -70,6 +70,7 @@ class LeakageAdversaryConfig:
     enabled: bool = True
     max_iterations: int = 3
     leakage_threshold: float = 0.5
+    abort_on_exhaustion: bool = True
     strategies: List[AttackVector] = field(default_factory=lambda: list(AttackVector))
     llm: Optional[LLMConfig] = None
 

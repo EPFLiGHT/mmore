@@ -95,9 +95,11 @@ _FEEDBACK_POLICY_INSTRUCTION = (
     "anonymization technique (masking characters, hashing, encryption), choose "
     "the presidio strategy and the matching operator. When it describes how "
     "the sanitized text should read, choose synthetic_rewrite and distill a "
-    "short rewrite instruction. Return the chosen value from the available "
-    "options, 'keep' for a field the feedback does not affect, and 'none' for "
-    "no rewrite instruction."
+    "short rewrite instruction. When it describes what or how to detect (e.g. "
+    "treat certain terms or patterns as sensitive), choose the llm engine and "
+    "distill a short detection instruction. Return the chosen value from the "
+    "available options, 'keep' for a field the feedback does not affect, and "
+    "'none' for no rewrite or detection instruction."
 )
 
 
@@ -139,6 +141,10 @@ _REQUESTED_OPERATOR_DESC = (
 )
 _REWRITE_INSTRUCTION_DESC = (
     "concise PII-free instruction for the rewrite LLM distilled from the "
+    "feedback, or 'none'"
+)
+_DETECTION_INSTRUCTION_DESC = (
+    "concise PII-free instruction for the LLM detector distilled from the "
     "feedback, or 'none'"
 )
 
@@ -195,6 +201,7 @@ class _FeedbackPolicySignature(dspy.Signature):
     requested_threshold: str = dspy.OutputField(desc=_REQUESTED_THRESHOLD_DESC)
     requested_operator: str = dspy.OutputField(desc=_REQUESTED_OPERATOR_DESC)
     rewrite_instruction: str = dspy.OutputField(desc=_REWRITE_INSTRUCTION_DESC)
+    detection_instruction: str = dspy.OutputField(desc=_DETECTION_INSTRUCTION_DESC)
 
 
 class _PresidioParamsSignature(dspy.Signature):
@@ -327,6 +334,8 @@ def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
         changes.append(f"operator->{new_operator}")
     if new.sanitizer_system_prompt != old.sanitizer_system_prompt:
         changes.append("rewrite_prompt")
+    if new.detector_system_prompt != old.detector_system_prompt:
+        changes.append("detection_prompt")
     added_labels = len(new.sensitive_entities) - len(old.sensitive_entities)
     if added_labels:
         changes.append(f"+{added_labels}_labels")
@@ -354,6 +363,7 @@ def _detection_unchanged(old: PrivacyPolicy, new: PrivacyPolicy) -> bool:
     return (
         new.detection_engine == old.detection_engine
         and new.detection_params == old.detection_params
+        and new.detector_system_prompt == old.detector_system_prompt
         and set(new.sensitive_entities) == set(old.sensitive_entities)
     )
 
@@ -549,6 +559,9 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         threshold = str(getattr(prediction, "requested_threshold", "")).strip().lower()
         operator = str(getattr(prediction, "requested_operator", "")).strip().lower()
         instruction = str(getattr(prediction, "rewrite_instruction", "")).strip()
+        detection_instruction = str(
+            getattr(prediction, "detection_instruction", "")
+        ).strip()
         engine_pinned = respect_config_pins and self.config.detection.engine
         strategy_pinned = respect_config_pins and self.config.sanitization.strategy
         threshold_pinned = (
@@ -586,6 +599,13 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             )
             if prompt != policy.sanitizer_system_prompt:
                 updates["sanitizer_system_prompt"] = prompt
+        final_engine = updates.get("detection_engine", policy.detection_engine)
+        if final_engine == "llm":
+            detector_prompt = _pin_rewrite_instruction(
+                policy.detector_system_prompt, detection_instruction
+            )
+            if detector_prompt != policy.detector_system_prompt:
+                updates["detector_system_prompt"] = detector_prompt
         return replace(policy, **updates) if updates else policy
 
     def _operator_params(self, operator: str) -> Dict[str, object]:

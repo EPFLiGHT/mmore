@@ -122,4 +122,7 @@ class SanitizerAgent(BaseAgent):
                 f"spans/raw_chunks length mismatch: {len(spans_per_chunk)} != {len(chunks)}"
             )
         sanitized = self.sanitize(policy, chunks, spans_per_chunk)
-        return PrivacyState(sanitized_chunks=sanitized)
+        query = state.get("query", "")
+        query_spans = list(state.get("query_spans") or [])
+        sanitized_query = self.sanitize(policy, [query], [query_spans])[0]
+        return PrivacyState(sanitized_chunks=sanitized, sanitized_query=sanitized_query)

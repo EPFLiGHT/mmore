@@ -21,4 +21,5 @@ class PrivacyPolicy:
     detection_params: dict = field(default_factory=dict)
     sanitization_params: dict = field(default_factory=dict)
     sanitizer_system_prompt: str = ""
+    detector_system_prompt: str = ""
     flagged_fields: List[str] = field(default_factory=list)

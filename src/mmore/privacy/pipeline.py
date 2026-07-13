@@ -60,15 +60,14 @@ class _Route(str, Enum):
     REJECTED = "rejected"
 
 
-def _route_after_adversary(state: PrivacyState, max_iterations: int) -> _Route:
-    """Decide branch once the adversary attacked the sanitized context.
-
-    Only leak-driven escalations count against ``max_iterations``.
-    """
+def _route_after_adversary(
+    state: PrivacyState, max_iterations: int, abort_on_exhaustion: bool
+) -> _Route:
+    """Decide branch once the adversary attacked the sanitized context."""
     if state.get("safe", False):
         return _Route.PROCEED
     if state.get("adversary_escalations", 0) >= max_iterations:
-        return _Route.UNSAFE
+        return _Route.UNSAFE if abort_on_exhaustion else _Route.PROCEED
     return _Route.ESCALATE
 
 
@@ -102,6 +101,7 @@ def build_pipeline_graph(
     answer: NodeFn,
     verifier: NodeFn,
     max_iterations: int = 3,
+    abort_on_exhaustion: bool = True,
     checkpointer: Optional[BaseCheckpointSaver] = None,
 ):
     """Compile the full pipeline from explicit node callables."""
@@ -122,7 +122,9 @@ def build_pipeline_graph(
     graph.add_edge(_Node.SANITIZER, _Node.ADVERSARY)
     graph.add_conditional_edges(
         _Node.ADVERSARY,
-        lambda state: _route_after_adversary(state, max_iterations),
+        lambda state: _route_after_adversary(
+            state, max_iterations, abort_on_exhaustion
+        ),
         {
             _Route.PROCEED: _Node.GATE,
             _Route.ESCALATE: _Node.ANALYZER,
@@ -172,5 +174,6 @@ def build_privacy_pipeline(
         answer=answer._node,
         verifier=verifier._node,
         max_iterations=config.leakage_adversary.max_iterations,
+        abort_on_exhaustion=config.leakage_adversary.abort_on_exhaustion,
         checkpointer=checkpointer,
     )

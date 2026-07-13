@@ -137,6 +137,7 @@ class DetectorAgent(BaseAgent):
             engine = LLMDetectionEngine(
                 self._llm_config,
                 sensitive_entities=policy.sensitive_entities or None,
+                instruction=policy.detector_system_prompt,
                 **policy.detection_params,
             )
             return lambda chunk, _policy: engine.detect(chunk)
@@ -172,4 +173,7 @@ class DetectorAgent(BaseAgent):
             return PrivacyState(skip_detection=False)
         chunks = list(state.get("raw_chunks", []))
         spans_per_chunk, risk = self.detect(policy, chunks)
-        return PrivacyState(spans=spans_per_chunk, risk=risk)
+        query_spans, _ = self.detect(policy, [state.get("query", "")])
+        return PrivacyState(
+            spans=spans_per_chunk, query_spans=query_spans[0], risk=risk
+        )

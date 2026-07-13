@@ -66,11 +66,14 @@ def _render_chunk_diff(raw: str, sanitized: str) -> str:
     return "".join(parts).strip()
 
 
-def _render_chunks(chunks: List[dict]) -> str:
-    """The full 'view' screen for the gate's chunk pairs."""
-    if not chunks:
+def _render_chunks(query: Optional[dict], chunks: List[dict]) -> str:
+    """The full 'view' screen for the gate's sanitized query and chunk pairs."""
+    if not query and not chunks:
         return "No sanitized context available."
     blocks = [_VIEW_LEGEND]
+    if query:
+        diff = _render_chunk_diff(query.get("raw", ""), query.get("sanitized", ""))
+        blocks.append(f"--- Query ---\n{diff}")
     for number, chunk in enumerate(chunks, 1):
         diff = _render_chunk_diff(chunk.get("raw", ""), chunk.get("sanitized", ""))
         blocks.append(f"--- Chunk {number} ---\n{diff}")
@@ -93,7 +96,7 @@ def terminal_approver(payload: dict) -> object:
             choice = input("Gate > ").strip()
             if choice.lower() in _VIEW_CHOICES:
                 print()
-                print(_render_chunks(payload.get("chunks", [])))
+                print(_render_chunks(payload.get("query"), payload.get("chunks", [])))
                 continue
             if choice.lower() in _RETRY_CHOICES:
                 feedback = input("Feedback (optional, Enter to skip) > ").strip()

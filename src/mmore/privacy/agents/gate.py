@@ -130,8 +130,10 @@ def build_gate_summary(state: PrivacyState) -> str:
     elif verdict == SAFE_VERDICT or verdict.vector is None:
         gate_verdict = "adversary did not probe (disabled or no sanitized context)"
     else:
+        # abort_on_exhaustion can route an uncleared context here
+        cleared = "cleared" if state.get("safe", False) else "did not clear"
         gate_verdict = (
-            f"adversary cleared the context (strongest probe {verdict.vector.value} "
+            f"adversary {cleared} the context (strongest probe {verdict.vector.value} "
             f"at confidence {verdict.confidence:.2f})"
         )
 
@@ -183,6 +185,10 @@ class HITLGateAgent(BaseAgent):
         base = {
             "summary": summary,
             "options": _gate_options(),
+            "query": {
+                "raw": state.get("query", ""),
+                "sanitized": state.get("sanitized_query", ""),
+            },
             "chunks": [
                 {"raw": raw, "sanitized": sanitized}
                 for raw, sanitized in zip(

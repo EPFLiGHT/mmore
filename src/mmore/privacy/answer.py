@@ -1,13 +1,13 @@
 """Post-cloud answer model.
 
 Pipeline:  ... -> gate -> [answer] -> verifier -> report
-Reads:     query, policy (domain prompt), sanitized_chunks
+Reads:     sanitized_query, policy (domain prompt), sanitized_chunks
 Writes:    answer, answer_backend, answer_model
 
 It receives only the sanitized context that passed the pre-cloud gate
-plus the query and the selected domain prompt.
+plus the sanitized query and the selected domain prompt.
 
-It must never read the raw chunks.
+It must never read the raw chunks or the raw query.
 """
 
 import logging
@@ -82,7 +82,7 @@ class AnswerModel:
         policy = state.get("policy")
         domain_prompt = policy.domain_prompt if policy else ""
         answer = self.answer(
-            state.get("query", ""),
+            state.get("sanitized_query", ""),
             list(state.get("sanitized_chunks", [])),
             domain_prompt,
         )

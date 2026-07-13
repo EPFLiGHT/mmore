@@ -83,10 +83,9 @@ def _build_demos() -> List[dspy.Example]:
     ]
 
 
-def _build_predictor() -> dspy.Predict:
-    predictor = dspy.Predict(
-        _DetectPIISignature.with_instructions(PII_DETECTION_INSTRUCTION)
-    )
+def _build_predictor(instruction: str = "") -> dspy.Predict:
+    full = f"{PII_DETECTION_INSTRUCTION} {instruction}".strip()
+    predictor = dspy.Predict(_DetectPIISignature.with_instructions(full))
     predictor.demos = _build_demos()
     return predictor
 
@@ -102,12 +101,14 @@ class LLMDetectionEngine(DetectionEngine):
         llm_config: LLMConfig,
         sensitive_entities: Optional[Sequence[str]] = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
+        instruction: str = "",
     ):
         self._llm_config = llm_config
         self._sensitive_entities: List[str] = (
             list(sensitive_entities) if sensitive_entities else list(DEFAULT_ENTITIES)
         )
         self._confidence_threshold = confidence_threshold
+        self._instruction = instruction
         self._llm: Optional[dspy.BaseLM] = None
         self._predictor: Optional[dspy.Predict] = None
 
@@ -134,18 +135,16 @@ class LLMDetectionEngine(DetectionEngine):
     @property
     def llm(self) -> dspy.BaseLM:
         """Lazy-build and cache the DSPy LM on first access."""
-        llm = self._llm
-        if llm is None:
-            llm = self._llm = build_dspy_lm(self._llm_config)
-        return llm
+        if self._llm is None:
+            self._llm = build_dspy_lm(self._llm_config)
+        return self._llm
 
     @property
     def predictor(self) -> dspy.Predict:
         """Lazy-build and cache the DSPy predictor on first access."""
-        predictor = self._predictor
-        if predictor is None:
-            predictor = self._predictor = _build_predictor()
-        return predictor
+        if self._predictor is None:
+            self._predictor = _build_predictor(self._instruction)
+        return self._predictor
 
     def detect(self, text: str) -> List[PIISpan]:
         lm = self.llm
@@ -201,6 +200,7 @@ def detect_pii_llm(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
     engine = LLMDetectionEngine(
         DEFAULT_LLM_CONFIG,
         sensitive_entities=policy.sensitive_entities or None,
+        instruction=policy.detector_system_prompt,
         **policy.detection_params,
     )
     return engine.detect(text)

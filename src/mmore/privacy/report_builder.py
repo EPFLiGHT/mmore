@@ -63,6 +63,7 @@ def build_report_record(state: PrivacyState) -> ReportRecord:
         advisory_warnings=_warning_summaries(verdict),
         hitl_events=_hitl_events(state),
         outcome=_outcome(state, verdict),
+        sanitized_query=state.get("sanitized_query", ""),
     )
 
 

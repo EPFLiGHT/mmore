@@ -73,3 +73,4 @@ class ReportRecord:
     advisory_warnings: List[WarningSummary]
     hitl_events: List[HITLEvent]
     outcome: ReportOutcome
+    sanitized_query: str = ""

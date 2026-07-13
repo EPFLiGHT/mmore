@@ -471,6 +471,24 @@ def test_terminal_approver_view_prints_chunks_then_resumes(monkeypatch, capsys):
     assert out.count("[1]") == 2  # menu shown again after the view
 
 
+def test_terminal_approver_view_renders_sanitized_query(monkeypatch, capsys):
+    from mmore.privacy.runner import terminal_approver
+
+    payload = {
+        **_GATE_PAYLOAD,
+        "query": {"raw": "Is John Doe sick?", "sanitized": "Is [PERSON] sick?"},
+        "chunks": [{"raw": "Call John Doe.", "sanitized": "Call [PERSON]."}],
+    }
+    answers = iter(["v", "1"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert terminal_approver(payload) == "1"
+    out = capsys.readouterr().out
+    assert "Query" in out
+    assert f"{_RED}John Doe{_RESET}" in out
+    assert f"{_GREEN}[PERSON]{_RESET}" in out
+
+
 def test_terminal_approver_view_without_chunks_prints_notice(monkeypatch, capsys):
     from mmore.privacy.runner import terminal_approver
 
