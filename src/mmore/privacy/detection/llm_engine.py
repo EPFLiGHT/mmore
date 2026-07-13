@@ -57,7 +57,6 @@ class _DetectPIISignature(dspy.Signature):
     spans: List[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
 
 
-# TODO: refine these examples later once we have domain definitions
 def _build_demos() -> List[dspy.Example]:
     return [
         dspy.Example(
