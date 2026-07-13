@@ -14,7 +14,7 @@ import logging
 import os
 import threading
 from collections import OrderedDict
-from typing import Callable, Optional, Tuple, TypeVar, cast
+from typing import Callable, Optional, TypeVar, cast
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class ModelRegistry:
         self._budget_mb = budget_mb
         self._budget_bytes: Optional[int] = None
         self._budget_ready = False
-        self._entries: "OrderedDict[str, Tuple[object, int]]" = OrderedDict()
+        self._entries: OrderedDict[str, tuple[object, int]] = OrderedDict()
         self._total = 0
         self._lock = threading.Lock()
 
