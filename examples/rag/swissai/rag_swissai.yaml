@@ -11,5 +11,5 @@ rag:
     k: 5
   system_prompt: "Use the following context to answer the questions.\n\nContext:\n{context}"
 inference:
-  input_file: ./examples/rag/queries.jsonl
+  input_file: ./examples/rag/swissai/queries.jsonl
   output_file: ./examples/rag/swissai/output.jsonl

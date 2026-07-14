@@ -10,9 +10,11 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, TypeVar
 
 logger = logging.getLogger(__name__)
+
+R = TypeVar("R")
 
 
 @dataclass
@@ -204,20 +206,19 @@ def time_context(name: str, log: bool = True):
             logger.info(f"⏱️  {name} took {elapsed:.4f} seconds")
 
 
-def time_function(func: Optional[Callable] = None, log: bool = True):
+def time_function(log: bool = True) -> Callable[[Callable[..., R]], Callable[..., R]]:
     """Decorator to time a function execution.
 
     Args:
-        func: Function to decorate (if used as decorator without parentheses)
         log: Whether to log the timing result
 
     Returns:
         Decorated function
     """
 
-    def decorator(f: Callable) -> Callable:
+    def decorator(f: Callable[..., R]) -> Callable[..., R]:
         @functools.wraps(f)
-        def wrapper(*args, **kwargs):
+        def wrapper(*args: object, **kwargs: object) -> R:
             start_time = time.time()
             try:
                 result = f(*args, **kwargs)
@@ -229,10 +230,7 @@ def time_function(func: Optional[Callable] = None, log: bool = True):
 
         return wrapper
 
-    if func is None:
-        return decorator
-    else:
-        return decorator(func)
+    return decorator
 
 
 class Profiler:

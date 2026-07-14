@@ -12,16 +12,16 @@
   </a>
 </p>
 
-####  Massive Multimodal Open RAG & Extraction
+## Massive Multimodal Open RAG & Extraction
 
-MMORE is an open-source, end-to-end pipeline to ingest, process, index, and retrieve knowledge from heterogeneous files: PDFs, Office docs, spreadsheets, emails, images, audio, video, and web pages. It standardizes content into a unified multimodal format, supports distributed CPU/GPU processing, and provides hybrid dense+sparse retrieval with an integrated RAG service (CLI, APIs). 
+mmore is an open-source, end-to-end pipeline to ingest, process, index, and retrieve knowledge from heterogeneous files: PDFs, Office docs, spreadsheets, emails, images, audio, video, and web pages. It standardizes content into a unified multimodal format, supports distributed CPU/GPU processing, and provides hybrid dense+sparse retrieval with an integrated RAG service (CLI, APIs).
+https://github.com/EPFLiGHT/mmore/pull/319/conflict?name=.github%252Fworkflows%252Fpyright.yml&ancestor_oid=e880609d900c8d1ca113e404d0d60dc5604ddc65&base_oid=652683914c68996968fa4d333618d000927a80eb&head_oid=104f07055d58c2e6c1420d89649cd5de5e57f32e
+👉 Read the paper for more details (arXiv): [mmore: Massive Multimodal Open RAG & Extraction](https://arxiv.org/abs/2509.11937)
 
-👉 Read the paper for more details (arXiv): [MMORE: Massive Multimodal Open RAG & Extraction](https://arxiv.org/abs/2509.11937)
 
+## Documentation
 
-### Documentation
-
-👉 Read the full documentation here: [MMORE Documentation](https://EPFLiGHT.github.io/mmore/).
+👉 Read the full documentation here: [mmore Documentation](https://EPFLiGHT.github.io/mmore/).
 
 
 ## :bulb: Quickstart
@@ -43,7 +43,7 @@ Our package requires system dependencies. This snippet will take care of install
 sudo apt update
 sudo apt install -y ffmpeg libsm6 libxext6 libnss3 \
   libxi6 libxrandr2 libxcomposite1 libxcursor1 libxdamage1 \
-  libxext6 libxfixes3 libxrender1 libasound2 libatk1.0-0 libgtk-3-0 libreoffice \
+  libxfixes3 libxrender1 libasound2 libatk1.0-0 libgtk-3-0 libreoffice \
   libpango-1.0-0 libpangoft2-1.0-0 weasyprint
 ```
 
@@ -66,9 +66,9 @@ brew install cairo pango gdk-pixbuf libffi
 uv pip install weasyprint
 ```
 
-You can also run MMORE on Windows by following our [Windows setup notes](docs/source/getting_started/windows.md).
+You can also run mmore on Windows by following our [Windows setup notes](docs/source/getting_started/windows.md).
 
-#### Step 1 – Install MMORE
+#### Step 1 – Install mmore
 
 Dependencies are split by pipeline stage. Install only what you need:
 
@@ -101,16 +101,16 @@ uv pip install "mmore[all,cu126]"
 uv pip install "mmore[process,cpu]"
 ```
 
-> :warning: This package requires many big dependencies, so it is recommended to install with `uv` to handle `pip` installations. [Check our tutorial on uv](https://github.com/EPFLiGHT/mmore/blob/master/docs/uv.md).
+> :warning: This package requires many big dependencies, so it is recommended to install with `uv` to handle `pip` installations. [Check our tutorial on uv](https://EPFLiGHT.github.io/mmore/advanced_usage/uv.html).
 
-> :warning: **Check the instructions for contributors directly at [`docs/for_devs.md`](./docs/for_devs.md)**
+> :warning: **Check the instructions for contributors directly in the documentation [`for_devs.md`](https://EPFLiGHT.github.io/mmore/developer_documentation/for_devs.html).**
 
 ### Interactive TUI
 
 Prefer a guided experience over editing YAML by hand? Install the `tui` extra and launch the interactive Terminal UI:
 
 ```bash
-uv sync --extra tui
+uv pip install "mmore[tui]"
 mmore tui
 ```
 
@@ -158,31 +158,31 @@ MultimodalSample.to_jsonl(out_file, result_pdf)
 
 ### Usage
 
-To launch the MMORE pipeline, follow the specialised instructions in the docs.
+To launch the mmore pipeline, follow the specialised instructions in the docs.
 
-![The MMORE pipelines architecture](https://github.com/user-attachments/assets/0cd61466-1680-43ed-9d55-7bd483a04a09)
+![The mmore pipelines architecture](docs/source/doc_images/pipeline_mmore+.png)
 
 
 1. **:page_facing_up: Input Documents**
    Upload your multimodal documents (PDFs, videos, spreadsheets, and m(m)ore) into the pipeline.
 
-2. [**:mag: Process**](https://github.com/EPFLiGHT/mmore/blob/master/docs/process.md)
+2. [**:mag: Process**](https://EPFLiGHT.github.io/mmore/getting_started/process.html)
    Extracts and standardizes text, metadata, and multimedia content from diverse file formats. Easily extensible! You can add your own processors to handle new file types.
    *Supports fast processing for specific types.*
 
-3. [**:file_folder: Index**](https://github.com/EPFLiGHT/mmore/blob/master/docs/index.md)
-   Organizes extracted data into a **hybrid retrieval-ready Vector Store DB**, combining dense and sparse indexing through [Milvus](https://milvus.io/). Your vector DB can also be remotely hosted and then you only have to provide a standard API. There is also an [HTTP Index API](https://github.com/EPFLiGHT/mmore/blob/master/docs/index_api.md) for adding new files on the fly with HTTP requests.
+3. [**:file_folder: Index**](https://EPFLiGHT.github.io/mmore/getting_started/indexing.html)
+   Organizes extracted data into a **hybrid retrieval-ready Vector Store DB**, combining dense and sparse indexing through [Milvus](https://milvus.io/). Your vector DB can also be remotely hosted and then you only have to provide a standard API. There is also an [HTTP Index API](https://EPFLiGHT.github.io/mmore/developer_documentation/index_api.html) for adding new files on the fly with HTTP requests.
 
-4. [**:robot: RAG**](https://github.com/EPFLiGHT/mmore/blob/master/docs/rag.md)
-   Use the indexed documents inside a **Retrieval-Augmented Generation (RAG) system**  that provides a [LangChain](https://www.langchain.com/) interface. Plug in any LLM with a compatible interface or add new ones through an easy-to-use interface.
+4. [**:robot: RAG**](https://EPFLiGHT.github.io/mmore/getting_started/rag.html)
+   Use the indexed documents inside a **Retrieval-Augmented Generation (RAG) system** that provides a [LangChain](https://www.langchain.com/) interface. Plug in any LLM with a compatible interface or add new ones through an easy-to-use interface.
    *Supports API hosting or local inference.*
 
-5. [**:globe_with_meridians: Web Search**](https://github.com/EPFLiGHT/mmore/blob/master/docs/websearch.md)
+5. [**:globe_with_meridians: Web Search**](https://EPFLiGHT.github.io/mmore/core_features/websearch.html)
    Augments RAG answers with live web search results using an iterative sub-query loop.
    DuckDuckGo is the default provider (free, no API key needed). Tavily is available as an optional higher-quality provider.
     ```bash
       # Install web search dependencies
-      pip install "mmore[rag,websearch]"
+      uv pip install "mmore[rag,websearch]"
 
       # Optional: use Tavily instead of DuckDuckGo
       export TAVILY_API_KEY=your_key_here
@@ -191,8 +191,6 @@ To launch the MMORE pipeline, follow the specialised instructions in the docs.
 6. **:tada: Evaluation**
    *Coming soon*
    An easy way to evaluate the performance of your RAG system using Ragas.
-
-See [the `/docs` directory](https://github.com/EPFLiGHT/mmore/blob/master/docs) for additional details on each modules and hands-on tutorials on parts of the pipeline.
 
 
 #### :construction: Supported File Types
@@ -208,14 +206,18 @@ See [the `/docs` directory](https://github.com/EPFLiGHT/mmore/blob/master/docs) 
 
 This project is licensed under the Apache 2.0 License, see the [LICENSE :mortar_board:](LICENSE) file for details.
 
-## Cite MMORE
+## Cite mmore
 
-If you use MMORE in your research, please cite the paper:
-```
-@inproceedings{sallinenm,
-  title={M (M) ORE: Massive Multimodal Open RAG \& Extraction},
-  author={Sallinen, Alexandre and Krsteski, Stefan and Teiletche, Paul and Marc-Antoine, Allard and Lecoeur, Baptiste and Zhang, Michael and Nemo, Fabrice and Kalajdzic, David and Meyer, Matthias and Hartley, Mary-Anne},
-  booktitle={Championing Open-source DEvelopment in ML Workshop@ ICML25}
+If you use mmore in your research, please cite the paper:
+```bibtex
+@misc{sallinen2025mmoremassivemultimodalopen,
+      title={mmore: Massive Multimodal Open RAG & Extraction}, 
+      author={Alexandre Sallinen and Stefan Krsteski and Paul Teiletche and Marc-Antoine Allard and Baptiste Lecoeur and Michael Zhang and Fabrice Nemo and David Kalajdzic and Matthias Meyer and Mary-Anne Hartley},
+      year={2025},
+      eprint={2509.11937},
+      archivePrefix={arXiv},
+      primaryClass={cs.SE},
+      url={https://arxiv.org/abs/2509.11937}, 
 }
 ```
 

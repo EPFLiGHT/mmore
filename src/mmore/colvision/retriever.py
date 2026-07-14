@@ -59,7 +59,7 @@ def embed_queries(texts: List[str], model, processor) -> List[np.ndarray]:
         with torch.no_grad():
             batch_query = {k: v.to(model.device) for k, v in batch_query.items()}
             emb = model(**batch_query)
-            vectors.extend(list(torch.unbind(emb.to("cpu"))))
+            vectors.extend(list(emb.to("cpu").unbind()))
     return [v.float().numpy() for v in vectors]
 
 

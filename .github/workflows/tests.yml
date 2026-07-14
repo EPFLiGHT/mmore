@@ -44,7 +44,7 @@ jobs:
       - name: Run tests - process
         run: |
           source .venv/bin/activate
-          pytest --ignore=tests/test_colvision.py
+          pytest
 
       - name: Install dependencies - colvision
         run: |

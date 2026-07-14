@@ -17,7 +17,7 @@ python3 -m mmore process --config-file examples/process/config.yaml
 ```
 
 ### 📌 Google Drive support
-MMORE also supports processing documents directly from **Google Drive**.
+mmore also supports processing documents directly from **Google Drive**.
 
 To enable this feature, the user must create a [Google service account](https://cloud.google.com/iam/docs/service-accounts-create) and download the corresponding secrets as a JSON file. Name that file `client_secrets.json` and put it in `googledrive/` (this folder may need to be created at the root of the mmore repository).
 
@@ -46,7 +46,7 @@ google_drive_ids:
 
 You can use local folders, Google Drive folders, or both in the same configuration.
 
-Make sure each referenced Google Drive folder is shared with the service account used by MMORE.
+Make sure each referenced Google Drive folder is shared with the service account used by mmore.
 
 You can find an example config file in [`examples/process/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/master/examples/process/config.yaml).
 
@@ -138,7 +138,7 @@ Our pipeline is a 3 steps process:
 3. **Processing**  
    Workers process files with the appropriate tools for each file type. They extract text, images, audio, and video frames, then pass the results to the next stage.
 
-MMORE uses a common data structure for document samples: [MultimodalSample](https://github.com/EPFLiGHT/mmore/blob/master/src/mmore/type.py#L38).
+mmore uses a common data structure for document samples: [MultimodalSample](https://github.com/EPFLiGHT/mmore/blob/master/src/mmore/type.py#L38).
 
 The goal is to make it easy to add new processors for new file types, or alternative processing methods for existing ones.
 
@@ -160,7 +160,7 @@ The project supports multiple file types and utilizes various AI-based tools for
 | **HTML**                         | [markdownify](https://pypi.org/project/markdownify/) to convert HTML to MD; [requests](https://docs.python-requests.org/en/master/) for images | N/A
 ---
 
-MMORE also uses [Dask Distributed](https://distributed.dask.org/en/latest/) to manage distributed execution.
+mmore also uses [Dask Distributed](https://distributed.dask.org/en/latest/) to manage distributed execution.
 
 ## 🔧 Customization
 The system is designed to be extensible, allowing you to register custom processors for handling new file types or specialized processing. To implement a new processor you need to inherit the `Processor` class and implement only two methods:

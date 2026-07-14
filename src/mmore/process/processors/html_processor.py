@@ -85,7 +85,7 @@ class HTMLProcessor(Processor):
                     images.append(image)
 
                 except Exception as e:
-                    logger.error(f"Failed to load image {src}: {e}")
+                    logger.debug(f"Failed to load image {src}: {e}")
 
             return images
 
@@ -98,14 +98,14 @@ class HTMLProcessor(Processor):
 
         markdown = md(html, heading_style="ATX")
 
-        if self.config.custom_config.get("extract_images", True):
+        if self.config.extract_images:
             embedded_images = _extract_images_from_markdown(markdown)
 
         else:
             embedded_images = []
 
         # If extract_images is enabled, optionally replace image markdown with a placeholder
-        if self.config.custom_config.get("extract_images", True):
+        if self.config.extract_images:
             # Replace all image markdown with the placeholder
             markdown = re.sub(r"!\[.*?\]\(.*?\)", self.config.attachment_tag, markdown)
 

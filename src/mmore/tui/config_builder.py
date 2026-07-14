@@ -26,49 +26,19 @@ from rich.text import Text
 from mmore.tui.commands import CommandSpec
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default, repo_root, resolve_example
-from mmore.tui.theme import ACCENT, ACCENT2, QMARK, QSTYLE, console, section
-
-
-def _ask(prompt_obj: Any) -> Any:
-    """Call .ask() and translate Ctrl-C / Esc into UserCancelledError.
-
-    questionary raises KeyboardInterrupt on Ctrl-C and returns None on Esc.
-    Both should land us back at the main menu, not exit the TUI.
-    """
-    try:
-        answer = prompt_obj.ask()
-    except KeyboardInterrupt as e:
-        raise UserCancelledError("cancelled") from e
-    if answer is None:
-        raise UserCancelledError("cancelled")
-    return answer
-
+from mmore.tui.prompts import ask, confirm, prompt, prompt_float, prompt_int, select
+from mmore.tui.theme import (
+    ACCENT,
+    ACCENT2,
+    ERR,
+    QMARK,
+    QSTYLE,
+    console,
+    section,
+)
+from mmore.ux import Color
 
 CONFIG_DIR = Path("./tui-configs")
-
-
-def _prompt(question: str, default: str = "") -> str:
-    return _ask(questionary.text(question, default=default, style=QSTYLE, qmark=QMARK))
-
-
-def _confirm(question: str, default: bool = False) -> bool:
-    return _ask(
-        questionary.confirm(question, default=default, style=QSTYLE, qmark=QMARK)
-    )
-
-
-def _prompt_int(question: str, default: int) -> int:
-    try:
-        return int(_prompt(question, str(default)))
-    except ValueError:
-        return default
-
-
-def _prompt_float(question: str, default: float) -> float:
-    try:
-        return float(_prompt(question, str(default)))
-    except ValueError:
-        return default
 
 
 def _save(name: str, data: dict[str, Any]) -> str:
@@ -107,18 +77,14 @@ def _post_validation_menu(path: str, spec: CommandSpec) -> str:
     Returns the (potentially re-validated) path.
     """
     while True:
-        action = _ask(
-            questionary.select(
-                "What next?",
-                choices=[
-                    questionary.Choice("▶  Run with this config", value="run"),
-                    questionary.Choice("👁  Preview config", value="preview"),
-                    questionary.Choice("✎  Edit in $EDITOR", value="edit"),
-                ],
-                default="run",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        action = select(
+            "What next?",
+            choices=[
+                questionary.Choice("▶  Run with this config", value="run"),
+                questionary.Choice("👁  Preview config", value="preview"),
+                questionary.Choice("✎  Edit in $EDITOR", value="edit"),
+            ],
+            default="run",
         )
         if action == "run":
             return path
@@ -135,17 +101,17 @@ def _post_validation_menu(path: str, spec: CommandSpec) -> str:
 
 
 def build_process_config() -> str:
-    data_path = _prompt(
+    data_path = prompt(
         "Data path (folder with documents to process)",
         cwd_default("data"),
     )
-    output_path = _prompt(
+    output_path = prompt(
         "Output path (where merged_results.jsonl will be written)",
         cwd_default("outputs/process"),
     )
-    use_fast = _confirm("Use fast (lower-quality) processors?", default=False)
-    distributed = _confirm("Use distributed processing (Dask)?", default=False)
-    extract_images = _confirm("Extract images from documents?", default=True)
+    use_fast = confirm("Use fast (lower-quality) processors?", default=False)
+    distributed = confirm("Use distributed processing (Dask)?", default=False)
+    extract_images = confirm("Extract images from documents?", default=True)
 
     cfg = {
         "data_path": data_path,
@@ -195,25 +161,17 @@ def build_process_config() -> str:
 
 
 def build_postprocess_config() -> str:
-    strategy = _ask(
-        questionary.select(
-            "Chunking strategy",
-            choices=["sentence", "token", "word", "semantic"],
-            default="sentence",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    strategy = select(
+        "Chunking strategy",
+        choices=["sentence", "token", "word", "semantic"],
+        default="sentence",
     )
-    table_handling = _ask(
-        questionary.select(
-            "Table handling",
-            choices=["single_row", "multi_rows", "keep_whole", "none"],
-            default="single_row",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    table_handling = select(
+        "Table handling",
+        choices=["single_row", "multi_rows", "keep_whole", "none"],
+        default="single_row",
     )
-    output_path = _prompt(
+    output_path = prompt(
         "Output JSONL path",
         cwd_default("outputs/postprocess/results.jsonl"),
     )
@@ -235,14 +193,14 @@ def build_postprocess_config() -> str:
 
 
 def build_index_config(documents_path: Optional[str] = None) -> str:
-    dense = _prompt("Dense embedding model", "sentence-transformers/all-MiniLM-L6-v2")
-    sparse = _prompt("Sparse embedding model", "splade")
-    db_uri = _prompt(
+    dense = prompt("Dense embedding model", "sentence-transformers/all-MiniLM-L6-v2")
+    sparse = prompt("Sparse embedding model", "splade")
+    db_uri = prompt(
         "DB URI (Milvus Lite file or server URL)", cwd_default("proc_demo.db")
     )
-    db_name = _prompt("DB name", "my_db")
-    collection = _prompt("Collection name", "my_docs")
-    docs = documents_path or _prompt(
+    db_name = prompt("DB name", "my_db")
+    collection = prompt("Collection name", "my_docs")
+    docs = documents_path or prompt(
         "Documents JSONL path",
         cwd_default("outputs/postprocess/results.jsonl"),
     )
@@ -260,27 +218,23 @@ def build_index_config(documents_path: Optional[str] = None) -> str:
 
 def build_rag_config() -> str:
     """Wizard for `rag` / `retrieve` / `ragcli` configs."""
-    llm_name = _prompt("LLM name", "OpenMeditron/meditron3-8b")
-    max_new_tokens = _prompt_int("Max new tokens", 1200)
+    llm_name = prompt("LLM name", "OpenMeditron/meditron3-8b")
+    max_new_tokens = prompt_int("Max new tokens", 1200)
 
-    db_uri = _prompt(
+    db_uri = prompt(
         "DB URI (Milvus Lite file or server URL)", cwd_default("proc_demo.db")
     )
-    db_name = _prompt("DB name", "my_db")
-    collection = _prompt("Collection name", "my_docs")
-    k = _prompt_int("Number of docs to retrieve (k)", 5)
-    hybrid = _prompt_float("Hybrid search weight (0.0 dense — 1.0 sparse)", 0.5)
-    use_web = _confirm("Augment retrieval with web search?", default=False)
-    reranker = _prompt("Reranker model (blank to skip)", "BAAI/bge-reranker-base")
+    db_name = prompt("DB name", "my_db")
+    collection = prompt("Collection name", "my_docs")
+    k = prompt_int("Number of docs to retrieve (k)", 5)
+    hybrid = prompt_float("Hybrid search weight (0.0 dense — 1.0 sparse)", 0.5)
+    use_web = confirm("Augment retrieval with web search?", default=False)
+    reranker = prompt("Reranker model (blank to skip)", "BAAI/bge-reranker-base")
 
-    mode = _ask(
-        questionary.select(
-            "Run mode",
-            choices=["local", "api"],
-            default="local",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    mode = select(
+        "Run mode",
+        choices=["local", "api"],
+        default="local",
     )
 
     cfg: dict[str, Any] = {
@@ -302,15 +256,13 @@ def build_rag_config() -> str:
         "mode": mode,
     }
     if mode == "local":
-        input_file = _prompt(
+        input_file = prompt(
             "Queries JSONL path", resolve_example("examples/rag/queries.jsonl")
         )
-        output_file = _prompt(
-            "Output JSON path", cwd_default("outputs/rag/output.json")
-        )
+        output_file = prompt("Output JSON path", cwd_default("outputs/rag/output.json"))
         cfg["mode_args"] = {"input_file": input_file, "output_file": output_file}
     else:
-        port = _prompt_int("API port", 8000)
+        port = prompt_int("API port", 8000)
         cfg["mode_args"] = {
             "endpoint": "/rag",
             "host": "0.0.0.0",
@@ -321,32 +273,28 @@ def build_rag_config() -> str:
 
 def build_websearch_config() -> str:
     """Wizard for `websearch` configs."""
-    use_rag = _confirm("Combine web search with RAG?", default=True)
+    use_rag = confirm("Combine web search with RAG?", default=True)
     rag_path = ""
     if use_rag:
-        rag_path = _prompt(
+        rag_path = prompt(
             "Path to a RAG config YAML",
             resolve_example("examples/rag/config.yaml"),
         )
-    llm_name = _prompt("LLM name", "OpenMeditron/meditron3-8b")
-    max_new_tokens = _prompt_int("Max new tokens", 1200)
-    input_queries = _prompt(
+    llm_name = prompt("LLM name", "OpenMeditron/meditron3-8b")
+    max_new_tokens = prompt_int("Max new tokens", 1200)
+    input_queries = prompt(
         "Input queries JSONL", resolve_example("examples/rag/queries.jsonl")
     )
-    output_file = _prompt(
+    output_file = prompt(
         "Output JSON path",
         cwd_default("outputs/websearch/enhanced_results.json"),
     )
-    n_subqueries = _prompt_int("Number of sub-queries per question", 2)
-    max_searches = _prompt_int("Max searches per query", 5)
-    provider = _ask(
-        questionary.select(
-            "Search provider",
-            choices=["duckduckgo"],
-            default="duckduckgo",
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    n_subqueries = prompt_int("Number of sub-queries per question", 2)
+    max_searches = prompt_int("Max searches per query", 5)
+    provider = select(
+        "Search provider",
+        choices=["duckduckgo"],
+        default="duckduckgo",
     )
 
     cfg: dict[str, Any] = {
@@ -378,7 +326,6 @@ BUILDERS = {
     "postprocess": build_postprocess_config,
     "index": build_index_config,
     "rag": build_rag_config,
-    "retrieve": build_rag_config,
     "ragcli": build_rag_config,
     "websearch": build_websearch_config,
 }
@@ -424,19 +371,19 @@ _PROCESSOR_DEFAULT_CONFIG: dict[str, list[dict[str, Any]]] = {
 
 def build_process_config_wizard() -> str:
     """Richer process-config builder that lets the user pick processors."""
-    data_path = _prompt(
+    data_path = prompt(
         "Data path (folder with documents to process)", cwd_default("data")
     )
-    output_path = _prompt(
+    output_path = prompt(
         "Output path (where merged_results.jsonl will be written)",
         cwd_default("outputs/process"),
     )
-    use_fast = _confirm("Use fast (lower-quality) processors?", default=False)
-    distributed = _confirm("Use distributed processing (Dask)?", default=False)
-    extract_images = _confirm("Extract images from documents?", default=True)
+    use_fast = confirm("Use fast (lower-quality) processors?", default=False)
+    distributed = confirm("Use distributed processing (Dask)?", default=False)
+    extract_images = confirm("Extract images from documents?", default=True)
 
     names = [n for n, _ in _ALL_PROCESSORS]
-    selected = _ask(
+    selected = ask(
         questionary.checkbox(
             "Select processors to enable",
             choices=[questionary.Choice(n, value=n, checked=True) for n in names],
@@ -447,12 +394,12 @@ def build_process_config_wizard() -> str:
     if not selected:
         selected = names  # empty would mean a no-op pipeline; fall back to all
 
-    customize = _confirm("Customize batch sizes?", default=False)
+    customize = confirm("Customize batch sizes?", default=False)
     sizes: list[dict[str, int]] = []
     for name, default in _ALL_PROCESSORS:
         if name not in selected:
             continue
-        value = _prompt_int(f"Batch size for {name}", default) if customize else default
+        value = prompt_int(f"Batch size for {name}", default) if customize else default
         sizes.append({name: value})
 
     processor_config = {
@@ -464,7 +411,7 @@ def build_process_config_wizard() -> str:
 
     previous_results = None
     prev_path = merged_results_path(output_path)
-    if os.path.exists(prev_path) and _confirm(
+    if os.path.exists(prev_path) and confirm(
         f"Previous results found at {prev_path}. Resume (skip unchanged files)?",
         default=True,
     ):
@@ -505,31 +452,23 @@ def _postprocessor_choices() -> list[str]:
 
 def _ask_module_args(pp_type: str) -> dict[str, Any]:
     if pp_type == "chunker":
-        strategy = _ask(
-            questionary.select(
-                "Chunking strategy",
-                choices=["sentence", "token", "word", "semantic"],
-                default="sentence",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        strategy = select(
+            "Chunking strategy",
+            choices=["sentence", "token", "word", "semantic"],
+            default="sentence",
         )
-        table_handling = _ask(
-            questionary.select(
-                "Table handling",
-                choices=["single_row", "multi_rows", "keep_whole", "none"],
-                default="single_row",
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        table_handling = select(
+            "Table handling",
+            choices=["single_row", "multi_rows", "keep_whole", "none"],
+            default="single_row",
         )
         return {
             "chunking_strategy": strategy,
             "table_handling": table_handling,
         }
     if pp_type in {"ner", "translator", "metafuse"}:
-        if _confirm(f"Provide extra args for `{pp_type}` as YAML?", default=False):
-            raw = _prompt("YAML args (single line, e.g. {key: value})", "{}")
+        if confirm(f"Provide extra args for `{pp_type}` as YAML?", default=False):
+            raw = prompt("YAML args (single line, e.g. {key: value})", "{}")
             try:
                 parsed = yaml.safe_load(raw) or {}
                 if isinstance(parsed, dict):
@@ -549,20 +488,16 @@ def build_postprocess_config_wizard() -> str:
             console.print(
                 f"  [dim]current modules:[/] {', '.join(m['type'] for m in modules)}"
             )
-        pp_type = _ask(
-            questionary.select(
-                "Add a post-processor module" if not modules else "Add another module",
-                choices=[*available, questionary.Separator(), "(done)"],
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        pp_type = select(
+            "Add a post-processor module" if not modules else "Add another module",
+            choices=[*available, questionary.Separator(), "(done)"],
         )
         if pp_type == "(done)":
             break
         args = _ask_module_args(pp_type)
         modules.append({"type": pp_type, "args": args})
 
-    output_path = _prompt(
+    output_path = prompt(
         "Output JSONL path",
         cwd_default("outputs/postprocess/results.jsonl"),
     )
@@ -574,7 +509,7 @@ def build_postprocess_config_wizard() -> str:
         pp_prev_path = output_path
     else:
         pp_prev_path = os.path.join(output_path, "final.jsonl")
-    if os.path.exists(pp_prev_path) and _confirm(
+    if os.path.exists(pp_prev_path) and confirm(
         f"Previous results found at {pp_prev_path}. Resume (skip unchanged)?",
         default=True,
     ):
@@ -589,15 +524,15 @@ def build_postprocess_config_wizard() -> str:
 
 
 def build_index_config_wizard(documents_path: Optional[str] = None) -> str:
-    dense = _prompt("Dense embedding model", "sentence-transformers/all-MiniLM-L6-v2")
-    sparse = _prompt("Sparse embedding model", "splade")
-    multimodal = _confirm("Multimodal embeddings?", default=False)
-    db_uri = _prompt(
+    dense = prompt("Dense embedding model", "sentence-transformers/all-MiniLM-L6-v2")
+    sparse = prompt("Sparse embedding model", "splade")
+    multimodal = confirm("Multimodal embeddings?", default=False)
+    db_uri = prompt(
         "DB URI (Milvus Lite file or server URL)", cwd_default("proc_demo.db")
     )
-    db_name = _prompt("DB name", "my_db")
-    collection = _prompt("Collection name", "my_docs")
-    docs = documents_path or _prompt(
+    db_name = prompt("DB name", "my_db")
+    collection = prompt("Collection name", "my_docs")
+    docs = documents_path or prompt(
         "Documents JSONL path",
         cwd_default("outputs/postprocess/results.jsonl"),
     )
@@ -630,7 +565,7 @@ def build_full_pipeline_wizard() -> dict[str, str]:
         if err is None:
             break
         _show_error_panel(process_path, err)
-        if not _confirm("Retry the process step?", default=True):
+        if not confirm("Retry the process step?", default=True):
             raise UserCancelledError("cancelled")
 
     console.print(
@@ -642,7 +577,7 @@ def build_full_pipeline_wizard() -> dict[str, str]:
         if err is None:
             break
         _show_error_panel(pp_path, err)
-        if not _confirm("Retry the postprocess step?", default=True):
+        if not confirm("Retry the postprocess step?", default=True):
             raise UserCancelledError("cancelled")
 
     try:
@@ -657,7 +592,7 @@ def build_full_pipeline_wizard() -> dict[str, str]:
         if err is None:
             break
         _show_error_panel(index_path, err)
-        if not _confirm("Retry the index step?", default=True):
+        if not confirm("Retry the index step?", default=True):
             raise UserCancelledError("cancelled")
 
     return {"process": process_path, "postprocess": pp_path, "index": index_path}
@@ -709,7 +644,7 @@ def _validate_with_spinner(path: str, spec: CommandSpec) -> Optional[str]:
     can take several seconds (heavy transitive imports), making the TUI look
     frozen otherwise."""
     spinner = Spinner(
-        "dots", text=Text(f"  Validating {spec.name} config…", style="cyan")
+        "dots", text=Text(f"  Validating {spec.name} config…", style=ACCENT)
     )
     result: dict[str, Optional[str]] = {}
     with Live(spinner, console=console, refresh_per_second=12, transient=True):
@@ -722,10 +657,10 @@ def _show_error_panel(path: str, err: str) -> None:
         Panel(
             Text.assemble(
                 (f"{path}\n\n", "bold"),
-                (err, "red"),
+                (err, str(Color.RED)),
             ),
-            title="[bold red]invalid config[/]",
-            border_style="red",
+            title=f"[{ERR}]invalid config[/]",
+            border_style=Color.RED,
             padding=(1, 2),
         )
     )
@@ -764,20 +699,14 @@ def pick_or_build_config(
     on failure rather than letting the run blow up later.
     """
     while True:
-        choice = _ask(
-            questionary.select(
-                f"Config for `{spec.name}`?",
-                choices=[
-                    questionary.Choice("📂 Pick existing YAML", value="pick"),
-                    questionary.Choice("✨ Generate new YAML (guided)", value="build"),
-                    questionary.Choice(
-                        "✎  Edit an existing YAML in $EDITOR", value="edit"
-                    ),
-                    questionary.Choice("⌨  Type a path manually", value="manual"),
-                ],
-                style=QSTYLE,
-                qmark=QMARK,
-            )
+        choice = select(
+            f"Config for `{spec.name}`?",
+            choices=[
+                questionary.Choice("📂 Pick existing YAML", value="pick"),
+                questionary.Choice("✨ Generate new YAML (guided)", value="build"),
+                questionary.Choice("✎  Edit an existing YAML in $EDITOR", value="edit"),
+                questionary.Choice("⌨  Type a path manually", value="manual"),
+            ],
         )
 
         path: Optional[str] = None
@@ -793,20 +722,15 @@ def pick_or_build_config(
                 )
                 choice = "manual"
             else:
-                picked = _ask(
-                    questionary.select(
-                        f"Select a config for `{spec.name}`",
-                        choices=ranked,
-                        style=QSTYLE,
-                        qmark=QMARK,
-                    )
+                path = select(
+                    f"Select a config for `{spec.name}`",
+                    choices=ranked,
                 )
-                path = picked
-                if choice == "edit":
+                if choice == "edit" and path is not None:
                     _edit_config(path)
 
         if choice == "manual":
-            manual = _prompt("Path to YAML config")
+            manual = prompt("Path to YAML config")
             manual = os.path.expandvars(os.path.expanduser(manual))
             if not os.path.exists(manual):
                 _show_error_panel(manual, "file not found")
@@ -832,5 +756,5 @@ def pick_or_build_config(
         if err is None:
             return _post_validation_menu(path, spec)
         _show_error_panel(path, err)
-        if not _confirm("Try a different config?", default=True):
+        if not confirm("Try a different config?", default=True):
             raise UserCancelledError("cancelled")

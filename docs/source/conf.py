@@ -1,6 +1,6 @@
-project = "MMORE"
-author = "MMORE contributors"
-copyright = "2026, MMORE contributors"
+project = "mmore"
+author = "mmore contributors"
+copyright = "2026, mmore contributors"
 
 extensions = [
     "myst_parser",
@@ -18,7 +18,7 @@ exclude_patterns = ["build", "Thumbs.db", ".DS_Store"]
 html_theme = "furo"
 html_static_path = ["_static"]
 html_css_files = ["custom.css"]
-html_title = "MMORE Documentation"
+html_title = "mmore Documentation"
 # Uncomment if you want to use a project logo placed in docs/source/_static/
 # html_logo = "_static/mmore_logo.jpg"
 
@@ -38,7 +38,7 @@ autosummary_generate = True
 
 # Replace with your real repository information when ready.
 html_theme_options = {
-    "source_repository": "https://github.com/<ORG>/<REPO>/",
+    "source_repository": "https://github.com/EPFLiGHT/mmore/",
     "source_branch": "main",
     "source_directory": "docs/source/",
 }

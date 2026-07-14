@@ -160,11 +160,11 @@ paths:
     post:
       tags:
         - Context Retrieval
-      summary: Retrieve on MMORE
+      summary: Retrieve on mmore
       description: |
         Search for files based on content similarity.
 
-        This request is meant to be called by the Gateway to MMORE service upon chat completions request from Moove.
+        This request is meant to be called by the Gateway to mmore service upon chat completions request from Moove.
       requestBody:
         required: true
         content:
@@ -211,6 +211,12 @@ paths:
                       type: string
                       nullable: true
                       description: Id of the chunk. `null` for a full document.
+                    filePath:
+                      type: string
+                      description: |
+                        Path of the source file used during indexing. Useful
+                        for human-readable citations. Empty string when the
+                        post-processor did not record one.
                     content:
                       type: string
                     similarity:
@@ -265,6 +271,11 @@ paths:
                     type: string
                   chunkId:
                     type: string
+                  filePath:
+                    type: string
+                    description: |
+                      Path of the source file used during indexing. Empty
+                      string when not recorded.
                   filename:
                     type: string
                     nullable: true

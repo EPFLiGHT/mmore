@@ -2,13 +2,13 @@
 
 ## Overview
 
-MMORE includes built-in profiling utilities to help you analyze performance bottlenecks and optimize your pipelines. 
+mmore includes built-in profiling utilities to help you analyze performance bottlenecks and optimize your pipelines. 
 
 The profiling system uses Python's standard `cProfile` module and provides easy-to-use wrappers for function and block-level profiling.
 
 ## 🚀 Quick Start
 
-Profiling is disabled by default to avoid overhead. To enable it, simply set the `MMORE_PROFILING_ENABLED` environment variable to `true` before running any MMORE command.
+Profiling is disabled by default to avoid overhead. To enable it, simply set the `MMORE_PROFILING_ENABLED` environment variable to `true` before running any mmore command.
 
 ### Linux / macOS / WSL
 
@@ -119,7 +119,7 @@ If you only need to measure execution time (wall clock), use `time_function` or 
 ```python
 from mmore.profiler import time_function, time_context
 
-@time_function
+@time_function()
 def quick_check():
     pass
 

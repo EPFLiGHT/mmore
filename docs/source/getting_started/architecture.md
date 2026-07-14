@@ -1,19 +1,19 @@
 # 🏗️ Architecture
 
-This page gives a high-level view of MMORE and explains how the main components fit together.
+This page gives a high-level view of mmore and explains how the main components fit together.
 
 It is meant to help readers understand the system before diving into implementation details.
 
-![MMORE architecture](../doc_images/general_pipeline_mmore.png)
+![mmore architecture](../doc_images/general_pipeline_mmore.png)
 
-*High-level overview of the MMORE pipeline, from processing and indexing to retrieval and RAG workflows.*
+*High-level overview of the mmore pipeline, from processing and indexing to retrieval and RAG workflows.*
 
 
 ## Overview
 
-MMORE is designed as a multimodal ingestion and retrieval framework for heterogeneous document collections.
+mmore is designed as a multimodal ingestion and retrieval framework for heterogeneous document collections.
 
-MMORE is organized around three main executable stages:
+mmore is organized around three main executable stages:
 
 - `run_process`, which handles ingestion, crawling, dispatching, and document processing
 - `run_indexer`, which builds the searchable index and can integrate multimodal retrieval components such as ColVision models
@@ -83,7 +83,7 @@ The retrieved outputs can be returned directly to the user or passed into a down
 
 ### 4. RAG workflows
 
-When MMORE is used in a retrieval-augmented generation setting, retrieval outputs are passed into a generative layer.
+When mmore is used in a retrieval-augmented generation setting, retrieval outputs are passed into a generative layer.
 
 The quality of the final result then depends on:
 
@@ -97,7 +97,7 @@ See [RAG](rag.md) for more details.
 
 ### 5. Multimodal support
 
-A key aspect of MMORE is support for heterogeneous and multimodal collections.
+A key aspect of mmore is support for heterogeneous and multimodal collections.
 
 That means the framework may work with:
 
@@ -112,7 +112,7 @@ See [ColVision](../core_features/colvision.md) for the multimodal retrieval side
 
 ### 6. Distributed processing
 
-For larger workloads, MMORE supports distributed execution in the processing stage.
+For larger workloads, mmore supports distributed execution in the processing stage.
 
 This is useful when:
 
@@ -124,7 +124,7 @@ See [Distributed processing](../advanced_usage/distributed_processing.md).
 
 ### 7. Evaluation and profiling
 
-MMORE also includes tooling to inspect and improve system quality and performance.
+mmore also includes tooling to inspect and improve system quality and performance.
 
 Two complementary concerns matter here:
 
@@ -136,7 +136,7 @@ See [Evaluation](../core_features/evaluation.md) and [Profiler](../advanced_usag
 
 ## Design principles
 
-MMORE is organized around a few simple principles:
+mmore is organized around a few simple principles:
 
 - clear separation between stages of the pipeline
 - modularity between processing, indexing, retrieval, and evaluation

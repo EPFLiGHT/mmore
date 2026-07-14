@@ -75,7 +75,7 @@ class MarkdownProcessor(Processor):
                 content,
                 file_path,
                 self.config.attachment_tag,
-                self.config.custom_config.get("extract_images", True),
+                self.config.extract_images,
             )
             return self.create_sample(
                 [all_text], embedded_images, DocumentMetadata(file_path=file_path)

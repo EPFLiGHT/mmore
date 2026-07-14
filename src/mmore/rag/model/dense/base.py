@@ -8,6 +8,7 @@ from langchain_huggingface.embeddings import HuggingFaceEmbeddings
 from langchain_mistralai import MistralAIEmbeddings
 from langchain_openai import OpenAIEmbeddings
 
+from ....ux import loading_model
 from .multimodal import MultimodalEmbeddings
 
 _OPENAI_MODELS = [
@@ -29,15 +30,13 @@ _MISTRAL_MODELS = ["mistral-textembedding-7B-v1", "mistral-textembedding-13B-v1"
 _AWS_MODELS = ["amazon-titan-embedding-xlarge", "amazon-titan-embedding-light"]
 
 
+# HF is handled in from_config (it takes a device), the rest are remote APIs.
 loaders = {
     "OPENAI": OpenAIEmbeddings,
     # 'GOOGLE': VertexAIEmbeddings,
     "COHERE": CohereEmbeddings,
     "MISTRAL": MistralAIEmbeddings,
     "AWS": BedrockEmbeddings,
-    "HF": lambda model, **kwargs: HuggingFaceEmbeddings(
-        model_name=model, model_kwargs={"trust_remote_code": True}, **kwargs
-    ),
     "FAKE": lambda **kwargs: FakeEmbeddings(
         size=2048
     ),  # For testing purposes, don't use in production
@@ -69,8 +68,17 @@ class DenseModelConfig:
 
 class DenseModel(Embeddings):
     @classmethod
-    def from_config(cls, config: DenseModelConfig) -> Embeddings:
-        if config.organization == "HF" and config.is_multimodal:
-            return MultimodalEmbeddings(model_name=config.model_name)
-        else:
+    def from_config(
+        cls, config: DenseModelConfig, device: str | None = None
+    ) -> Embeddings:
+        if config.organization != "HF":
             return loaders[config.organization](model=config.model_name)
+        with loading_model(f"the embedding model ({config.model_name})"):
+            if config.is_multimodal:
+                return MultimodalEmbeddings(model_name=config.model_name)
+            model_kwargs: dict = {"trust_remote_code": True}
+            if device:
+                model_kwargs["device"] = str(device)
+            return HuggingFaceEmbeddings(
+                model_name=config.model_name, model_kwargs=model_kwargs
+            )

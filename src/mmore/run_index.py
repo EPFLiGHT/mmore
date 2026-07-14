@@ -1,5 +1,5 @@
 import argparse
-import logging
+import time
 from dataclasses import dataclass
 from typing import Optional, Union
 
@@ -9,14 +9,17 @@ from mmore.index.indexer import Indexer, IndexerConfig
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.type import MultimodalSample
 from mmore.utils import load_config
-
-logger = logging.getLogger(__name__)
-INDEX_EMOJI = "🗂️"
-logging.basicConfig(
-    format=f"[INDEX {INDEX_EMOJI}  -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
+from mmore.ux import (
+    model_loading_seconds,
+    quiet_noisy_libs,
+    setup_logging,
+    step_intro,
+    step_summary,
 )
+
+INDEX_NAME = "Index"
+INDEX_EMOJI = "📇"
+logger = setup_logging(INDEX_NAME, INDEX_EMOJI)
 
 load_dotenv()
 
@@ -35,6 +38,7 @@ def index(
     collection_name: Optional[str] = None,
 ):
     """Index files for specified documents."""
+    quiet_noisy_libs()
     # Load the config file
     config: IndexConfig = load_config(config_file, IndexConfig)
     if collection_name is None:
@@ -44,11 +48,28 @@ def index(
 
     documents = MultimodalSample.from_jsonl(documents_path)
 
-    logger.info("Creating the indexer...")
+    step_intro(
+        INDEX_NAME,
+        INDEX_EMOJI,
+        "Make your documents searchable and store them",
+        [f"{len(documents)} documents", f"collection: {collection_name}"],
+    )
+
+    start = time.time()
+    loading_start = model_loading_seconds()
     Indexer.from_documents(
         config=config.indexer, documents=documents, collection_name=collection_name
     )
-    logger.info("Documents indexed!")
+    elapsed = time.time() - start - (model_loading_seconds() - loading_start)
+    step_summary(
+        INDEX_NAME,
+        INDEX_EMOJI,
+        elapsed,
+        {
+            "embedding": config.indexer.dense_model.model_name,
+            "throughput": f"{len(documents) / elapsed:.1f} docs/s" if elapsed else "-",
+        },
+    )
 
 
 if __name__ == "__main__":
@@ -68,7 +89,4 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
 
-    index_config = load_config(args.config_file, IndexConfig)
-    index(
-        index_config.indexer, index_config.documents_path, index_config.collection_name
-    )
+    index(args.config_file, args.documents_path, args.collection_name)

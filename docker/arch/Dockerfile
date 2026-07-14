@@ -3,17 +3,15 @@ ARG UV_OVERRIDE
 
 # --- Base images ---
 FROM archlinux:latest AS gpu
-ENV UV_ARGUMENTS="--extra all,cu126"
-RUN echo "Using GPU image"
+ENV SYNC_ARGS="--extra all --extra cu126"
 
 FROM archlinux:latest AS cpu
-ENV UV_ARGUMENTS="--extra all,cpu"
-RUN echo "Using CPU-only image"
+ENV SYNC_ARGS="--extra all --extra cpu"
 
 # --- Build ---
 FROM ${DEVICE:-gpu} AS build
 ARG UV_OVERRIDE
-ENV UV_ARGUMENTS=${UV_OVERRIDE:-$UV_ARGUMENTS}
+ENV SYNC_ARGS=${UV_OVERRIDE:-$SYNC_ARGS}
 RUN echo "DisableSandbox" >> /etc/pacman.conf
 
 ARG USER_UID=1000
@@ -22,14 +20,21 @@ ARG USER_GID=1000
 # Install system dependencies
 RUN pacman -Syu --noconfirm && \
     pacman -S --noconfirm --needed \
-      base-devel python uv \
-      tzdata curl ffmpeg \
+      base-devel \
+      tzdata curl git ffmpeg \
       libsm libxext nss \
       libxi libxrandr libxcomposite libxcursor libxdamage libxfixes libxrender \
       alsa-lib atk gtk3 libreoffice-fresh libjpeg-turbo pango && \
     ln -fs /usr/share/zoneinfo/Europe/Zurich /etc/localtime && \
     echo "Europe/Zurich" > /etc/timezone && \
     pacman -Sc --noconfirm
+
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.7.13 /uv /uvx /bin/
+
+ENV UV_PYTHON=3.11 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_LINK_MODE=copy
 
 # Create non-root user
 RUN groupadd --gid ${USER_GID} mmoreuser \
@@ -39,14 +44,14 @@ WORKDIR /app
 RUN chown mmoreuser:mmoreuser /app
 USER mmoreuser
 
-# Set up Python virtual environment
-ENV VIRTUAL_ENV=/app/.venv
-RUN uv venv --python 3.11 .venv \
- && uv pip install --no-cache weasyprint
-
 # Install dependencies (cached unless uv.lock changes)
 COPY --chown=mmoreuser:mmoreuser pyproject.toml uv.lock /app/
-RUN uv sync --frozen --no-install-project ${UV_ARGUMENTS}
+RUN --mount=type=cache,target=/home/mmoreuser/.cache/uv,uid=${USER_UID},gid=${USER_GID} \
+    uv sync --frozen --no-install-project ${SYNC_ARGS}
+
+# weasyprint needs to be installed using pip
+RUN --mount=type=cache,target=/home/mmoreuser/.cache/uv,uid=${USER_UID},gid=${USER_GID} \
+    uv pip install weasyprint
 
 # Install mmore from local source code
 COPY --chown=mmoreuser:mmoreuser . /app

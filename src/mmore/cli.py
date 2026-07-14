@@ -1,8 +1,12 @@
+import os
 from typing import Optional
 
 import click
 
 from mmore.profiler import enable_profiling_from_env
+
+# To not have the fork-handler messages ("FD from fork parent still in poll list")
+os.environ.setdefault("GRPC_VERBOSITY", "ERROR")
 
 
 @click.group()

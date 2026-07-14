@@ -5,6 +5,7 @@ Integration tests for the live retrieval API using a Milvus DB:
 """
 
 import json
+import time
 from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
@@ -312,6 +313,17 @@ def _fake_doc(file_path: str, document_id: str = "doc") -> MultimodalSample:
     )
 
 
+def _wait_job(tc, job_id: str, timeout: float = 15.0) -> dict:
+    """Poll the job status endpoint until the background job is terminal."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        resp = tc.get(f"/v1/jobs/{job_id}")
+        if resp.status_code == 200 and resp.json()["status"] in ("done", "failed"):
+            return resp.json()
+        time.sleep(0.02)
+    raise AssertionError(f"job {job_id} did not finish in time")
+
+
 def test_apply_uploaded_file_metadata_preserves_chunk_suffix():
     doc = _fake_doc("/tmp/original-name.txt", document_id="default-doc")
     doc.id = "processor-generated-id+7"
@@ -402,7 +414,7 @@ def test_upload_file_success(indexer_client):
     fake_path = str(Path(upload_dir) / "new-doc.txt")
 
     with patch(
-        "mmore.run_index_api.process_files_default",
+        "mmore.run_index_api._process_files",
         return_value=[_fake_doc(fake_path)],
     ):
         response = tc.post(
@@ -410,10 +422,11 @@ def test_upload_file_success(indexer_client):
             data={"fileId": "new-doc"},
             files={"file": ("new-doc.txt", b"Hello world", "text/plain")},
         )
+        assert response.status_code == 202
+        job_id = response.json()["jobId"]
+        job = _wait_job(tc, job_id)
 
-    assert response.status_code == 201
-    data = response.json()
-    assert data["fileId"] == "new-doc"
+    assert job["status"] == "done"
     assert Path(upload_dir, "new-doc").exists()
 
 
@@ -461,7 +474,7 @@ def test_uploaded_file_has_filename_in_list_files(tmp_path):
         uploaded_path = str(upload_dir / "listed-doc.txt")
         stack.enter_context(
             patch(
-                "mmore.run_index_api.process_files_default",
+                "mmore.run_index_api._process_files",
                 return_value=[_fake_doc(uploaded_path)],
             )
         )
@@ -470,7 +483,8 @@ def test_uploaded_file_has_filename_in_list_files(tmp_path):
             data={"fileId": "listed-doc"},
             files={"file": ("listed-doc.txt", b"Hello list files", "text/plain")},
         )
-        assert response.status_code == 201
+        assert response.status_code == 202
+        assert _wait_job(index_client, response.json()["jobId"])["status"] == "done"
 
         stack.enter_context(
             patch(
@@ -496,13 +510,13 @@ def test_upload_duplicate_file_returns_400(indexer_client):
     tc, upload_dir, _ = indexer_client
     duplicate_id = "duplicate-doc"
     Path(upload_dir, duplicate_id).write_bytes(b"Existing content.")
-    with patch("mmore.run_index_api.process_files_default", return_value=[]):
+    with patch("mmore.run_index_api._process_files", return_value=[]):
         response = tc.post(
             "/v1/files",
             data={"fileId": duplicate_id},
             files={"file": ("duplicate-doc.txt", b"Hello again", "text/plain")},
         )
-    assert response.status_code == 400
+    assert response.status_code == 409
     assert "already exists" in response.json()["detail"]
 
 
@@ -510,17 +524,22 @@ def test_upload_failed_processing_does_not_consume_id(indexer_client):
     tc, upload_dir, _ = indexer_client
     file_id = "id"
 
-    response = tc.post(
-        "/v1/files",
-        data={"fileId": file_id},
-        files={"file": ("file.xyz", b"bad", "application/octet-stream")},
-    )
-    assert response.status_code == 422
+    # Processing now fails in the background, the upload still returns 202
+    with patch("mmore.run_index_api._process_files", side_effect=KeyError("xyz")):
+        response = tc.post(
+            "/v1/files",
+            data={"fileId": file_id},
+            files={"file": ("file.xyz", b"bad", "application/octet-stream")},
+        )
+        assert response.status_code == 202
+        job = _wait_job(tc, response.json()["jobId"])
+    assert job["status"] == "failed"
     assert not Path(upload_dir, file_id).exists()
 
+    # A failed job releases the id, so it can be reused
     fake_path = str(Path(upload_dir) / "good.txt")
     with patch(
-        "mmore.run_index_api.process_files_default",
+        "mmore.run_index_api._process_files",
         return_value=[_fake_doc(fake_path, file_id)],
     ):
         response = tc.post(
@@ -528,7 +547,8 @@ def test_upload_failed_processing_does_not_consume_id(indexer_client):
             data={"fileId": file_id},
             files={"file": ("file.txt", b"good", "text/plain")},
         )
-    assert response.status_code == 201
+        assert response.status_code == 202
+        assert _wait_job(tc, response.json()["jobId"])["status"] == "done"
     assert Path(upload_dir, file_id).read_bytes() == b"good"
 
 
@@ -540,22 +560,14 @@ def test_upload_failed_processing_does_not_consume_id(indexer_client):
 def test_upload_bulk_files_success(indexer_client):
     tc, *_ = indexer_client
 
-    def fake_process(temp_dir, collection_name, extensions):
-        first_path, second_path = sorted(Path(temp_dir).iterdir())
-        return [
-            _fake_doc(str(first_path), "bulk-1"),
-            MultimodalSample(
-                id="bulk-1+1",
-                document_id="bulk-1",
-                text="Second chunk from the first bulk document.",
-                modalities=[],
-                metadata=DocumentMetadata(file_path=str(first_path)),
-            ),
-            _fake_doc(str(second_path), "bulk-2"),
-        ]
+    def fake_process(pool, input_dir, collection_name, extensions, device, output_path):
+        # Each job processes a single file
+        path = next(p for p in Path(input_dir).iterdir() if p.is_file())
+        count = 2 if path.name.startswith("bulk-1") else 1
+        return [_fake_doc(str(path)) for _ in range(count)]
 
     with patch(
-        "mmore.run_index_api.process_files_default",
+        "mmore.run_index_api._process_files",
         side_effect=fake_process,
     ):
         response = tc.post(
@@ -566,28 +578,26 @@ def test_upload_bulk_files_success(indexer_client):
                 ("files", ("bulk-2.txt", b"Bulk content 2", "text/plain")),
             ],
         )
+        assert response.status_code == 202
+        jobs_by_id = {j["fileId"]: j for j in response.json()["jobs"]}
+        assert set(jobs_by_id) == {"bulk-1", "bulk-2"}
+        results = {fid: _wait_job(tc, job["jobId"]) for fid, job in jobs_by_id.items()}
 
-    assert response.status_code == 201
-    data = response.json()
-    documents_by_id = {doc["fileId"]: doc for doc in data["documents"]}
-    assert set(documents_by_id) == {"bulk-1", "bulk-2"}
-    assert documents_by_id["bulk-1"]["filename"] == "bulk-1.txt"
-    assert documents_by_id["bulk-1"]["chunks"] == 2
-    assert documents_by_id["bulk-2"]["filename"] == "bulk-2.txt"
-    assert documents_by_id["bulk-2"]["chunks"] == 1
+    assert results["bulk-1"]["status"] == "done"
+    assert results["bulk-1"]["result"]["chunks"] == 2
+    assert results["bulk-2"]["status"] == "done"
+    assert results["bulk-2"]["result"]["chunks"] == 1
 
 
 def test_upload_bulk_files_allows_duplicate_uploaded_filenames(indexer_client):
     tc, upload_dir, _ = indexer_client
 
-    def fake_process(temp_dir, collection_name, extensions):
-        return [
-            _fake_doc(str(path), f"processed-{path.stem}")
-            for path in sorted(Path(temp_dir).iterdir())
-        ]
+    def fake_process(pool, input_dir, collection_name, extensions, device, output_path):
+        path = next(p for p in Path(input_dir).iterdir() if p.is_file())
+        return [_fake_doc(str(path))]
 
     with patch(
-        "mmore.run_index_api.process_files_default",
+        "mmore.run_index_api._process_files",
         side_effect=fake_process,
     ):
         response = tc.post(
@@ -598,22 +608,19 @@ def test_upload_bulk_files_allows_duplicate_uploaded_filenames(indexer_client):
                 ("files", ("same.txt", b"Second content", "text/plain")),
             ],
         )
+        assert response.status_code == 202
+        jobs_by_id = {j["fileId"]: j for j in response.json()["jobs"]}
+        assert set(jobs_by_id) == {"same-name-1", "same-name-2"}
+        for job in jobs_by_id.values():
+            assert _wait_job(tc, job["jobId"])["status"] == "done"
 
-    assert response.status_code == 201
-    data = response.json()
-    documents_by_id = {doc["fileId"]: doc for doc in data["documents"]}
-    assert set(documents_by_id) == {"same-name-1", "same-name-2"}
-    assert documents_by_id["same-name-1"]["filename"] == "same.txt"
-    assert documents_by_id["same-name-1"]["chunks"] == 1
-    assert documents_by_id["same-name-2"]["filename"] == "same.txt"
-    assert documents_by_id["same-name-2"]["chunks"] == 1
     assert Path(upload_dir, "same-name-1").exists()
     assert Path(upload_dir, "same-name-2").exists()
 
 
 def test_upload_bulk_mismatched_ids_returns_400(indexer_client):
     tc, *_ = indexer_client
-    with patch("mmore.run_index_api.process_files_default", return_value=[]):
+    with patch("mmore.run_index_api._process_files", return_value=[]):
         response = tc.post(
             "/v1/files/bulk",
             data={"listIds": "only-one-id"},
@@ -630,22 +637,28 @@ def test_upload_bulk_failed_processing_does_not_consume_ids(indexer_client):
     tc, upload_dir, _ = indexer_client
     ids = ["id-1", "id-2"]
 
-    response = tc.post(
-        "/v1/files/bulk",
-        data={"listIds": ",".join(ids)},
-        files=[
-            ("files", ("file.xyz", b"bad A", "application/octet-stream")),
-            ("files", ("file.xyz", b"bad B", "application/octet-stream")),
-        ],
-    )
-    assert response.status_code == 422
+    with patch("mmore.run_index_api._process_files", side_effect=KeyError("xyz")):
+        response = tc.post(
+            "/v1/files/bulk",
+            data={"listIds": ",".join(ids)},
+            files=[
+                ("files", ("file.xyz", b"bad A", "application/octet-stream")),
+                ("files", ("file.xyz", b"bad B", "application/octet-stream")),
+            ],
+        )
+        assert response.status_code == 202
+        for job in response.json()["jobs"]:
+            assert _wait_job(tc, job["jobId"])["status"] == "failed"
     for file_id in ids:
         assert not Path(upload_dir, file_id).exists()
 
-    fake_paths = [str(Path(upload_dir) / f"{i}_file.txt") for i in ids]
+    def fake_process(pool, input_dir, collection_name, extensions, device, output_path):
+        path = next(p for p in Path(input_dir).iterdir() if p.is_file())
+        return [_fake_doc(str(path))]
+
     with patch(
-        "mmore.run_index_api.process_files_default",
-        return_value=[_fake_doc(p, i) for p, i in zip(fake_paths, ids)],
+        "mmore.run_index_api._process_files",
+        side_effect=fake_process,
     ):
         response = tc.post(
             "/v1/files/bulk",
@@ -655,7 +668,9 @@ def test_upload_bulk_failed_processing_does_not_consume_ids(indexer_client):
                 ("files", ("file.txt", b"good B", "text/plain")),
             ],
         )
-    assert response.status_code == 201
+        assert response.status_code == 202
+        for job in response.json()["jobs"]:
+            assert _wait_job(tc, job["jobId"])["status"] == "done"
     assert Path(upload_dir, ids[0]).read_bytes() == b"good A"
     assert Path(upload_dir, ids[1]).read_bytes() == b"good B"
 
@@ -672,21 +687,23 @@ def test_update_existing_file_success(indexer_client):
 
     fake_path = str(Path(upload_dir) / "update-doc.txt")
     with patch(
-        "mmore.run_index_api.process_files_default",
+        "mmore.run_index_api._process_files",
         return_value=[_fake_doc(fake_path, update_id)],
     ):
         response = tc.put(
             f"/v1/files/{update_id}",
             files={"file": ("update-doc.txt", b"Updated content.", "text/plain")},
         )
+        assert response.status_code == 202
+        assert response.json()["fileId"] == update_id
+        assert _wait_job(tc, response.json()["jobId"])["status"] == "done"
 
-    assert response.status_code == 200
-    assert response.json()["fileId"] == update_id
+    assert Path(upload_dir, update_id).read_bytes() == b"Updated content."
 
 
 def test_update_nonexistent_file_returns_404(indexer_client):
     tc, *_ = indexer_client
-    with patch("mmore.run_index_api.process_files_default", return_value=[]):
+    with patch("mmore.run_index_api._process_files", return_value=[]):
         response = tc.put(
             "/v1/files/does-not-exist",
             files={"file": ("x.txt", b"content", "text/plain")},
@@ -728,3 +745,35 @@ def test_download_nonexistent_file_returns_404(indexer_client):
     tc, *_ = indexer_client
     response = tc.get("/v1/files/does-not-exist")
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# GET /v1/jobs/{jobId} and /v1/jobs/{jobId}/events
+# ---------------------------------------------------------------------------
+
+
+def test_get_unknown_job_returns_404(indexer_client):
+    tc, *_ = indexer_client
+    response = tc.get("/v1/jobs/does-not-exist")
+    assert response.status_code == 404
+
+
+def test_job_events_stream_reaches_done(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    fake_path = str(Path(upload_dir) / "sse-doc.txt")
+    with patch(
+        "mmore.run_index_api._process_files",
+        return_value=[_fake_doc(fake_path)],
+    ):
+        response = tc.post(
+            "/v1/files",
+            data={"fileId": "sse-doc"},
+            files={"file": ("sse-doc.txt", b"stream me", "text/plain")},
+        )
+        job_id = response.json()["jobId"]
+        with tc.stream("GET", f"/v1/jobs/{job_id}/events") as stream:
+            body = "".join(stream.iter_text())
+
+    # The stream stays open until the job is terminal, so "done" is always sent
+    assert "data:" in body
+    assert "done" in body

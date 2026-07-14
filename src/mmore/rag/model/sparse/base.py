@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
+from ....ux import loading_model
 from .splade import SpladeSparseEmbedding
 
 _SPLADE_MODELS = ["naver/splade-cocondenser-selfdistil"]
@@ -28,7 +29,10 @@ class SparseModelConfig:
 
 class SparseModel(BaseSparseEmbedding):
     @classmethod
-    def from_config(cls, config: SparseModelConfig) -> BaseSparseEmbedding:
-        return loaders.get(config.model_type, SpladeSparseEmbedding)(
-            model_name=config.model_name
-        )
+    def from_config(
+        cls, config: SparseModelConfig, device: str | None = None
+    ) -> BaseSparseEmbedding:
+        with loading_model(f"the keyword-matching model ({config.model_name})"):
+            return loaders.get(config.model_type, SpladeSparseEmbedding)(
+                model_name=config.model_name, device=device
+            )

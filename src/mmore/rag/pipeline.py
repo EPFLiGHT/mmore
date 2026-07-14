@@ -11,7 +11,12 @@ from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable, RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import (
+    Runnable,
+    RunnableConfig,
+    RunnableLambda,
+    RunnablePassthrough,
+)
 
 from ..utils import load_config
 from .judge import JUDGE_OUTPUT_KEYS, JudgeConfig, LLMJudge, retrieve_with_judge
@@ -130,14 +135,17 @@ class RAGPipeline:
         return validate_input | core_chain | validate_output
 
     def __call__(
-        self, queries: Dict[str, Any] | List[Dict[str, Any]], return_dict: bool = False
-    ) -> List[Dict[str, str | List[str]]]:
-        if isinstance(queries, Dict):
+        self,
+        queries: Dict[str, Any] | List[Dict[str, Any]],
+        return_dict: bool = False,
+        config: Optional[RunnableConfig] = None,
+    ) -> List[Dict[str, Any]]:
+        if isinstance(queries, dict):
             queries_list = [queries]
         else:
             queries_list = queries
 
-        results = self.rag_chain.batch(queries_list)
+        results = self.rag_chain.batch(queries_list, config=config)
 
         if return_dict:
             return results

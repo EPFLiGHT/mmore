@@ -1,14 +1,19 @@
 import argparse
+import asyncio
+import json
 import logging
+import multiprocessing
 import os
 import shutil
 import tempfile
+from concurrent.futures import ProcessPoolExecutor
 from pathlib import Path as FilePath
-from typing import List
+from typing import Callable, List, Optional
 
+import torch
 import uvicorn
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Path, UploadFile
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pymilvus import MilvusClient
 
 logger = logging.getLogger(__name__)
@@ -21,6 +26,7 @@ logging.basicConfig(
 
 from mmore.profiler import enable_profiling_from_env
 
+from .job_queue import DuplicateJobError, Job, JobQueue, QueueFullError
 from .process.processors import register_all_processors
 from .rag.retriever import RetrieverConfig
 from .type import MultimodalSample
@@ -35,6 +41,34 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
+POLL_INTERVAL = 2.0
+HEARTBEAT_SECONDS = 15
+
+
+def _process_files(pool, input_dir, collection_name, extensions, device, output_path):
+    """Run processing in the device's subprocess."""
+    return pool.submit(
+        process_files_default,
+        input_dir,
+        collection_name,
+        extensions,
+        device=device,
+        output_path=output_path,
+    ).result()
+
+
+def _job_payload(job: Job) -> dict:
+    return {
+        "jobId": job.id,
+        "fileId": job.file_id,
+        "filename": job.filename,
+        "status": job.status.value,
+        "device": job.device,
+        "result": job.result,
+        "error": job.error,
+    }
+
+
 def _apply_uploaded_file_metadata(
     documents: List[MultimodalSample], file_id: str, filename: str
 ) -> None:
@@ -45,6 +79,7 @@ def _apply_uploaded_file_metadata(
         doc.id = f"{file_id}+{chunk_id}" if chunk_id else file_id
 
         doc.metadata.extra["filename"] = filename
+        doc.metadata.file_path = str(FilePath(UPLOAD_DIR) / file_id)
 
 
 def make_router(config_path: str) -> APIRouter:
@@ -60,332 +95,304 @@ def make_router(config_path: str) -> APIRouter:
     get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
     register_all_processors(preload=True)
 
-    @router.get("/")
+    jobs = JobQueue(
+        jobs_per_gpu=config.jobs_per_gpu,
+        max_queue_size=config.max_queue_size,
+    )
+
+    mp_context = multiprocessing.get_context("spawn")
+    process_pools = {
+        device: ProcessPoolExecutor(
+            max_workers=config.jobs_per_gpu, mp_context=mp_context
+        )
+        for device in jobs.devices
+    }
+
+    def _shutdown():
+        jobs.shutdown()
+        for pool in process_pools.values():
+            pool.shutdown(wait=True)
+
+    router.add_event_handler("shutdown", _shutdown)
+
+    def _stage_upload(file: UploadFile, filename: str) -> tuple[str, str]:
+        """Save the uploaded bytes now, while the request is alive.
+
+        Returns (job_dir, input_dir). The worker removes job_dir when done.
+        """
+        job_dir = tempfile.mkdtemp(prefix="index_job_")
+        input_dir = os.path.join(job_dir, "input")
+        os.makedirs(input_dir)
+        target = os.path.realpath(os.path.join(input_dir, os.path.basename(filename)))
+        if os.path.dirname(target) != os.path.realpath(input_dir):
+            raise HTTPException(status_code=422, detail="Invalid filename")
+        with open(target, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return job_dir, input_dir
+
+    def _make_ingest_job(
+        job_dir: str,
+        input_dir: str,
+        file_id: str,
+        filename: str,
+        replace: bool,
+    ) -> Callable[[str], dict]:
+        extension = FilePath(filename).suffix.lower()
+
+        def ingest(device: str) -> dict:
+            try:
+                # Processing runs in the device's subprocess
+                documents = _process_files(
+                    process_pools[device],
+                    input_dir,
+                    COLLECTION_NAME,
+                    [extension],
+                    device,
+                    os.path.join(job_dir, "out"),
+                )
+                _apply_uploaded_file_metadata(documents, file_id, filename)
+
+                indexer = get_indexer(
+                    COLLECTION_NAME, MILVUS_URI, MILVUS_DB, device=device
+                )
+                if str(device).startswith("cuda"):
+                    torch.cuda.set_device(torch.device(device))
+                if replace:
+                    indexer.client.delete(
+                        collection_name=COLLECTION_NAME,
+                        filter=f"document_id == {json.dumps(file_id)}",
+                    )
+                indexer.index_documents(
+                    documents=documents, collection_name=COLLECTION_NAME
+                )
+                indexer.client.flush(COLLECTION_NAME)
+
+                # Persist the permanent copy only on success
+                dest = FilePath(UPLOAD_DIR) / file_id
+                os.makedirs(os.path.dirname(dest), exist_ok=True)
+                shutil.copy2(os.path.join(input_dir, filename), dest)
+                return {"chunks": len(documents)}
+            finally:
+                shutil.rmtree(job_dir, ignore_errors=True)
+
+        return ingest
+
+    @router.get("/", tags=["Health"], summary="Health check")
     async def root():
         return {
             "message": "Indexer API is running (what are you doing here...go catch it!)"
         }
 
     # SINGLE FILE UPLOAD ENDPOINT
-    @router.post("/v1/files", status_code=201, tags=["File Operations"])
+    @router.post(
+        "/v1/files",
+        status_code=202,
+        tags=["File Operations"],
+        summary="Upload a single file",
+        responses={
+            202: {
+                "description": "Job queued",
+                "content": {
+                    "application/json": {
+                        "example": {"jobId": "a1b2c3d4...", "fileId": "example123"}
+                    }
+                },
+            },
+            409: {
+                "description": "File ID already exists or is already being processed"
+            },
+            422: {"description": "Uploaded file has no filename"},
+            503: {"description": "Job queue is full, retry later"},
+        },
+    )
     async def upload_file(
         fileId: str = Form(..., description="Unique identifier for the file"),
         file: UploadFile = File(..., description="The file content"),
     ):
         """
-        Upload a new file with a unique identifier.
+        Queue a new file for processing and indexing.
 
-        Requirements:
-        - Unique fileId
+        Returns a jobId immediately, the work runs in the background.
         """
+        if file.filename is None:
+            raise HTTPException(
+                status_code=422, detail="Provided file should have a filename"
+            )
+        if (FilePath(UPLOAD_DIR) / fileId).exists():
+            raise HTTPException(
+                status_code=409, detail=f"File with ID {fileId} already exists"
+            )
+
+        job_dir, input_dir = _stage_upload(file, file.filename)
+        await file.close()
+        ingest = _make_ingest_job(
+            job_dir, input_dir, fileId, file.filename, replace=False
+        )
         try:
-            # Check if file with this ID already exists
-            # pdb.set_trace()
-            file_storage_path = FilePath(UPLOAD_DIR) / fileId
-            if file_storage_path.exists():
-                raise HTTPException(
-                    status_code=400, detail=f"File with ID {fileId} already exists"
-                )
+            job_id = jobs.submit(fileId, file.filename, ingest)
+        except DuplicateJobError:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=409,
+                detail=f"File with ID {fileId} is already being processed",
+            )
+        except QueueFullError:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=503, detail="Server busy, retry later")
 
-            if file.filename is None:
-                raise HTTPException(
-                    status_code=422, detail="Provided file should have a filename"
-                )
+        return {"jobId": job_id, "fileId": fileId}
 
-            # Use a temporary directory for processing so that we only process the incoming docs
-            with tempfile.TemporaryDirectory() as temp_dir:
-                temp_file_path = FilePath(temp_dir) / file.filename
-                with temp_file_path.open("wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-
-                await file.close()
-
-                # Process and index the file
-                file_extension = FilePath(file.filename).suffix.lower()
-                try:
-                    documents = process_files_default(
-                        temp_dir, COLLECTION_NAME, [file_extension]
-                    )
-                except KeyError as e:
-                    logger.warning(
-                        "Could not process file '%s' with extension '%s'",
-                        file.filename,
-                        file_extension,
-                        exc_info=True,
-                    )
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"Could not process file '{file.filename}'",
-                    ) from e
-
-                # Save a permanent copy for later retrieval
-                os.makedirs(os.path.dirname(file_storage_path), exist_ok=True)
-                shutil.copy2(temp_file_path, file_storage_path)
-
-                # Process and index the file
-                file_extension = FilePath(file.filename).suffix.lower()
-                documents = process_files_default(
-                    temp_dir, COLLECTION_NAME, [file_extension]
-                )
-
-                _apply_uploaded_file_metadata(documents, fileId, file.filename)
-
-                # Get indexer and index the document
-                try:
-                    indexer = get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=str(e))
-
-                indexer.index_documents(
-                    documents=documents, collection_name=COLLECTION_NAME
-                )
-                indexer.client.flush(COLLECTION_NAME)
-
-                return {
-                    "status": "success",
-                    "message": f"File successfully indexed in {COLLECTION_NAME} collection",
-                    "fileId": fileId,
-                    "filename": file.filename,
-                }
-
-        except HTTPException:
-            raise
-
-        except Exception as e:
-            logger.error(f"Error uploading file: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @router.post("/v1/files/bulk", status_code=201, tags=["File Operations"])
+    @router.post(
+        "/v1/files/bulk",
+        status_code=202,
+        tags=["File Operations"],
+        summary="Upload multiple files with IDs",
+        responses={
+            202: {
+                "description": "Per-file outcome (jobId or error)",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "jobs": [
+                                {"fileId": "doc1", "jobId": "a1b2c3..."},
+                                {"fileId": "doc2", "error": "already exists"},
+                            ]
+                        }
+                    }
+                },
+            },
+            400: {"description": "Number of IDs does not match number of files"},
+        },
+    )
     async def upload_files(
         listIds: List[str] = Form(..., description="List of IDs for the files"),
         files: List[UploadFile] = File(..., description="Files to upload"),
     ):
         """
-        Upload multiple files with custom IDs and index them.
+        Queue multiple files, one independent job per file.
+
+        Returns a per-file outcome (jobId or error), so one bad file does not
+        fail the whole batch.
         """
-        try:
-            listIds = [
-                file_id.strip()
-                for ids in listIds
-                for file_id in ids.split(",")
-                if file_id.strip()
-            ]
-            # Check if IDs and files match in number
-            if len(listIds) != len(files):
-                raise HTTPException(
-                    status_code=400,
-                    detail=f"Number of IDs ({len(listIds)}) doesn't match number of files ({len(files)})",
-                )
+        listIds = [
+            file_id.strip()
+            for ids in listIds
+            for file_id in ids.split(",")
+            if file_id.strip()
+        ]
+        if len(listIds) != len(files):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Number of IDs ({len(listIds)}) doesn't match number of files ({len(files)})",
+            )
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                logging.info(f"Starting to process {len(files)} files with custom IDs")
+        results = []
+        for file, file_id in zip(files, listIds):
+            if file.filename is None:
+                await file.close()
+                results.append({"fileId": file_id, "error": "missing filename"})
+                continue
+            if (FilePath(UPLOAD_DIR) / file_id).exists():
+                await file.close()
+                results.append({"fileId": file_id, "error": "already exists"})
+                continue
 
-                uploaded_files: list[dict[str, str]] = []
-                file_info_by_temp_path = {}
-                for index, (file, file_id) in enumerate(zip(files, listIds)):
-                    if file.filename is None:
-                        raise HTTPException(
-                            status_code=422,
-                            detail=f"File {file_id} does not have a filename",
-                        )
-                    filename = file.filename
+            job_dir, input_dir = _stage_upload(file, file.filename)
+            await file.close()
+            ingest = _make_ingest_job(
+                job_dir, input_dir, file_id, file.filename, replace=False
+            )
+            try:
+                job_id = jobs.submit(file_id, file.filename, ingest)
+                results.append({"fileId": file_id, "jobId": job_id})
+            except DuplicateJobError:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                results.append({"fileId": file_id, "error": "already being processed"})
+            except QueueFullError:
+                shutil.rmtree(job_dir, ignore_errors=True)
+                results.append({"fileId": file_id, "error": "queue full"})
 
-                    # Check if file with this ID already exists
-                    file_storage_path = FilePath(UPLOAD_DIR) / file_id
-                    if file_storage_path.exists():
-                        raise HTTPException(
-                            status_code=400,
-                            detail=f"File with ID {file_id} already exists",
-                        )
+        return {"jobs": results}
 
-                    # Save to temp directory
-                    temp_file_path = (
-                        FilePath(temp_dir) / f"{index}{FilePath(filename).suffix}"
-                    )
-                    file_info = {
-                        "fileId": file_id,
-                        "filename": filename,
-                        "temp_path": str(temp_file_path.resolve()),
+    @router.put(
+        "/v1/files/{fileId}",
+        status_code=202,
+        tags=["File Operations"],
+        summary="Replace an existing file and re-index",
+        responses={
+            202: {
+                "description": "Replacement job queued",
+                "content": {
+                    "application/json": {
+                        "example": {"jobId": "a1b2c3d4...", "fileId": "doc123"}
                     }
-                    uploaded_files.append(file_info)
-                    file_info_by_temp_path[file_info["temp_path"]] = file_info
-
-                    with temp_file_path.open("wb") as buffer:
-                        shutil.copyfileobj(file.file, buffer)
-
-                    # Close the file
-                    await file.close()
-
-                logging.info(f"Files saved to temporary directory: {temp_dir}")
-
-                # Process the documents
-                file_extensions = [
-                    FilePath(file_info["temp_path"]).suffix.lower()
-                    for file_info in uploaded_files
-                ]
-                try:
-                    documents = process_files_default(
-                        temp_dir, COLLECTION_NAME, file_extensions
-                    )
-                except KeyError as e:
-                    logger.warning(
-                        "Could not process one of the uploaded files with extensions %s",
-                        file_extensions,
-                        exc_info=True,
-                    )
-                    raise HTTPException(
-                        status_code=422,
-                        detail="Could not process one of the uploaded files",
-                    ) from e
-
-                # Save permanent copies
-                for file_info in uploaded_files:
-                    file_storage_path = FilePath(UPLOAD_DIR) / file_info["fileId"]
-                    shutil.copy2(file_info["temp_path"], file_storage_path)
-
-                # Change the IDs to match the ones from the client
-                modified_documents = []
-                text_by_file_id = {}
-                chunks_by_file_id = {
-                    file_info["fileId"]: 0 for file_info in uploaded_files
-                }
-                for doc_index, doc in enumerate(documents):
-                    doc_temp_path = str(FilePath(doc.metadata.file_path).resolve())
-                    file_info = file_info_by_temp_path.get(doc_temp_path)
-                    if file_info is None:
-                        if doc_index >= len(uploaded_files):
-                            raise HTTPException(
-                                status_code=500,
-                                detail=(
-                                    "Could not match processed document "
-                                    f"{doc.metadata.file_path} to an uploaded file"
-                                ),
-                            )
-                        # Fallback for processors/tests that return file paths outside temp_dir.
-                        file_info = uploaded_files[doc_index]
-                    doc_id = file_info["fileId"]
-                    _apply_uploaded_file_metadata([doc], doc_id, file_info["filename"])
-                    text_by_file_id.setdefault(doc_id, doc.text)
-                    chunks_by_file_id[doc_id] += 1
-                    modified_documents.append(doc)
-
-                logging.info("Indexing the files")
-
-                try:
-                    indexer = get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=str(e))
-
-                indexer.index_documents(
-                    documents=modified_documents, collection_name=COLLECTION_NAME
-                )
-                indexer.client.flush(COLLECTION_NAME)
-
-                return {
-                    "status": "success",
-                    "message": f"Successfully processed and indexed {len(uploaded_files)} files",
-                    "documents": [
-                        {
-                            "fileId": file_info["fileId"],
-                            "filename": file_info["filename"],
-                            "text": text_by_file_id.get(file_info["fileId"], "")[:50]
-                            + "...",
-                            "chunks": chunks_by_file_id[file_info["fileId"]],
-                        }
-                        for file_info in uploaded_files
-                    ],
-                }
-
-        except HTTPException:
-            raise
-
-        except Exception as e:
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @router.put("/v1/files/{fileId}", tags=["File Operations"])
+                },
+            },
+            404: {"description": "File not found"},
+            409: {"description": "File is already being processed"},
+            422: {"description": "Uploaded file has no filename"},
+            503: {"description": "Job queue is full, retry later"},
+        },
+    )
     async def update_file(
         fileId: str = Path(..., description="ID of the file to update"),
         file: UploadFile = File(..., description="The new file content"),
     ):
         """
-        Replace an existing file with a new version.
+        Queue a replacement for an existing file and re-index it.
+
+        The old vectors are deleted and the new ones inserted only after
+        processing succeeds, so a failure leaves the existing document intact.
         """
+        if not (FilePath(UPLOAD_DIR) / fileId).exists():
+            raise HTTPException(
+                status_code=404, detail=f"File with ID {fileId} not found"
+            )
+        if file.filename is None:
+            raise HTTPException(
+                status_code=422, detail="Provided file should have a filename"
+            )
+
+        job_dir, input_dir = _stage_upload(file, file.filename)
+        await file.close()
+        ingest = _make_ingest_job(
+            job_dir, input_dir, fileId, file.filename, replace=True
+        )
         try:
-            # Check if file exists
-            file_storage_path = FilePath(UPLOAD_DIR) / fileId
-            if not file_storage_path.exists():
-                raise HTTPException(
-                    status_code=404, detail=f"File with ID {fileId} not found"
-                )
+            job_id = jobs.submit(fileId, file.filename, ingest)
+        except DuplicateJobError:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=409,
+                detail=f"File with ID {fileId} is already being processed",
+            )
+        except QueueFullError:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            raise HTTPException(status_code=503, detail="Server busy, retry later")
 
-            if file.filename is None:
-                raise HTTPException(
-                    status_code=422, detail="Provided file should have a filename"
-                )
+        return {"jobId": job_id, "fileId": fileId}
 
-            with tempfile.TemporaryDirectory() as temp_dir:
-                # Save the file temporarily for processing
-                temp_file_path = FilePath(temp_dir) / file.filename
-                with temp_file_path.open("wb") as buffer:
-                    shutil.copyfileobj(file.file, buffer)
-
-                await file.close()
-
-                # Replace the existing file
-                os.remove(file_storage_path)
-                shutil.copy2(temp_file_path, file_storage_path)
-
-                # Process and index the file
-                file_extension = FilePath(file.filename).suffix.lower()
-                documents = process_files_default(
-                    temp_dir, COLLECTION_NAME, [file_extension]
-                )
-
-                # Set the custom ID and preserve the original upload filename
-                _apply_uploaded_file_metadata(documents, fileId, file.filename)
-
-                # Get indexer and reindex the document
-                try:
-                    indexer = get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
-                except Exception as e:
-                    raise HTTPException(status_code=500, detail=str(e))
-
-                # First delete the existing document
-                try:
-                    # Delete existing document with this ID from collection
-                    client = MilvusClient(
-                        uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
-                    )
-                    client.delete(
-                        collection_name=COLLECTION_NAME,
-                        filter=f"document_id == '{fileId}'",
-                    )
-                except Exception as delete_error:
-                    logger.warning(
-                        f"Error deleting existing document (may not exist): {str(delete_error)}"
-                    )
-
-                # Index the new document
-                indexer.index_documents(
-                    documents=documents, collection_name=COLLECTION_NAME
-                )
-                indexer.client.flush(COLLECTION_NAME)
-
-                return {
-                    "status": "success",
-                    "message": "File successfully updated",
-                    "fileId": fileId,
-                    "filename": file.filename,
-                }
-
-        except HTTPException as e:
-            raise e
-
-        except Exception as e:
-            logger.error(f"Error updating file: {str(e)}", exc_info=True)
-            raise HTTPException(status_code=500, detail=str(e))
-
-    @router.delete("/v1/files/{fileId}", tags=["File Operations"])
+    @router.delete(
+        "/v1/files/{fileId}",
+        tags=["File Operations"],
+        summary="Delete a file and remove its vector entry",
+        responses={
+            200: {
+                "description": "File deleted",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "status": "success",
+                            "message": "File successfully deleted",
+                            "fileId": "doc123",
+                        }
+                    }
+                },
+            },
+            404: {"description": "File not found"},
+            500: {"description": "Internal error while deleting the file"},
+        },
+    )
     async def delete_file(
         fileId: str = Path(..., description="ID of the file to delete"),
     ):
@@ -410,7 +417,8 @@ def make_router(config_path: str) -> APIRouter:
                     uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
                 )
                 delete_result = client.delete(
-                    collection_name=COLLECTION_NAME, filter=f"document_id == '{fileId}'"
+                    collection_name=COLLECTION_NAME,
+                    filter=f"document_id == {json.dumps(fileId)}",
                 )
                 logger.info(f"Deleted document from vector DB: {delete_result}")
             except Exception as db_error:
@@ -431,7 +439,20 @@ def make_router(config_path: str) -> APIRouter:
             logger.error(f"Error deleting file: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
 
-    @router.get("/v1/files/{fileId}", tags=["File Operations"])
+    @router.get(
+        "/v1/files/{fileId}",
+        tags=["File Operations"],
+        summary="Download a file by its ID",
+        response_class=FileResponse,
+        responses={
+            200: {
+                "description": "Binary file content",
+                "content": {"application/octet-stream": {}},
+            },
+            404: {"description": "File not found"},
+            500: {"description": "Internal error while retrieving the file"},
+        },
+    )
     async def download_file(
         fileId: str = Path(..., description="ID of the file to download"),
     ):
@@ -453,7 +474,7 @@ def make_router(config_path: str) -> APIRouter:
                 )
                 file_paths = client.query(
                     collection_name=COLLECTION_NAME,
-                    filter=f"document_id == '{fileId}'",
+                    filter=f"document_id == {json.dumps(fileId)}",
                     output_fields=["file_path"],
                 )
 
@@ -484,6 +505,81 @@ def make_router(config_path: str) -> APIRouter:
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/v1/jobs/{jobId}",
+        tags=["Jobs"],
+        summary="Get a one-shot job status snapshot",
+        responses={
+            200: {
+                "description": "Job status snapshot",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "jobId": "a1b2c3...",
+                            "fileId": "doc1",
+                            "filename": "doc.pdf",
+                            "status": "done",
+                            "device": "cuda:0",
+                            "result": {"chunks": 12},
+                            "error": None,
+                        }
+                    }
+                },
+            },
+            404: {"description": "Unknown or expired job"},
+        },
+    )
+    async def get_job(jobId: str = Path(..., description="ID of the job")):
+        """One-shot job status snapshot, fallback for when the SSE stream drops."""
+        job = jobs.get(jobId)
+        if job is None:
+            raise HTTPException(status_code=404, detail=f"Unknown job {jobId}")
+        return _job_payload(job)
+
+    @router.get(
+        "/v1/jobs/{jobId}/events",
+        tags=["Jobs"],
+        summary="Stream job status updates over SSE",
+        response_class=StreamingResponse,
+        responses={
+            200: {
+                "description": "Server-Sent Events stream of job status changes, "
+                "closed when the job is done or failed",
+                "content": {"text/event-stream": {}},
+            },
+        },
+    )
+    async def stream_job_events(jobId: str = Path(..., description="ID of the job")):
+        """Push job status updates to the client over SSE until the job ends."""
+
+        async def event_stream():
+            last: Optional[str] = None
+            idle = 0.0
+            while True:
+                job = jobs.get(jobId)
+                status = job.status.value if job else "unknown"
+                if status != last:
+                    last = status
+                    idle = 0.0
+                    payload = (
+                        _job_payload(job) if job else {"jobId": jobId, "status": status}
+                    )
+                    yield f"data: {json.dumps(payload)}\n\n"
+                    if job is None or job.status.is_terminal:
+                        return
+                else:
+                    idle += POLL_INTERVAL
+                    if idle >= HEARTBEAT_SECONDS:
+                        idle = 0.0
+                        yield ": keepalive\n\n"
+                await asyncio.sleep(POLL_INTERVAL)
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     return router
 

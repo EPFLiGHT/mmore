@@ -87,7 +87,7 @@ class EMLProcessor(Processor):
 
             # extract images only if passed argument in config is True
             elif part.get_content_type().startswith("image/"):
-                if self.config.custom_config.get("extract_images", True):
+                if self.config.extract_images:
                     try:
                         image_data = part.get_payload(decode=True)
                         if isinstance(image_data, bytes):

@@ -1,10 +1,10 @@
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from tqdm import tqdm
-
 from ...type import MultimodalSample
+from ...ux import progress
 from ..utils import save_samples
 
 
@@ -67,7 +67,9 @@ class BasePostProcessor(ABC):
             open(tmp_save_path, "w").close()
 
         current_batch = []
-        for s in tqdm(samples, desc=f"{self.name}"):
+        bar = progress(samples, desc=self.name, unit="sample")
+        for s in bar:
+            bar.set_postfix_str(os.path.basename(s.metadata.file_path or ""))
             new = self.process(s, **kwargs)
             current_batch += new
 

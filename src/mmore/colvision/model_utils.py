@@ -10,6 +10,8 @@ from typing import Tuple, Type
 
 import torch
 
+from ..ux import loading_model
+
 logger = logging.getLogger(__name__)
 
 # Patterns checked in order — more specific patterns first.
@@ -57,7 +59,12 @@ def resolve_model_classes(model_name: str) -> Tuple[Type, Type]:
     Raises:
         ValueError: if the model name does not match any known pattern.
     """
-    import colpali_engine.models as models_module
+    try:
+        import colpali_engine.models as models_module
+    except ImportError as e:
+        raise ImportError(
+            "colpali_engine is required for ColVision. Install with: pip install mmore[colvision]"
+        ) from e
 
     name_lower = model_name.lower()
 
@@ -90,9 +97,10 @@ def load_model_and_processor(
         Tuple of (model, processor) ready for inference.
     """
     model_cls, proc_cls = resolve_model_classes(model_name)
-    logger.info(f"Loading model: {model_name} ({model_cls.__name__})")
-    model = model_cls.from_pretrained(
-        model_name, torch_dtype=dtype, device_map=device
-    ).eval()
-    processor = proc_cls.from_pretrained(model_name)
+    logger.debug(f"Loading model: {model_name} ({model_cls.__name__})")
+    with loading_model(model_name):
+        model = model_cls.from_pretrained(
+            model_name, torch_dtype=dtype, device_map=device
+        ).eval()
+        processor = proc_cls.from_pretrained(model_name)
     return model, processor

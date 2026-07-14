@@ -1,12 +1,12 @@
-# MMORE Documentation
+# mmore Documentation
 
-MMORE is an open-source multimodal ingestion and retrieval framework designed for heterogeneous document collections.
+mmore is an open-source multimodal ingestion and retrieval framework designed for heterogeneous document collections.
 
 It provides tools to process documents, build indexes, run retrieval pipelines, support multimodal workflows, and run distributed processing for larger collections and production-oriented settings.
 
-## What is MMORE?
+## What is mmore?
 
-MMORE helps you build retrieval systems over complex document collections by combining:
+mmore helps you build retrieval systems over complex document collections by combining:
 
 - document ingestion and processing
 - indexing pipelines
@@ -20,7 +20,7 @@ MMORE helps you build retrieval systems over complex document collections by com
 
 Depending on what you want to do, start in different places:
 
-- to install MMORE, read [Installation](getting_started/installation.md)
+- to install mmore, read [Installation](getting_started/installation.md)
 - to run a first workflow, read [Quickstart](getting_started/quickstart.md)
 - to understand the overall system, read [Architecture](getting_started/architecture.md)
 - to understand ingestion and indexing, read [Process](getting_started/process.md) and [Indexing](getting_started/indexing.md)
@@ -77,7 +77,7 @@ developer_documentation/index_api
 
 Here is a quick overview of the main pages:
 
-- [Installation](getting_started/installation.md): set up MMORE and prepare your environment
+- [Installation](getting_started/installation.md): set up mmore and prepare your environment
 - [Running on Windows](getting_started/windows.md): what differs on Windows and how to fix it
 - [Quickstart](getting_started/quickstart.md): run a first minimal workflow end to end
 - [Architecture](getting_started/architecture.md): understand the main system components and how they interact

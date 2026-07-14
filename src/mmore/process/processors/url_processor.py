@@ -41,7 +41,7 @@ class URLProcessor(Processor):
             # replace all ![] with <attachment>
             all_text = re.sub(r"!\[.*\]\(.*\)", self.config.attachment_tag, result)
 
-            if self.config.custom_config.get("extract_images", True):
+            if self.config.extract_images:
                 images = re.findall(r"!\[.*\]\(.*\)", result)
             else:
                 images = []

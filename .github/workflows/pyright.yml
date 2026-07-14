@@ -8,39 +8,29 @@ on:
 
 jobs:
   pyright:
+    name: "Pyright"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
 
-      - name: Set up Python 3.12
+      - name: Set up Python 3.11
         uses: actions/setup-python@v6
         with:
-          python-version: "3.12"
+          python-version: "3.11"
 
-      - name: Install uv and create venv
-        run: |
-          pipx install uv
-          uv venv .venv
+      - name: Install uv
+        run: pipx install uv
 
-      - name: Install dependencies
-        run: |
-          source .venv/bin/activate
-          uv pip install -e ".[process,index,rag,api,cpu,dev,websearch,privacy,paper_discovery]"
+      - name: Install base dependencies
+        run: uv venv .venv && source .venv/bin/activate && uv pip install -e ".[process,index,rag,api,tui,cpu,dev,websearch,privacy,paper_discovery]"
 
-      - name: Run Pyright
+      - name: Run Pyright (base)
         continue-on-error: true
-        run: |
-          source .venv/bin/activate
-          pyright
+        run: source .venv/bin/activate && pyright --project pyrightconfig.json
 
-      - name: Install dependencies - colvision
-        run: |
-          uv venv .venv-colvision
-          source .venv-colvision/bin/activate
-          uv pip install -e ".[colvision,cpu,dev]"
+      - name: Install colvision dependencies
+        run: uv venv .venv-colvision && source .venv-colvision/bin/activate && uv pip install -e ".[colvision,tui,cpu,dev]"
 
-      - name: Run Pyright - colvision
+      - name: Run Pyright (colvision)
         continue-on-error: true
-        run: |
-          source .venv-colvision/bin/activate
-          pyright src/mmore/colvision
+        run: source .venv-colvision/bin/activate && pyright --project .github/pyright/pyrightconfig.colvision.json

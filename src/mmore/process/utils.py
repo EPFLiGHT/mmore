@@ -124,4 +124,4 @@ def save_samples(
         logger.error("Invalid sample encountered when saving to %s: %s", path, e)
         raise
     else:
-        logger.info(f"Results saved to {path}!")
+        logger.debug(f"Results saved to {path}")

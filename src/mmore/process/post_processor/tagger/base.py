@@ -2,9 +2,8 @@ from abc import abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
 
-from tqdm import tqdm
-
 from ....type import MultimodalSample
+from ....ux import progress
 from .. import BasePostProcessor
 
 
@@ -55,7 +54,7 @@ class BaseTagger(BasePostProcessor):
         Returns: a list, the same size as `batch`, containing the filter result for each document
 
         """
-        return list(map(self.tag, tqdm(batch, desc=f"{self.name}")))
+        return list(map(self.tag, progress(batch, desc=self.name, unit="sample")))
 
     def process(self, sample: MultimodalSample, **kwargs) -> List[MultimodalSample]:
         tag = self.tag(sample)

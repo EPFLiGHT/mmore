@@ -162,7 +162,7 @@ The LLM wrappers are based on LangChain's [`BaseChatModel`](https://python.langc
 If you want to create a custom retriever you can simply make it inherit from this class and use it as described in our examples. 
 
 ```{warning}
-MMORE supports [Hugging Face Hub](https://huggingface.co/models) models.
+mmore supports [Hugging Face Hub](https://huggingface.co/models) models.
 
 In some cases, a simpler solution is to push a model to the Hub and use it through the existing class rather than implementing a new wrapper.
 ```

@@ -11,6 +11,7 @@ from dask.distributed import Client, as_completed
 from tqdm import tqdm
 
 from ..type import MultimodalSample
+from ..ux import init_worker
 from .crawler import DispatcherReadyResult, FileDescriptor, URLDescriptor
 from .execution_state import ExecutionState
 from .processors.base import (
@@ -74,6 +75,9 @@ class DispatcherConfig:
     process_batch_sizes: Optional[List[Dict[str, float]]] = None
     batch_multiplier: int = 1
     extract_images: bool = False
+    # When set, processing is pinned to this single device (used by the indexer
+    # API to run one job per GPU). None keeps the default behavior.
+    device: Optional[str] = None
 
     def __post_init__(self):
         os.makedirs(self.output_path, exist_ok=True)
@@ -133,6 +137,38 @@ class DispatcherConfig:
         )
 
 
+class _LazyPool:
+    """A multiprocessing pool created on first map() call.
+
+    Processors that override process_batch (e.g. PDF, media) never call map(), so a
+    job that only uses them never spawns any worker.
+    """
+
+    def __init__(self, processes: int):
+        self._processes = processes
+        self._pool = None
+
+    def _ensure_pool(self):
+        if self._pool is None:
+            logger.debug(f"Initializing shared pool with {self._processes} workers...")
+            self._pool = mp.Pool(processes=self._processes, initializer=init_worker)
+        return self._pool
+
+    def map(self, func, iterable):
+        return self._ensure_pool().map(func, iterable)
+
+    def imap(self, func, iterable):
+        return self._ensure_pool().imap(func, iterable)
+
+    def close(self):
+        if self._pool is not None:
+            self._pool.close()
+
+    def join(self):
+        if self._pool is not None:
+            self._pool.join()
+
+
 class Dispatcher:
     """
     Takes a converted crawl result and dispatches it to the appropriate processor.
@@ -182,9 +218,7 @@ class Dispatcher:
 
         instantiated_processors: Dict[Type[Processor], Processor] = {}
 
-        num_workers = os.cpu_count() or 1
-        logger.info(f"🚀 Initializing Shared Global Pool with {num_workers} workers...")
-        global_pool = mp.Pool(processes=num_workers)
+        global_pool = _LazyPool(os.cpu_count() or 1)
 
         try:
             for processor_type, files in task_lists:
@@ -203,20 +237,22 @@ class Dispatcher:
                         processor_config = {}
 
                     processor_config["output_path"] = self.config.output_path
-                    processor_config["extract_images"] = self.config.extract_images
+                    if self.config.device is not None:
+                        processor_config["device"] = self.config.device
 
                     full_config = ProcessorConfig(
+                        extract_images=self.config.extract_images,
                         custom_config=processor_config,
                     )
 
-                    logger.info(f"Initializing processor: {processor_type.__name__}")
+                    logger.debug(f"Initializing processor: {processor_type.__name__}")
                     new_proc_instance = processor_type(full_config)
                     new_proc_instance.set_shared_pool(global_pool)
                     instantiated_processors[processor_type] = new_proc_instance
 
                 proc_instance = instantiated_processors[processor_type]
 
-                logger.info(
+                logger.debug(
                     f"Processing batch of {len(files)} files with {proc_instance.__class__.__name__}"
                 )
 
@@ -227,7 +263,7 @@ class Dispatcher:
                 self.save_individual_processor_results(res, processor_type.__name__)
                 yield res
         finally:
-            logger.info("Closing Shared Global Pool")
+            logger.debug("Closing shared global pool")
             global_pool.close()
             global_pool.join()
 
@@ -258,13 +294,13 @@ class Dispatcher:
             else:
                 processor_config = {}
             processor_config["output_path"] = self.config.output_path
-            processor_config["extract_images"] = self.config.extract_images
 
             logger.info(
                 f"Dispatching in distributed (to some worker) {len(files)} files to {processor_type.__name__}"
             )
 
             processor_config = ProcessorConfig(
+                extract_images=self.config.extract_images,
                 custom_config=processor_config,
             )
 
@@ -276,7 +312,7 @@ class Dispatcher:
                     ExecutionState.initialize(distributed_mode=True, client=client)
 
                 worker_count = os.cpu_count() or 1
-                task_pool = mp.Pool(processes=worker_count)
+                task_pool = mp.Pool(processes=worker_count, initializer=init_worker)
 
                 try:
                     proc_instance = processor_class(processor_config)
@@ -424,4 +460,4 @@ class Dispatcher:
         output_file = os.path.join(processor_output_path, "results.jsonl")
         MultimodalSample.to_jsonl(output_file, results)
 
-        logger.info(f"Results saved to {output_file}")
+        logger.debug(f"Results saved to {output_file}")

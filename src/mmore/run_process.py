@@ -1,12 +1,10 @@
 import argparse
 import json
-import logging
 import os
 import time
 from dataclasses import dataclass
 from typing import List, Optional, Union
 
-import click
 import torch
 
 from mmore.process.crawler import Crawler, CrawlerConfig
@@ -18,14 +16,17 @@ from mmore.process.incremental import (
 )
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.utils import load_config
-
-PROCESS_EMOJI = "🚀"
-logger = logging.getLogger(__name__)
-logging.basicConfig(
-    format=f"[Process {PROCESS_EMOJI} -- %(asctime)s] %(message)s",
-    level=logging.INFO,
-    datefmt="%Y-%m-%d %H:%M:%S",
+from mmore.ux import (
+    PROCESS_EMOJI,
+    PROCESS_NAME,
+    human_size,
+    quiet_noisy_libs,
+    setup_logging,
+    step_intro,
+    step_summary,
 )
+
+logger = setup_logging(PROCESS_NAME, PROCESS_EMOJI)
 
 overall_start_time = time.time()
 
@@ -53,8 +54,9 @@ def merged_results_path(output_path: str) -> str:
     return os.path.join(output_path, "merged", "merged_results.jsonl")
 
 
-def _write_merged_results(output_path, reused_samples, dispatched=True):
-    """Merge per-processor JSONL files and reused samples into a single output."""
+def _write_merged_results(output_path, reused_samples, dispatched=True) -> int:
+    """Merge per-processor JSONL files and reused samples into a single output and
+    returns the total number of samples written."""
     output_file = merged_results_path(output_path)
     os.makedirs(os.path.dirname(output_file), exist_ok=True)
 
@@ -78,13 +80,15 @@ def _write_merged_results(output_path, reused_samples, dispatched=True):
                                     f.write(stripped_line + "\n")
                                     total_results += 1
 
-    logger.info(f"Merged results ({total_results} samples) saved to {output_file}")
+    logger.debug(f"Merged results ({total_results} samples) saved to {output_file}")
+    return total_results
 
 
 @profile_function()
 def process(config_file: str):
     """Process documents from a directory."""
-    click.echo(f"Dispatcher configuration file path: {config_file}")
+    quiet_noisy_libs()
+    logger.debug(f"Dispatcher configuration file path: {config_file}")
 
     overall_start_time = time.time()
 
@@ -134,14 +138,14 @@ def process(config_file: str):
     else:
         raise ValueError("Data path not provided in the configuration")
 
-    logger.info(f"Using crawler configuration: {crawler_config}")
+    logger.debug(f"Using crawler configuration: {crawler_config}")
     crawler = Crawler(config=crawler_config)
 
     crawl_start_time = time.time()
     crawl_result = crawler.crawl()
     crawl_end_time = time.time()
     crawl_time = crawl_end_time - crawl_start_time
-    logger.info(f"Crawling completed in {crawl_time:.2f} seconds")
+    logger.debug(f"Crawled {len(crawl_result)} files in {crawl_time:.4f}s")
 
     # Collect all crawled file paths and urls (excluding this way deleted files)
     all_crawled_paths = {
@@ -179,29 +183,37 @@ def process(config_file: str):
     output_path = config.dispatcher_config.output_path
 
     dispatched = len(crawl_result) > 0
+    n_dispatched = len(crawl_result)
+
+    intro_fields = [f"{len(all_crawled_paths)} files", f"output: {output_path}"]
+    step_intro(
+        PROCESS_NAME,
+        PROCESS_EMOJI,
+        "Read your files and pull out their text and images",
+        intro_fields,
+    )
 
     if not dispatched and not reused_samples:
         logger.warning("⚠️ Found no file to process")
         if previous is None:
             return
 
+    dispatch_time = 0.0
     if dispatched:
         dispatcher_config: DispatcherConfig = config.dispatcher_config
-        logger.info(f"Using dispatcher configuration: {dispatcher_config}")
+        logger.debug(f"Using dispatcher configuration: {dispatcher_config}")
 
         dispatcher = Dispatcher(result=crawl_result, config=dispatcher_config)
         dispatch_start_time = time.time()
         list(dispatcher())
         dispatch_time = time.time() - dispatch_start_time
-        logger.info(
-            f"Dispatching and processing completed in {dispatch_time:.2f} seconds"
-        )
+        logger.debug(f"Processed {n_dispatched} files in {dispatch_time:.1f}s")
     elif reused_samples:
-        logger.info("No new files to process, reusing previous samples only.")
+        logger.debug("No new files to process, reusing previous samples only.")
     else:
-        logger.info("No new files to process and no samples to reuse.")
+        logger.debug("No new files to process and no samples to reuse.")
 
-    _write_merged_results(
+    total_samples = _write_merged_results(
         output_path,
         reused_samples,
         dispatched=dispatched,
@@ -211,7 +223,19 @@ def process(config_file: str):
         ggdrive_downloader.remove_downloads()
 
     overall_time = time.time() - overall_start_time
-    logger.info(f"Total execution time: {overall_time:.2f} seconds")
+    merged_file = merged_results_path(output_path)
+    size_label = (
+        human_size(os.path.getsize(merged_file)) if os.path.exists(merged_file) else "-"
+    )
+    stats: dict[str, object] = {}
+    if reused_samples:
+        stats["files"] = f"{n_dispatched} new · {len(reused_samples)} reused ♻️"
+    stats["output"] = f"{total_samples} samples"
+    stats["size"] = size_label
+    stats["throughput"] = (
+        f"{n_dispatched / dispatch_time:.2f} files/s" if dispatch_time else "-"
+    )
+    step_summary(PROCESS_NAME, PROCESS_EMOJI, overall_time, stats)
 
 
 if __name__ == "__main__":

@@ -1,7 +1,8 @@
 import cProfile
 import os
 import pstats
-from unittest.mock import patch
+from typing import Mapping
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +16,13 @@ from mmore.profiler import (
     time_context,
     time_function,
 )
+
+StatsKey = tuple[str, int, str]
+StatsValue = tuple[object, ...]
+
+
+def _stats_map(stats: pstats.Stats) -> Mapping[StatsKey, StatsValue]:
+    return getattr(stats, "stats")
 
 
 @pytest.fixture(autouse=True)
@@ -97,11 +105,11 @@ def test_enable_profiling_from_env_defaults(tmp_path, monkeypatch):
 
 
 @patch("mmore.profiler.logger")
-def test_time_function_with_parens(mock_logger):
+def test_time_function_with_parens(mock_logger: MagicMock):
     """@time_function() with parens returns correct result and logs."""
 
     @time_function(log=True)
-    def add(a, b):
+    def add(a: int, b: int) -> int:
         return a + b
 
     assert add(2, 3) == 5
@@ -110,11 +118,11 @@ def test_time_function_with_parens(mock_logger):
 
 
 @patch("mmore.profiler.logger")
-def test_time_function_no_parens(mock_logger):
-    """@time_function without parens also works correctly."""
+def test_time_function_no_parens(mock_logger: MagicMock):
+    """@time_function() returns correct result and logs."""
 
-    @time_function
-    def multiply(a, b):
+    @time_function()
+    def multiply(a: int, b: int) -> int:
         return a * b
 
     assert multiply(3, 4) == 12
@@ -123,7 +131,7 @@ def test_time_function_no_parens(mock_logger):
 
 
 @patch("mmore.profiler.logger")
-def test_time_context(mock_logger):
+def test_time_context(mock_logger: MagicMock):
     """time_context logs elapsed time including block name."""
     with time_context("MyBlock", log=True):
         pass
@@ -133,7 +141,7 @@ def test_time_context(mock_logger):
 
 
 @patch("mmore.profiler.logger")
-def test_time_context_no_log(mock_logger):
+def test_time_context_no_log(mock_logger: MagicMock):
     """time_context with log=False suppresses logger."""
     with time_context("SilentBlock", log=False):
         pass
@@ -304,9 +312,10 @@ def test_profile_function_records_call_in_file(
     assert len(files) == 1
 
     stats = pstats.Stats(str(files[0]))
-    workload_entries = [key for key in stats.stats if key[2] == "workload"]
+    stats_map = _stats_map(stats)
+    workload_entries = [key for key in stats_map if key[2] == "workload"]
     assert len(workload_entries) == 1
-    assert stats.stats[workload_entries[0]][1] == 1
+    assert stats_map[workload_entries[0]][1] == 1
 
 
 @patch("pstats.Stats.print_stats")
@@ -325,9 +334,10 @@ def test_profile_context_records_total_call_count(_mock_print_stats, tmp_path):
     assert len(files) == 1
 
     stats = pstats.Stats(str(files[0]))
-    inner_entries = [key for key in stats.stats if key[2] == "inner"]
+    stats_map = _stats_map(stats)
+    inner_entries = [key for key in stats_map if key[2] == "inner"]
     assert len(inner_entries) == 1
-    assert stats.stats[inner_entries[0]][1] == 10
+    assert stats_map[inner_entries[0]][1] == 10
 
 
 @patch("pstats.Stats.print_stats")
@@ -347,6 +357,7 @@ def test_profiler_records_total_call_count(_mock_print_stats, tmp_path):
     assert len(files) == 1
 
     stats = pstats.Stats(str(files[0]))
-    inner_entries = [key for key in stats.stats if key[2] == "inner"]
+    stats_map = _stats_map(stats)
+    inner_entries = [key for key in stats_map if key[2] == "inner"]
     assert len(inner_entries) == 1
-    assert stats.stats[inner_entries[0]][1] == 10
+    assert stats_map[inner_entries[0]][1] == 10

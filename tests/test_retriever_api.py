@@ -35,6 +35,7 @@ def test_get_chunk_flat_row_shape(client, mock_retriever):
         {
             "text": "hello world",
             "paragraph_positions": [[1, 0], [1, 2], [2, 1]],
+            "file_path": "papers/example.pdf",
             "filename": "demo.pdf",
         }
     ]
@@ -45,6 +46,7 @@ def test_get_chunk_flat_row_shape(client, mock_retriever):
     assert response.json() == {
         "fileId": "file-123",
         "chunkId": "chunk-7",
+        "filePath": "papers/example.pdf",
         "filename": "demo.pdf",
         "content": "hello world",
         "metadata": {
@@ -55,7 +57,12 @@ def test_get_chunk_flat_row_shape(client, mock_retriever):
     call_kwargs = mock_retriever.client.query.call_args.kwargs
     assert call_kwargs["collection_name"] == "test_docs"
     assert call_kwargs["filter"] == 'id in ["file-123+chunk-7"]'
-    assert call_kwargs["output_fields"] == ["text", "paragraph_positions", "filename"]
+    assert call_kwargs["output_fields"] == [
+        "text",
+        "paragraph_positions",
+        "file_path",
+        "filename",
+    ]
     assert call_kwargs["limit"] == 1
 
 
@@ -72,6 +79,8 @@ def test_get_chunk_no_paragraph_positions_returns_null_metadata(client, mock_ret
     assert body["filename"] is None
     assert body["content"] == "no positions"
     assert body["metadata"] is None
+    # missing file_path should fall back to empty string, not crash
+    assert body["filePath"] == ""
 
 
 def test_get_chunk_404_when_not_found(client, mock_retriever):
@@ -111,6 +120,7 @@ def test_retrieve_returns_gateway_contract_shape(client, mock_retriever):
                 "id": "file-1+chunk-0",
                 "similarity": 0.91,
                 "paragraph_positions": [[1, 0], [1, 3]],
+                "file_path": "papers/one.pdf",
             },
         ),
         Document(
@@ -119,6 +129,7 @@ def test_retrieve_returns_gateway_contract_shape(client, mock_retriever):
                 "id": "file-2+chunk-5",
                 "similarity": 0.42,
                 "paragraph_positions": [],
+                "file_path": "papers/two.pdf",
             },
         ),
     ]
@@ -139,6 +150,7 @@ def test_retrieve_returns_gateway_contract_shape(client, mock_retriever):
         {
             "fileId": "file-1",
             "chunkId": "chunk-0",
+            "filePath": "papers/one.pdf",
             "content": "first chunk",
             "similarity": 0.91,
             "metadata": {
@@ -149,6 +161,7 @@ def test_retrieve_returns_gateway_contract_shape(client, mock_retriever):
         {
             "fileId": "file-2",
             "chunkId": "chunk-5",
+            "filePath": "papers/two.pdf",
             "content": "second chunk",
             "similarity": 0.42,
             "metadata": None,
@@ -183,6 +196,8 @@ def test_retrieve_handles_id_without_chunk_suffix(client, mock_retriever):
     assert item["fileId"] == "file-no-chunks"
     assert item["chunkId"] is None
     assert item["metadata"] is None
+    # missing file_path should not crash; default to empty string
+    assert item["filePath"] == ""
 
 
 def test_retrieve_handles_id_with_multiple_plus_separators(client, mock_retriever):

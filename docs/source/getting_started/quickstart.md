@@ -2,13 +2,13 @@
 
 ## Overview
 
-This page helps you get MMORE running quickly with a minimal workflow.
+This page helps you get mmore running quickly with a minimal workflow.
 
 The goal is not to cover every configuration option, but to give you a first successful setup and a clear mental model of the main steps.
 
 ## What this quickstart covers
 
-In a typical MMORE workflow, you will:
+In a typical mmore workflow, you will:
 
 1. install the project and its dependencies
 2. prepare a small document collection
@@ -46,7 +46,7 @@ sample_data/
 
 ### 2. Run document processing
 
-Processing transforms raw documents into a form that MMORE can index and retrieve from.
+Processing transforms raw documents into a form that mmore can index and retrieve from.
 
 Depending on your setup, this step may include:
 
@@ -87,7 +87,7 @@ See [RAG](rag.md) for how retrieval and generation are combined.
 
 ## Example end-to-end flow
 
-Conceptually, a first MMORE run looks like this:
+Conceptually, a first mmore run looks like this:
 
 ```text
 Raw documents
