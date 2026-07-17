@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
+from ...ux import loading_model
 from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..config import DetectionConfig, DetectionEngineType
@@ -34,7 +35,8 @@ def _load_gliner_model(model_name: str) -> "BaseEncoderGLiNER":
         device = "cuda"
     else:
         device = "cpu"
-    return GLiNER.from_pretrained(model_name).to(device)
+    with loading_model(f"the PII detection model ({model_name})"):
+        return GLiNER.from_pretrained(model_name).to(device)
 
 
 def clear_gliner_cache() -> None:

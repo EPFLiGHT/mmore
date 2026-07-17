@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 import dspy
 
 from ..rag.llm import LLMConfig
+from ..ux import loading_model
 from ._cache import MODEL_REGISTRY
 
 if TYPE_CHECKING:
@@ -65,12 +66,13 @@ def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
         device, dtype = 0, torch.bfloat16
     else:
         device, dtype = -1, torch.float32
-    return pipeline(
-        task="text-generation",
-        model=model_name,
-        device=device,
-        torch_dtype=dtype,
-    )
+    with loading_model(f"the privacy model ({model_name})"):
+        return pipeline(
+            task="text-generation",
+            model=model_name,
+            device=device,
+            torch_dtype=dtype,
+        )
 
 
 def get_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":

@@ -12,6 +12,7 @@ from mmore.tui.commands import REGISTRY, check_stage_available
 from mmore.tui.config_builder import (
     build_full_pipeline_wizard,
     pick_or_build_config,
+    pick_privacy_config,
 )
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default
@@ -70,10 +71,11 @@ def _show_missing_extras(spec_name: str, hint: str) -> None:
     )
 
 
-def _missing_extras_notice() -> Panel | None:
+def _missing_extras_notice(specs) -> Panel | None:
     """One-line-per-install-command notice — kept compact so the banner stays visible."""
     install_to_stages: dict[str, list[str]] = {}
-    for name, spec in REGISTRY.items():
+    for spec in specs:
+        name = spec.name
         hint = check_stage_available(spec)
         if hint and "Install with: " in hint:
             cmd = hint.split("Install with: ", 1)[1].strip()
@@ -131,7 +133,7 @@ def _select_and_run(specs, display_name, prompt: str) -> None:
     # every choice is disabled because it can't pick an initial pointer. Bail
     # out with a clear notice instead.
     if enabled_count == 0:
-        notice = _missing_extras_notice()
+        notice = _missing_extras_notice(specs)
         if notice is not None:
             console.print(notice)
         return
@@ -147,7 +149,9 @@ def _run_spec(name: str) -> None:
         _show_missing_extras(spec.name, hint)
         return
     config_file = pick_or_build_config(spec)
-    kwargs = {"config_file": config_file}
+    kwargs: dict[str, str | None] = {"config_file": config_file}
+    if spec.name in ("rag", "ragcli"):
+        kwargs["privacy_config_file"] = pick_privacy_config()
     if spec.needs_input_data:
         input_data = questionary.text(
             "Input JSONL path",
@@ -184,7 +188,9 @@ def _run_colvision_menu() -> None:
 
 def _chat_only() -> None:
     config_file = pick_or_build_config(REGISTRY["ragcli"])
-    REGISTRY["ragcli"].run(config_file=config_file)
+    REGISTRY["ragcli"].run(
+        config_file=config_file, privacy_config_file=pick_privacy_config()
+    )
 
 
 def _run_full_wizard() -> None:
@@ -231,7 +237,9 @@ def _colvision_hint() -> str | None:
 
 
 def _main_menu() -> str | None:
-    notice = _missing_extras_notice()
+    notice = _missing_extras_notice(
+        [s for s in REGISTRY.values() if not _is_colvision(s)]
+    )
     if notice is not None:
         console.print(notice)
 

@@ -1,6 +1,7 @@
 """Shared UX helpers for all mmore pipelines: standard logging setup, colored
 output, a spinner, and a progress bar."""
 
+import io
 import itertools
 import logging
 import os
@@ -16,7 +17,8 @@ from typing import Iterable, Iterator, Optional, Sized
 
 from rich.color import Color as RichColor
 from rich.color import ColorSystem
-from rich.console import COLOR_SYSTEMS, Console
+from rich.console import COLOR_SYSTEMS, Console, Group, RenderableType
+from rich.live import Live
 from rich.markup import escape
 from rich.panel import Panel
 from rich.progress import (
@@ -28,7 +30,9 @@ from rich.progress import (
     TextColumn,
     TimeElapsedColumn,
 )
+from rich.spinner import Spinner as RichSpinner
 from rich.table import Table
+from rich.text import Text
 from rich.theme import Theme
 
 DATEFMT = "%Y-%m-%d %H:%M:%S"
@@ -62,6 +66,16 @@ _NOISY_LIBS = [
     "hickory_resolver",
     "rustls",
     "cookie_store",
+    "presidio-analyzer",
+    "spacy",
+    "gliner",
+    "langgraph",
+    "langchain",
+    "dspy",
+    "LiteLLM",
+    "litellm",
+    "openai",
+    "httpcore",
 ]
 
 
@@ -73,6 +87,17 @@ def is_verbose() -> bool:
 # ------------------------------ Logging setup ------------------------------ #
 
 
+class _LateBoundStderr(io.TextIOBase):
+    """Looks sys.stderr up on every write, so logs follow a live display's proxy
+    instead of scrolling the terminal behind its back."""
+
+    def write(self, text: str) -> int:
+        return sys.stderr.write(text)
+
+    def flush(self) -> None:
+        sys.stderr.flush()
+
+
 def setup_logging(name: str, emoji: str, level: int = logging.INFO) -> logging.Logger:
     """Configure logging with the standard mmore header `[name emoji time] msg`
     and return a logger for the step. Call once from a pipeline entry point."""
@@ -80,6 +105,7 @@ def setup_logging(name: str, emoji: str, level: int = logging.INFO) -> logging.L
         format=f"[{name} {emoji} %(asctime)s] %(message)s",
         datefmt=DATEFMT,
         level=logging.DEBUG if is_verbose() else level,
+        handlers=[logging.StreamHandler(_LateBoundStderr())],
         force=True,
     )
     return logging.getLogger(name)
@@ -170,6 +196,10 @@ def str_brand(text: str | int, bold: bool = False) -> str:
     return str_in_color(text, Color.MMORE, bold=bold)
 
 
+def plural(count: int, noun: str) -> str:
+    return f"{count} {noun}" if count == 1 else f"{count} {noun}s"
+
+
 # --------------------------------- Spinner --------------------------------- #
 
 SPINNER_WORDS = [
@@ -183,10 +213,40 @@ SPINNER_WORDS = [
     "Noodling",
 ]
 
+# Seconds a spinner sticks with a word before picking the next one
+_WORD_SECONDS = 3.0
+
 
 # Only the innermost active spinner draws, so a nested download spinner can take
 # over the shared line and hand it back on exit
 _SPINNER_STACK: "list[Spinner]" = []
+
+
+class _SpinnerWords:
+    """A spinner's caption: a word, and the seconds it has been running."""
+
+    def __init__(self, label: Optional[str] = None) -> None:
+        self._label = label
+        self._word = label or random.choice(SPINNER_WORDS)
+        self._start = self._word_time = time.monotonic()
+
+    def caption(self) -> str:
+        now = time.monotonic()
+        if self._label is None and now - self._word_time > _WORD_SECONDS:
+            self._word, self._word_time = random.choice(SPINNER_WORDS), now
+        return f"{self._word}... ({int(now - self._start)}s)"
+
+
+class _WordSpinner(RichSpinner):
+    """The same caption, animated by a live display instead of its own thread."""
+
+    def __init__(self) -> None:
+        super().__init__("dots", style=Color.MMORE)
+        self.words = _SpinnerWords()
+
+    def render(self, time: float) -> RenderableType:
+        self.text = Text(self.words.caption(), style=Color.MMORE)
+        return super().render(time)
 
 
 class Spinner:
@@ -196,11 +256,22 @@ class Spinner:
         self._label = label
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
+        self._saved_status: Optional[list[str]] = None
+        self._saved_words: Optional[_SpinnerWords] = None
 
     def __enter__(self) -> "Spinner":
         self._stop.clear()
         _SPINNER_STACK.append(self)
-        if sys.stdout.isatty():
+        if _SPIN is not None:
+            if self._label is not None:
+                self._saved_words = _SPIN.words
+                _SPIN.words = _SpinnerWords(self._label)
+        elif _LIVE is not None:
+            self._saved_status = list(_STATUS)
+            label = self._label or random.choice(SPINNER_WORDS)
+            line = f"  [{Color.MMORE}]{escape(label)}...[/]"
+            _set_status([*self._saved_status[:-1], line])
+        elif sys.stdout.isatty():
             self._thread = threading.Thread(target=self._spin, daemon=True)
             self._thread.start()
         return self
@@ -211,24 +282,25 @@ class Spinner:
             self._thread.join()
         if self in _SPINNER_STACK:
             _SPINNER_STACK.remove(self)
+        if self._saved_words is not None and _SPIN is not None:
+            _SPIN.words = self._saved_words
+            self._saved_words = None
+        if self._saved_status is not None:
+            _set_status(self._saved_status)
+            self._saved_status = None
         if self._thread is not None:
             sys.stdout.write("\r\033[K")
             sys.stdout.flush()
 
     def _spin(self) -> None:
         frames = itertools.cycle("|/-\\")
-        word = self._label or random.choice(SPINNER_WORDS)
-        start = word_start = time.monotonic()
+        words = _SpinnerWords(self._label)
         while not self._stop.is_set():
-            now = time.monotonic()
             # Stay quiet as long as a nested spinner is running
             if not _SPINNER_STACK or _SPINNER_STACK[-1] is not self:
                 time.sleep(0.1)
                 continue
-            if self._label is None and now - word_start > 3:
-                word = random.choice(SPINNER_WORDS)
-                word_start = now
-            status = f"{next(frames)} {word}... ({int(now - start)}s)"
+            status = f"{next(frames)} {words.caption()}"
             sys.stdout.write(f"\r\033[K{str_in_color(status, Color.MMORE)}")
             sys.stdout.flush()
             time.sleep(0.1)
@@ -300,6 +372,25 @@ def step_intro(
     _console().print(line)
 
 
+def card(title: str, rows: "dict[str, object]") -> None:
+    """Branded panel with a label/value table, for in-run reports."""
+    table = Table.grid(padding=(0, 3))
+    table.add_column(style="dim")
+    table.add_column()
+    for label, value in rows.items():
+        table.add_row(escape(str(label)), escape(str(value)))
+
+    _console().print(
+        Panel(
+            table,
+            title=f"[bold]mmore[/] ▸ {escape(title)}",
+            title_align="left",
+            border_style=Color.MMORE,
+            expand=False,
+        )
+    )
+
+
 def step_summary(
     step: str, emoji: str, elapsed: float, stats: "dict[str, object]"
 ) -> None:
@@ -337,6 +428,34 @@ def step_summary(
 
 _PROGRESS: Optional[Progress] = None
 _PROGRESS_REFS = 0
+_LIVE: Optional[Live] = None
+_STATUS: list[str] = []
+_SPIN: Optional[_WordSpinner] = None
+
+
+def _live_group() -> Group:
+    lines: list = [Text.from_markup(line) for line in _STATUS]
+    if _PROGRESS is not None:
+        lines.append(_PROGRESS)
+    elif _SPIN is not None:
+        lines.append(_SPIN)
+    return Group(*lines)
+
+
+def _ensure_live() -> None:
+    global _LIVE
+    if _LIVE is None:
+        _LIVE = Live(_live_group(), console=_console(), refresh_per_second=12)
+        _LIVE.start()
+
+
+def _erase_live() -> None:
+    global _LIVE
+    if _LIVE is None:
+        return
+    _LIVE.transient = True
+    _LIVE.stop()
+    _LIVE = None
 
 
 def _ensure_progress() -> Progress:
@@ -353,16 +472,90 @@ def _ensure_progress() -> Progress:
             TextColumn("{task.fields[postfix]}", style="dim", markup=False),
             console=_console(),
         )
-        _PROGRESS.start()
+        _ensure_live()
     return _PROGRESS
 
 
+def _set_status(lines: "Iterable[str]") -> None:
+    """Replace the lines shown just above the bar (empty to drop them)."""
+    global _STATUS
+    _STATUS = list(lines)
+    if _LIVE is not None:
+        _LIVE.update(_live_group())
+
+
+_PAUSED_SECONDS = 0.0
+
+
+def paused_seconds() -> float:
+    """Seconds the bar spent paused, i.e. spent waiting on the user."""
+    return _PAUSED_SECONDS
+
+
+@contextmanager
+def paused_progress() -> "Iterator[None]":
+    """When the user interacts during the privacy HITL, it pauses the progress."""
+    global _PAUSED_SECONDS, _LIVE
+    if _LIVE is None:
+        yield
+        return
+    _erase_live()
+    start = time.monotonic()
+    try:
+        yield
+    finally:
+        _PAUSED_SECONDS += time.monotonic() - start
+        _ensure_live()
+
+
 def _release_progress() -> None:
-    global _PROGRESS, _PROGRESS_REFS
+    global _PROGRESS, _PROGRESS_REFS, _STATUS, _LIVE
     _PROGRESS_REFS = max(0, _PROGRESS_REFS - 1)
-    if _PROGRESS_REFS == 0 and _PROGRESS is not None:
-        _PROGRESS.stop()
-        _PROGRESS = None
+    if _PROGRESS_REFS or _PROGRESS is None or _LIVE is None:
+        return
+    _STATUS = []
+    _LIVE.update(_live_group())
+    _LIVE.stop()
+    _PROGRESS, _LIVE = None, None
+
+
+class _Status:
+    """Live status lines above a spinner: the same surface as `_Bar`, for a run
+    with nothing to count."""
+
+    def __init__(self) -> None:
+        global _SPIN
+        _SPIN = _WordSpinner()
+        _ensure_live()
+        self._closed = False
+
+    def set_status(self, *lines: str) -> None:
+        _set_status(lines)
+
+    def set_unit(self, unit: str | None) -> None:
+        """Ignored: only a bar has a column for the step name."""
+
+    def print_above(self, text: str) -> None:
+        _console().print(text)
+
+    def close(self) -> None:
+        global _SPIN, _STATUS
+        if self._closed:
+            return
+        self._closed = True
+        _erase_live()
+        _SPIN, _STATUS = None, []
+
+    def __enter__(self) -> "_Status":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
+
+
+def live_status() -> _Status:
+    """A spinner with status lines above it. Use as a context manager."""
+    return _Status()
 
 
 class _Bar:
@@ -398,6 +591,10 @@ class _Bar:
 
     def set_unit(self, unit: str | None) -> None:
         self._prog.update(self._task, unit=unit or "")
+
+    def set_status(self, *lines: str) -> None:
+        """Rich-markup lines redrawn in place above the bar (none to clear)."""
+        _set_status(lines)
 
     def print_above(self, text: str) -> None:
         self._prog.console.print(text)

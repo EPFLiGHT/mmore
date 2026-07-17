@@ -67,16 +67,20 @@ def _index(
     index(config_file, documents_path, collection_name)
 
 
-def _rag(config_file: str, **_):
+def _rag(config_file: str, privacy_config_file: Optional[str] = None, **_):
     from mmore.run_rag import rag
 
-    rag(config_file)
+    rag(config_file, privacy_config_file=privacy_config_file)
 
 
-def _ragcli(config_file: str, **_):
+def _privacy_not_runnable(**_):
+    raise RuntimeError("privacy is a config for `rag`, not a standalone stage")
+
+
+def _ragcli(config_file: str, privacy_config_file: Optional[str] = None, **_):
     from mmore.run_ragcli import RagCLI
 
-    RagCLI(config_file).launch_cli()
+    RagCLI(config_file, privacy_config_file=privacy_config_file).launch_cli()
 
 
 def _websearch(config_file: str, **_):
@@ -120,6 +124,24 @@ def _dc_rag():
     from mmore.run_rag import RAGInferenceConfig
 
     return RAGInferenceConfig
+
+
+def _dc_privacy():
+    from mmore.privacy.config import PrivacyConfig
+
+    return PrivacyConfig
+
+
+PRIVACY_SPEC = CommandSpec(
+    name="privacy",
+    description="Detect + sanitize sensitive data before the cloud call",
+    example_config="examples/rag/privacy.yaml",
+    run=_privacy_not_runnable,
+    config_globs=["examples/**/privacy*.yaml", "examples/**/privacy*.yml"],
+    config_dataclass=_dc_privacy,
+    required_extras=["privacy"],
+    canary_imports=["dspy", "langgraph"],
+)
 
 
 REGISTRY: dict[str, CommandSpec] = {

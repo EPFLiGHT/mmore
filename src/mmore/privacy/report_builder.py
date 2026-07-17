@@ -15,15 +15,30 @@ from .report import (
     WarningSummary,
 )
 from .risk import RiskAssessment
-from .verification import VerifierVerdict
+from .verification import VerifierVerdict, WarningKind
 
 _ABORTED_OUTCOMES = (PreCloudOutcome.ABORTED, PreCloudOutcome.REJECTED)
 
 
 def _warning_summaries(verdict: Optional[VerifierVerdict]) -> List[WarningSummary]:
-    """Aggregate the advisory warnings to type + count, dropping any content."""
-    counts = Counter(w.kind for w in verdict.warnings) if verdict else Counter()
-    return [WarningSummary(kind=kind, count=count) for kind, count in counts.items()]
+    """Aggregate the verifier warnings to type + count, dropping any content."""
+    if verdict is None:
+        return []
+    counts = Counter(w.kind for w in verdict.warnings)
+    summaries: List[WarningSummary] = []
+    for kind, count in counts.items():
+        group = [w for w in verdict.warnings if w.kind is kind]
+        summaries.append(
+            WarningSummary(
+                kind=kind,
+                count=count,
+                entity_type=(
+                    group[0].flagged if kind is WarningKind.RESIDUAL_LEAKAGE else None
+                ),
+                confidence=max(w.confidence for w in group),
+            )
+        )
+    return summaries
 
 
 def _hitl_events(state: PrivacyState) -> List[HITLEvent]:
@@ -60,7 +75,9 @@ def build_report_record(state: PrivacyState) -> ReportRecord:
         gate_outcome=gate_outcome,
         answer_backend=state.get("answer_backend"),
         answer_model=state.get("answer_model"),
-        advisory_warnings=_warning_summaries(verdict),
+        verifier_warnings=_warning_summaries(verdict),
+        verifier_checks_run=list(verdict.checks_run) if verdict else [],
+        verifier_checks_failed=list(verdict.checks_failed) if verdict else [],
         hitl_events=_hitl_events(state),
         outcome=_outcome(state, verdict),
         sanitized_query=state.get("sanitized_query", ""),

@@ -261,18 +261,25 @@ def websearch(config_file):
 @click.option(
     "--config-file", type=str, required=True, help="Configuration for the RAG CLI."
 )
-def ragcli(config_file: str):
+@click.option(
+    "--privacy",
+    type=str,
+    default=None,
+    help="Path to a privacy config.",
+)
+def ragcli(config_file: str, privacy: Optional[str]):
     """Run the RAG CLI.
 
     Args:
       config_file: Configuration.
+      privacy: Optional privacy config path to start the chat in privacy mode.
 
     Returns:
 
     """
     from .run_ragcli import RagCLI
 
-    my_rag_cli = RagCLI(config_file)
+    my_rag_cli = RagCLI(config_file, privacy_config_file=privacy)
     my_rag_cli.launch_cli()
 
 

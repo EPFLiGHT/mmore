@@ -302,7 +302,7 @@ class AdversarialAgent(BaseAgent):
         entities = list(policy.sensitive_entities)
         verdicts = []
         for number, vector in enumerate(self.strategies, 1):
-            logger.info(
+            logger.debug(
                 "Adversary probe (LLM): %s (%d/%d)",
                 vector.value,
                 number,

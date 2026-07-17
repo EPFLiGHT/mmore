@@ -41,10 +41,12 @@ class HITLDecision(str, Enum):
 
 @dataclass
 class WarningSummary:
-    """One advisory warning kind and how many fired, no content."""
+    """One verifier warning kind and how many fired."""
 
     kind: WarningKind
     count: int
+    entity_type: Optional[str] = None
+    confidence: float = 0.0
 
 
 @dataclass
@@ -70,7 +72,9 @@ class ReportRecord:
     gate_outcome: PreCloudOutcome
     answer_backend: Optional[str]
     answer_model: Optional[str]
-    advisory_warnings: List[WarningSummary]
+    verifier_warnings: List[WarningSummary]
+    verifier_checks_run: List[str]
+    verifier_checks_failed: List[str]
     hitl_events: List[HITLEvent]
     outcome: ReportOutcome
     sanitized_query: str = ""

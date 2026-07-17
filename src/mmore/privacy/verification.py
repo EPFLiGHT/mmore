@@ -1,8 +1,7 @@
 """Structured output of the post-cloud Advisory Verifier.
 
 Emitted by the VerifierAgent after checking the model's answer against
-the whole context (raw + sanitized). It never re-triggers detection or
-sanitization.
+the whole context (raw + sanitized). It never re-triggers an escalation.
 """
 
 from dataclasses import dataclass, field
@@ -33,6 +32,8 @@ class VerifierVerdict:
     """Aggregate advisory verdict: the warnings raised across all checks."""
 
     warnings: List[VerifierWarning] = field(default_factory=list)
+    checks_run: List[str] = field(default_factory=list)
+    checks_failed: List[str] = field(default_factory=list)
 
     @property
     def clean(self) -> bool:

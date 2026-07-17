@@ -39,6 +39,7 @@ from ..sanitization.constants import (
     SANITIZATION_GUIDANCE,
     SANITIZATION_TOOL_NAMES,
 )
+from ..ux import report_notice
 from .base import BaseAgent
 from .registry import tool_registry
 from .state import PreCloudOutcome, PrivacyState
@@ -318,28 +319,28 @@ def _build_param_predictor(engine: str) -> dspy.Predict | None:
 
 
 def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
-    """Short escalation-log label for what the guidance actually changed."""
+    """Short, human-readable label for what the guidance actually changed."""
     changes: List[str] = []
     if new.detection_engine != old.detection_engine:
-        changes.append(f"engine->{new.detection_engine}")
+        changes.append(f"detecting with {new.detection_engine}")
     if new.sanitization_strategy != old.sanitization_strategy:
-        changes.append(f"strategy->{new.sanitization_strategy}")
+        changes.append(f"sanitizing with {new.sanitization_strategy}")
     old_threshold = old.detection_params.get("confidence_threshold")
     new_threshold = new.detection_params.get("confidence_threshold")
     if new_threshold != old_threshold:
-        changes.append(f"threshold->{new_threshold}")
+        changes.append(f"detection threshold {new_threshold}")
     old_operator = old.sanitization_params.get("operator")
     new_operator = new.sanitization_params.get("operator")
     if new_operator != old_operator:
-        changes.append(f"operator->{new_operator}")
+        changes.append(f"{new_operator} operator")
     if new.sanitizer_system_prompt != old.sanitizer_system_prompt:
-        changes.append("rewrite_prompt")
+        changes.append("new rewrite instruction")
     if new.detector_system_prompt != old.detector_system_prompt:
-        changes.append("detection_prompt")
+        changes.append("new detection instruction")
     added_labels = len(new.sensitive_entities) - len(old.sensitive_entities)
     if added_labels:
-        changes.append(f"+{added_labels}_labels")
-    return " ".join(changes) if changes else "note_only"
+        changes.append(f"{added_labels} more entity labels")
+    return ", ".join(changes) if changes else "same policy, stricter guidance"
 
 
 def _format_engine_guidance() -> str:
@@ -723,7 +724,19 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         verdict = state.get("verdict")
         trigger_vector, trigger_entity = None, None
         from_human_feedback = False
-        if verdict is not None and verdict.leaked:
+        if state.get("revision_requested"):
+            revision = total_escalations - adversary_escalations + 1
+            reason = f"Revision {revision}: acting on your feedback"
+            report = (state.get("human_feedback") or "").strip()
+            new_policy = self._apply_guidance(
+                state,
+                policy,
+                report,
+                note_label="Human guidance",
+                respect_config_pins=False,
+            )
+            from_human_feedback = bool(report)
+        elif verdict is not None and verdict.leaked:
             report = (verdict.recommendation or "").strip()
             new_policy = self._apply_guidance(
                 state,
@@ -734,18 +747,17 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             )
             trigger_vector, trigger_entity = verdict.vector, verdict.entity_type
             adversary_escalations += 1
-        elif state.get("approved") is False:
-            report = (state.get("human_feedback") or "").strip()
-            new_policy = self._apply_guidance(
-                state,
-                policy,
-                report,
-                note_label="Human guidance",
-                respect_config_pins=False,
+            budget = self.config.leakage_adversary.max_iterations
+            leaked = trigger_entity or "sensitive data"
+            vector = (
+                trigger_vector.value.replace("_", " ") if trigger_vector else "a probe"
             )
-            from_human_feedback = True
+            reason = (
+                f"Leak {adversary_escalations}/{budget}: the adversary recovered "
+                f"{leaked} via {vector} (confidence {verdict.confidence:.2f})"
+            )
         else:
-            raise ValueError("escalate called without a leak or rejection")
+            raise ValueError("escalate called without a leak or a revision")
         label = _describe_policy_changes(policy, new_policy)
         record = EscalationRecord(
             iteration=total_escalations + 1,
@@ -755,7 +767,9 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             entity_type=trigger_entity,
             report=report or None,
         )
-        logger.info("Policy escalation %d: %s", total_escalations + 1, label)
+        notice = f"{reason} → retrying with {label}"
+        if not report_notice(notice):
+            logger.info("Privacy: %s", notice)
         return PrivacyState(
             policy=new_policy,
             total_escalations=total_escalations + 1,
@@ -763,6 +777,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             escalation_log=list(state.get("escalation_log", [])) + [record],
             outcome=PreCloudOutcome.RE_LOOPED,
             human_feedback=None,  # was taken into account already
+            revision_requested=False,
             skip_detection=_detection_unchanged(policy, new_policy),
         )
 

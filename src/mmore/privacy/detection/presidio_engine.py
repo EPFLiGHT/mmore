@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, List, Optional, Sequence
 
 from typing_extensions import Self
 
+from ...ux import loading_model
 from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..config import DetectionConfig, DetectionEngineType
@@ -69,10 +70,13 @@ def _load_presidio_analyzer() -> "AnalyzerEngine":
     """Build a ``presidio_analyzer.AnalyzerEngine`` with custom clinical recognizers."""
     from presidio_analyzer import AnalyzerEngine
 
-    _ensure_spacy_model(DEFAULT_PRESIDIO_SPACY_MODEL)
-    analyzer = AnalyzerEngine()
-    for recognizer in _build_clinical_recognizers():
-        analyzer.registry.add_recognizer(recognizer)
+    with loading_model(
+        f"the PII detection engine (presidio, {DEFAULT_PRESIDIO_SPACY_MODEL})"
+    ):
+        _ensure_spacy_model(DEFAULT_PRESIDIO_SPACY_MODEL)
+        analyzer = AnalyzerEngine()
+        for recognizer in _build_clinical_recognizers():
+            analyzer.registry.add_recognizer(recognizer)
     return analyzer
 
 

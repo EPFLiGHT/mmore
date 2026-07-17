@@ -32,9 +32,8 @@ Context:
 {context}
 """
 
-# Privacy-mode output fields: report record, advisory warnings, and the
-# sanitized context the answer model received
-PRIVACY_OUTPUT_KEYS = ("privacy_report", "privacy_warnings", "sanitized_context")
+PRIVACY_OUTPUT_KEYS = ("privacy_report", "sanitized_context")
+PRIVACY_CHUNKS_KEY = "sanitized_chunks"
 
 # Answers the privacy gate's interrupt payloads
 PrivacyApprover = Callable[[dict], object]
@@ -54,14 +53,14 @@ class RAGPipeline:
     """Main RAG pipeline combining retrieval and generation."""
 
     retriever: Retriever
-    llm: BaseChatModel
+    llm: Optional[BaseChatModel]
     prompt_template: Union[str, ChatPromptTemplate]
 
     def __init__(
         self,
         retriever: Retriever,
         prompt_template: Union[str, ChatPromptTemplate],
-        llm: BaseChatModel,
+        llm: Optional[BaseChatModel] = None,
         judge: Optional[LLMJudge] = None,
         privacy_graph: Optional[Any] = None,
         privacy_approver: Optional[PrivacyApprover] = None,
@@ -100,7 +99,7 @@ class RAGPipeline:
             config = load_config(config, RAGConfig)
 
         retriever = Retriever.from_config(config.retriever)
-        llm = LLM.from_config(config.llm)
+        llm = None if privacy_graph is not None else LLM.from_config(config.llm)
         judge = (
             LLMJudge(llm=judge_llm_from_config(config.judge.llm), config=config.judge)
             if config.judge
@@ -140,15 +139,18 @@ class RAGPipeline:
             res_dict = MMOREOutput.model_validate(x).model_dump()
             res_dict["answer"] = res_dict["answer"].split("<|im_start|>assistant\n")[-1]
             # Expose formatted context and judge correction logs in the API response (context is not on MMOREOutput).
-            for key in ("context", *JUDGE_OUTPUT_KEYS, *PRIVACY_OUTPUT_KEYS):
+            for key in (
+                "context",
+                *JUDGE_OUTPUT_KEYS,
+                *PRIVACY_OUTPUT_KEYS,
+                PRIVACY_CHUNKS_KEY,
+            ):
                 if key in x:
                     res_dict[key] = x[key]
 
             return res_dict
 
         validate_output = RunnableLambda(make_output)
-
-        rag_chain_from_docs = prompt | llm | StrOutputParser()
 
         # Only retrieval differs (retriever vs judge); format context and generate answer unchanged.
         if judge is not None:
@@ -170,7 +172,9 @@ class RAGPipeline:
             )
             core_chain = with_context | answer_step
         else:
-            core_chain = with_context.assign(answer=rag_chain_from_docs)
+            if llm is None:
+                raise ValueError("RAGPipeline needs an LLM when privacy mode is off.")
+            core_chain = with_context.assign(answer=prompt | llm | StrOutputParser())
 
         return validate_input | core_chain | validate_output
 
@@ -193,15 +197,12 @@ class RAGPipeline:
             )
             updated = dict(x)
             updated["answer"] = result.answer
+            updated[PRIVACY_CHUNKS_KEY] = list(result.sanitized_chunks)
             updated["sanitized_context"] = "\n\n".join(
                 chunk for chunk in result.sanitized_chunks if chunk
             ).strip()
             if result.record is not None:
                 updated["privacy_report"] = asdict(result.record)
-                updated["privacy_warnings"] = [
-                    {"kind": w.kind.value, "count": w.count}
-                    for w in result.record.advisory_warnings
-                ]
             return updated
 
         return step

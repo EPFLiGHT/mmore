@@ -151,7 +151,7 @@ class DetectorAgent(BaseAgent):
 
         spans_per_chunk: List[List[PIISpan]] = []
         for number, chunk in enumerate(chunks, 1):
-            logger.info(
+            logger.debug(
                 "Detection (%s): chunk %d/%d",
                 policy.detection_engine,
                 number,
@@ -169,7 +169,7 @@ class DetectorAgent(BaseAgent):
         if policy is None:
             raise ValueError("DetectorAgent requires 'policy' in the state.")
         if state.get("skip_detection") and state.get("spans") is not None:
-            logger.info("Skipping detection during escalation")
+            logger.debug("Skipping detection during escalation")
             return PrivacyState(skip_detection=False)
         chunks = list(state.get("raw_chunks", []))
         spans_per_chunk, risk = self.detect(policy, chunks)

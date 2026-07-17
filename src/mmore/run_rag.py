@@ -13,6 +13,9 @@ from langchain_core.documents import Document
 from pydantic import BaseModel
 from rich.markup import escape
 
+from mmore.privacy.ux import PRIVACY_EMOJI
+from mmore.privacy.ux import attach as attach_privacy
+from mmore.privacy.ux import detach as detach_privacy
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.judge import extract_judge_output
 from mmore.rag.pipeline import PRIVACY_OUTPUT_KEYS, RAGConfig, RAGPipeline
@@ -21,6 +24,7 @@ from mmore.utils import load_config
 from mmore.ux import (
     Color,
     model_loading_seconds,
+    paused_seconds,
     progress,
     quiet_noisy_libs,
     setup_logging,
@@ -30,6 +34,7 @@ from mmore.ux import (
 
 RAG_NAME = "RAG"
 RAG_EMOJI = "🧠"
+RAG_PRIVACY_NAME = "RAG WITH PRIVACY"
 logger = setup_logging(RAG_NAME, RAG_EMOJI)
 
 load_dotenv()
@@ -153,7 +158,6 @@ class RAGOutput(BaseModel):
     retrieval_metrics: Optional[Dict[str, float]] = None
     retrieval_corrections: Optional[List[Dict[str, Any]]] = None
     privacy_report: Optional[Dict[str, Any]] = None
-    privacy_warnings: Optional[List[Dict[str, Any]]] = None
     sanitized_context: Optional[str] = None
 
 
@@ -181,27 +185,31 @@ def create_api(rag: RAGPipeline, endpoint: str):
 
 def _setup_privacy(privacy_config_file: str, mode: str):
     """Load + validate the privacy config and compile its pipeline graph."""
-    from dataclasses import replace
+    from mmore.privacy.runner import setup_privacy
 
-    from langgraph.checkpoint.memory import MemorySaver
+    return setup_privacy(privacy_config_file, interactive_ok=mode != "api")
 
-    from mmore.privacy.pipeline import build_privacy_pipeline
-    from mmore.privacy.runner import load_privacy_config, terminal_approver
 
-    privacy_config = load_privacy_config(privacy_config_file)
-    privacy_approver = None
-    if privacy_config.interactive:
-        if mode == "api":
-            logger.warning(
-                "The interactive privacy gate is not supported in api mode; "
-                "auto-approving at the gate. Set 'interactive: false' to "
-                "silence this warning."
-            )
-            privacy_config = replace(privacy_config, interactive=False)
-        else:
-            privacy_approver = terminal_approver
+def _privacy_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Privacy counters for the closing card, aggregated over the whole run."""
+    from mmore.privacy.report import PreCloudOutcome
 
-    return build_privacy_pipeline(privacy_config, MemorySaver()), privacy_approver
+    records = [r["privacy_report"] for r in results if r.get("privacy_report")]
+    approved = sum(
+        1 for rec in records if rec["gate_outcome"] == PreCloudOutcome.APPROVED
+    )
+    return {
+        "validated & approved": f"{approved}/{max(1, len(results))}",
+        "sensitive spans found": sum(rec["detection"]["count"] for rec in records),
+        "leakage escalations": sum(rec["adversary_iterations"] for rec in records),
+        "human revisions": sum(rec["human_iterations"] for rec in records),
+        "verifier warnings": sum(
+            warning["count"] for rec in records for warning in rec["verifier_warnings"]
+        ),
+        "verifier checks failed": sum(
+            len(rec["verifier_checks_failed"]) for rec in records
+        ),
+    }
 
 
 @profile_function()
@@ -210,29 +218,35 @@ def rag(config_file, privacy_config_file: Optional[str] = None):
     quiet_noisy_libs()
     config = load_config(config_file, RAGInferenceConfig)
 
+    privacy_graph, privacy_approver, privacy_config = None, None, None
+    if privacy_config_file is not None:
+        logger.debug("Privacy mode enabled, building the privacy pipeline...")
+        privacy_graph, privacy_approver, privacy_config = _setup_privacy(
+            privacy_config_file, config.mode
+        )
+
+    if privacy_config is None:
+        name, emoji = RAG_NAME, RAG_EMOJI
+        about = "Find relevant passages and answer questions about your docs"
+        answer_llm = config.rag.llm.llm_name
+    else:
+        name, emoji = RAG_PRIVACY_NAME, PRIVACY_EMOJI
+        about = (
+            "Answer questions about your docs with no sensitive data leaving "
+            "your machine"
+        )
+        assert privacy_config.answer is not None
+        answer_llm = privacy_config.answer.llm.llm_name
+
     fields = [
         f"collection: {config.rag.retriever.collection_name}",
-        f"LLM: {config.rag.llm.llm_name}",
+        f"LLM: {answer_llm}",
     ]
     if config.mode == "local":
         fields.append(f"answers: {cast(LocalConfig, config.mode_args).output_file}")
     else:
         fields.append(f"mode: {config.mode}")
-    if privacy_config_file is not None:
-        fields.append("privacy: on")
-    step_intro(
-        RAG_NAME,
-        RAG_EMOJI,
-        "Find relevant passages and answer questions about your docs",
-        fields,
-    )
-
-    privacy_graph, privacy_approver = None, None
-    if privacy_config_file is not None:
-        logger.debug("Privacy mode enabled, building the privacy pipeline...")
-        privacy_graph, privacy_approver = _setup_privacy(
-            privacy_config_file, config.mode
-        )
+    step_intro(name, emoji, about, fields)
 
     logger.debug("Creating the RAG Pipeline...")
     rag_pp = RAGPipeline.from_config(
@@ -258,12 +272,15 @@ def rag(config_file, privacy_config_file: Optional[str] = None):
             rag_pp.retriever.set_stage_callback(
                 lambda stage: bar.set_unit(stage_labels.get(stage, stage))
             )
+            if privacy_graph is not None:
+                attach_privacy(bar)
             timer = BatchGenerationTimer(
                 on_generate_start=lambda: bar.set_unit(stage_labels["generate"])
             )
 
             start = time.time()
             loading_start = model_loading_seconds()
+            waiting_start = paused_seconds()
             try:
                 for i, query in enumerate(queries, 1):
                     question = str(query.get("input", ""))
@@ -276,24 +293,32 @@ def rag(config_file, privacy_config_file: Optional[str] = None):
                     bar.update(1)
             finally:
                 rag_pp.retriever.set_stage_callback(None)
+                detach_privacy()
             bar.set_unit("")
 
-        elapsed = time.time() - start - (model_loading_seconds() - loading_start)
+        # Model loading and the time you spent at the gate are not the pipeline's
+        waiting = paused_seconds() - waiting_start
+        elapsed = (
+            time.time() - start - (model_loading_seconds() - loading_start) - waiting
+        )
         save_results(results, config_args.output_file)
 
         n = max(1, len(queries))
         retrieve_s, rerank_s = rag_pp.retriever.pop_timings()
-        step_summary(
-            RAG_NAME,
-            RAG_EMOJI,
-            elapsed,
-            {
-                "queries": len(queries),
-                "retrieve": f"{retrieve_s / n:.2f} s/query",
-                "rerank": f"{rerank_s / n:.2f} s/query" if rerank_s else "n/a",
-                "generate": f"{timer.generate_seconds / n:.2f} s/query",
-            },
-        )
+        stats: Dict[str, Any] = {
+            "queries": len(queries),
+            "retrieve": f"{retrieve_s / n:.2f} s/query",
+            "rerank": f"{rerank_s / n:.2f} s/query" if rerank_s else "n/a",
+        }
+        if privacy_graph is None:
+            stats["generate"] = f"{timer.generate_seconds / n:.2f} s/query"
+        else:
+            privacy_s = max(0.0, elapsed - retrieve_s - rerank_s)
+            stats["privacy pipeline"] = f"{privacy_s / n:.2f} s/query"
+            if waiting:
+                stats["waiting on you"] = f"{waiting:.1f} s"
+            stats.update(_privacy_stats(results))
+        step_summary(name, emoji, elapsed, stats)
 
     elif config.mode == "api":
         config_args = cast(APIConfig, config.mode_args)

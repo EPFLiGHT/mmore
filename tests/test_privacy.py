@@ -429,7 +429,13 @@ def test_terminal_approver_without_tty_raises_clear_error(monkeypatch):
 # Gate "view" command: colorized sanitized-context inspection
 # --------------------------------------------------------------------------
 
-_RED, _GREEN, _RESET = "\033[31m", "\033[32m", "\033[0m"
+_RED, _RESET = "\033[31m", "\033[0m"
+
+
+def _brand(text: str) -> str:
+    from mmore.ux import str_brand
+
+    return str_brand(text)
 
 
 def test_render_chunk_diff_colors_replacements():
@@ -442,8 +448,8 @@ def test_render_chunk_diff_colors_replacements():
 
     assert rendered.startswith("Call ")  # unchanged text stays plain
     assert f"{_RED}John Doe{_RESET}" in rendered  # flagged PII in red
-    assert f"{_GREEN}[PERSON]{_RESET}" in rendered  # its replacement in green
-    assert f"{_GREEN}[PHONE_NUMBER].{_RESET}" in rendered
+    assert _brand("[PERSON]") in rendered  # its replacement in the brand color
+    assert _brand("[PHONE_NUMBER].") in rendered
 
 
 def test_render_chunk_diff_plain_when_nothing_changed():
@@ -467,7 +473,7 @@ def test_terminal_approver_view_prints_chunks_then_resumes(monkeypatch, capsys):
     assert terminal_approver(payload) == "1"
     out = capsys.readouterr().out
     assert "Chunk 1" in out
-    assert _RED in out and _GREEN in out
+    assert _RED in out and _brand("[PERSON].") in out
     assert out.count("[1]") == 2  # menu shown again after the view
 
 
@@ -486,7 +492,7 @@ def test_terminal_approver_view_renders_sanitized_query(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "Query" in out
     assert f"{_RED}John Doe{_RESET}" in out
-    assert f"{_GREEN}[PERSON]{_RESET}" in out
+    assert _brand("[PERSON]") in out
 
 
 def test_terminal_approver_view_without_chunks_prints_notice(monkeypatch, capsys):

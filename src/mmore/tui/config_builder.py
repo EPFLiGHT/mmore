@@ -23,7 +23,7 @@ from rich.spinner import Spinner
 from rich.syntax import Syntax
 from rich.text import Text
 
-from mmore.tui.commands import CommandSpec
+from mmore.tui.commands import PRIVACY_SPEC, CommandSpec, check_stage_available
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default, repo_root, resolve_example
 from mmore.tui.prompts import ask, confirm, prompt, prompt_float, prompt_int, select
@@ -80,7 +80,7 @@ def _post_validation_menu(path: str, spec: CommandSpec) -> str:
         action = select(
             "What next?",
             choices=[
-                questionary.Choice("▶  Run with this config", value="run"),
+                questionary.Choice("▶  Use this config", value="run"),
                 questionary.Choice("👁  Preview config", value="preview"),
                 questionary.Choice("✎  Edit in $EDITOR", value="edit"),
             ],
@@ -271,6 +271,92 @@ def build_rag_config() -> str:
     return _save("rag", cfg)
 
 
+# "auto" leaves the field unset so the context analyzer decides it per query
+_AUTO = "auto (decided per query)"
+_DEFAULT_ADVERSARY_ITERATIONS = 3
+
+
+def build_privacy_config() -> str:
+    """Wizard for the privacy config used by `rag` in privacy mode."""
+    llm_name = prompt(
+        "Privacy LLM (analyzer, sanitizer, adversary, verifier, answer)",
+        "Qwen/Qwen2.5-3B-Instruct",
+    )
+    domain = select(
+        "Domain of your documents",
+        choices=[_AUTO, "global", "healthcare", "humanitarian"],
+        default=_AUTO,
+    )
+    engine = select(
+        "Sensitive-data detection engine",
+        choices=[_AUTO, "presidio", "gliner", "llm", "openai_filter"],
+        default=_AUTO,
+    )
+    strategy = select(
+        "Sanitization strategy",
+        choices=[
+            _AUTO,
+            "token_masking",
+            "entity_replacement",
+            "synthetic_rewrite",
+            "presidio",
+        ],
+        default=_AUTO,
+    )
+    interactive = confirm("Ask for your approval before each cloud call?", default=True)
+    adversary = confirm(
+        "Attack the sanitized context with the leak adversary?", default=False
+    )
+    max_iterations = (
+        prompt_int(
+            "How many times may a leak tighten the policy and retry?",
+            _DEFAULT_ADVERSARY_ITERATIONS,
+        )
+        if adversary
+        else _DEFAULT_ADVERSARY_ITERATIONS
+    )
+
+    llm = {"llm_name": llm_name}
+    cfg: dict[str, Any] = {
+        "interactive": interactive,
+        "context_analyzer": {"llm": llm},
+        "detection": {
+            "engine": None if engine == _AUTO else engine,
+            "confidence_threshold": 0.7,
+            "entity_types": [],
+            "llm": llm,
+        },
+        "sanitization": {
+            "strategy": None if strategy == _AUTO else strategy,
+            "consistency": True,
+            "llm": llm,
+        },
+        "leakage_adversary": {
+            "enabled": adversary,
+            "max_iterations": max_iterations,
+            "leakage_threshold": 0.9,
+            "llm": llm,
+        },
+        "answer": {"llm": llm},
+        "verifier": {"warn_threshold": 0.5, "llm": llm},
+    }
+    if domain != _AUTO:
+        cfg["domain"] = domain
+    return _save("privacy", cfg)
+
+
+def pick_privacy_config() -> Optional[str]:
+    hint = check_stage_available(PRIVACY_SPEC)
+    if hint:
+        return None
+    if not confirm(
+        "Privacy mode (sanitize the context before it leaves your machine)?",
+        default=False,
+    ):
+        return None
+    return pick_or_build_config(PRIVACY_SPEC)
+
+
 def build_websearch_config() -> str:
     """Wizard for `websearch` configs."""
     use_rag = confirm("Combine web search with RAG?", default=True)
@@ -328,6 +414,7 @@ BUILDERS = {
     "rag": build_rag_config,
     "ragcli": build_rag_config,
     "websearch": build_websearch_config,
+    "privacy": build_privacy_config,
 }
 
 

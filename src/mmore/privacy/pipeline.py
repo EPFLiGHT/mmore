@@ -12,6 +12,7 @@ cannot proceed.
 """
 
 import logging
+from dataclasses import replace
 from enum import Enum
 from typing import Optional, Protocol
 
@@ -28,6 +29,7 @@ from .agents.verifier import AdvisoryVerifierAgent
 from .answer import AnswerModel
 from .config import PrivacyConfig
 from .report_builder import build_report_record
+from .ux import Stage, report_stage
 
 logger = logging.getLogger(__name__)
 
@@ -58,6 +60,54 @@ class _Route(str, Enum):
     ESCALATE = "escalate"
     UNSAFE = "unsafe"
     REJECTED = "rejected"
+
+
+# What the user sees while each agent runs
+_STAGES: dict[str, Stage] = {
+    _Node.ANALYZER: Stage(
+        "Analyzer", "reading the context and setting the privacy policy", "analyzing"
+    ),
+    _Node.DETECTOR: Stage(
+        "Detector", "scanning the query and the chunks for sensitive data", "detecting"
+    ),
+    _Node.SANITIZER: Stage(
+        "Sanitizer", "masking or rewriting what was flagged", "sanitizing"
+    ),
+    _Node.ADVERSARY: Stage(
+        "Adversary", "attacking the sanitized context to find leaks", "probing"
+    ),
+    _Node.GATE: Stage(
+        "Gate", "waiting for your approval before the answer model call", "reviewing"
+    ),
+    _Node.ANSWER: Stage(
+        "Answer", "answering from the sanitized context only", "answering"
+    ),
+    _Node.VERIFIER: Stage(
+        "Verifier", "checking the answer for leaks and faithfulness", "verifying"
+    ),
+}
+
+
+def _with_tool(stage: Stage, node_id: str, state: PrivacyState) -> Stage:
+    """Name the tool the policy picked, for the agents that run one."""
+    policy = state.get("policy")
+    if policy is None:
+        return stage
+    if node_id == _Node.DETECTOR:
+        return replace(stage, unit=f"{stage.unit} w/ {policy.detection_engine}")
+    if node_id == _Node.SANITIZER:
+        return replace(stage, unit=f"{stage.unit} w/ {policy.sanitization_strategy}")
+    return stage
+
+
+def _staged(node: NodeFn, node_id: str, stage: Stage) -> NodeFn:
+    """Announce the agent before running its node."""
+
+    def run(state: PrivacyState) -> PrivacyState:
+        report_stage(_with_tool(stage, node_id, state))
+        return node(state)
+
+    return run
 
 
 def _route_after_adversary(
@@ -106,14 +156,17 @@ def build_pipeline_graph(
 ):
     """Compile the full pipeline from explicit node callables."""
     graph = StateGraph(PrivacyState)
-    graph.add_node(_Node.ANALYZER, analyzer)
-    graph.add_node(_Node.DETECTOR, detector)
-    graph.add_node(_Node.SANITIZER, sanitizer)
-    graph.add_node(_Node.ADVERSARY, adversary)
-    graph.add_node(_Node.GATE, gate)
+    for node_id, node in (
+        (_Node.ANALYZER, analyzer),
+        (_Node.DETECTOR, detector),
+        (_Node.SANITIZER, sanitizer),
+        (_Node.ADVERSARY, adversary),
+        (_Node.GATE, gate),
+        (_Node.ANSWER, answer),
+        (_Node.VERIFIER, verifier),
+    ):
+        graph.add_node(node_id, _staged(node, node_id, _STAGES[node_id]))
     graph.add_node(_Node.MARK_UNSAFE, _mark_unsafe_node)
-    graph.add_node(_Node.ANSWER, answer)
-    graph.add_node(_Node.VERIFIER, verifier)
     graph.add_node(_Node.REPORT, _report_node)
 
     graph.add_edge(START, _Node.ANALYZER)

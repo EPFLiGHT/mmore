@@ -15,7 +15,7 @@ the model's answer. It runs the configured advisory checks over the answer:
 """
 
 import logging
-from typing import List, Optional, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -26,6 +26,7 @@ from ...utils import load_config
 from ..config import PrivacyConfig, VerifierCheck
 from ..detection.constants import DEFAULT_LLM_CONFIG
 from ..dspy_llm import build_dspy_lm
+from ..ux import report_notice
 from ..verification import CLEAN_VERDICT, VerifierVerdict, VerifierWarning, WarningKind
 from .base import BaseAgent
 from .state import PrivacyState
@@ -172,13 +173,9 @@ class AdvisoryVerifierAgent(BaseAgent):
             self._dspy_lm = build_dspy_lm(self._llm_config)
         return self._dspy_lm
 
-    def _predict(self, predictor: dspy.Predict, **inputs) -> dspy.Prediction | None:
-        try:
-            with dspy.context(lm=self._ensure_dspy_lm()):
-                return predictor(**inputs)
-        except Exception as e:
-            logger.warning("Advisory check failed (%s), treating as no warning", e)
-            return None
+    def _predict(self, predictor: dspy.Predict, **inputs) -> dspy.Prediction:
+        with dspy.context(lm=self._ensure_dspy_lm()):
+            return predictor(**inputs)
 
     def _check_residual_leakage(
         self, answer: str, sanitized_context: str, raw_context: str
@@ -189,8 +186,6 @@ class AdvisoryVerifierAgent(BaseAgent):
             sanitized_context=sanitized_context,
             raw_context=raw_context,
         )
-        if prediction is None:
-            return None
         confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
         if not getattr(prediction, "leaked", False) or confidence < self.warn_threshold:
             return None
@@ -205,8 +200,6 @@ class AdvisoryVerifierAgent(BaseAgent):
         prediction = self._predict(
             _build_faithfulness_predictor(), answer=answer, evidence=evidence
         )
-        if prediction is None:
-            return None
         confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
         if (
             not getattr(prediction, "unfaithful", False)
@@ -230,16 +223,41 @@ class AdvisoryVerifierAgent(BaseAgent):
         sanitized_context = "\n\n".join(c for c in sanitized_chunks if c).strip()
         raw_context = "\n\n".join(c for c in raw_chunks if c).strip()
 
+        checks: List[Tuple[VerifierCheck, Callable[[], VerifierWarning | None]]] = [
+            (
+                VerifierCheck.RESIDUAL_LEAKAGE,
+                lambda: self._check_residual_leakage(
+                    answer, sanitized_context, raw_context
+                ),
+            ),
+            (
+                VerifierCheck.FAITHFULNESS,
+                lambda: self._check_faithfulness(answer, raw_context),
+            ),
+        ]
+
         warnings: List[VerifierWarning] = []
-        if VerifierCheck.RESIDUAL_LEAKAGE in self.checks:
-            w = self._check_residual_leakage(answer, sanitized_context, raw_context)
-            if w is not None:
-                warnings.append(w)
-        if VerifierCheck.FAITHFULNESS in self.checks:
-            w = self._check_faithfulness(answer, raw_context)
-            if w is not None:
-                warnings.append(w)
-        return VerifierVerdict(warnings=warnings)
+        ran: List[str] = []
+        failed: List[str] = []
+        for check, run in checks:
+            if check not in self.checks:
+                continue
+            try:
+                warning = run()
+            except Exception as e:
+                logger.debug("Verifier check %s failed: %s", check.value, e)
+                message = (
+                    f"Verifier: the {check.value} check could not run, "
+                    "its result is unknown for this answer"
+                )
+                if not report_notice(message):
+                    logger.warning(message)
+                failed.append(check.value)
+                continue
+            ran.append(check.value)
+            if warning is not None:
+                warnings.append(warning)
+        return VerifierVerdict(warnings=warnings, checks_run=ran, checks_failed=failed)
 
     def _node(self, state: PrivacyState) -> PrivacyState:
         """Graph node: annotate the answer with the advisory verdict only."""

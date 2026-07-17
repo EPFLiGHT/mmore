@@ -12,6 +12,7 @@ from ..agents.registry import register_tool
 from ..config import DetectionConfig
 from ..dspy_llm import build_dspy_lm
 from ..policy import PrivacyPolicy
+from ..ux import report_notice
 from .base import DetectionEngine, PIISpan
 from .constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
@@ -20,6 +21,12 @@ from .constants import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _warn(message: str) -> None:
+    if not report_notice(message):
+        logger.warning(message)
+
 
 # --------------------------------------------------------------------------
 # Prompts
@@ -44,8 +51,9 @@ OUTPUT_SPANS_DESC = (
 
 class _DetectedSpan(BaseModel):
     text: str = Field(description=SPAN_TEXT_DESC)
-    label: str = Field(description=SPAN_LABEL_DESC)
+    label: Optional[str] = Field(default=None, description=SPAN_LABEL_DESC)
     score: float = Field(
+        default=1.0,
         ge=0.0,
         le=1.0,
         description=SPAN_SCORE_DESC,
@@ -153,35 +161,47 @@ class LLMDetectionEngine(DetectionEngine):
             with dspy.context(lm=lm):
                 prediction = predictor(text=text, entity_types=self._sensitive_entities)
         except Exception as e:
-            logger.warning("LLM detection failed (%s), returning no spans", e)
+            logger.debug("LLM detection failed: %s", e)
+            _warn(
+                "Detector: the LLM answer could not be read, this chunk was left "
+                "unscanned (a rule-based engine like presidio is steadier here)"
+            )
             return []
 
         spans: List[PIISpan] = []
+        unusable = 0
         # Maps repeated fragments to successive occurrences
         search_cursors: dict[str, int] = {}
         for s in getattr(prediction, "spans", None) or []:
             try:
                 fragment = str(s.text)
-                label = str(s.label)
+                label = str(s.label) if s.label else ""
                 score = float(s.score)
             except (AttributeError, TypeError, ValueError):
+                unusable += 1
                 continue
-            if not fragment:
+            if not fragment or not label:
+                unusable += 1
                 continue
             score = max(0.0, min(1.0, score))
             if score < self._confidence_threshold:
                 continue
             start = text.find(fragment, search_cursors.get(fragment, 0))
             if start < 0:
-                logger.debug(
-                    "LLM emitted fragment %r not found in source text", fragment
-                )
+                # Paraphrased instead of quoted: nothing to mask in the source
+                logger.debug("LLM span %r is not in the source text", fragment)
+                unusable += 1
                 continue
             search_cursors[fragment] = start + len(fragment)
             spans.append(
                 PIISpan(
                     start=start, end=start + len(fragment), label=label, score=score
                 )
+            )
+        if unusable:
+            _warn(
+                f"Detector: the LLM returned {unusable} unusable span(s), "
+                f"ignored them and kept {len(spans)}"
             )
         return spans
 

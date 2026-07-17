@@ -78,7 +78,7 @@ class SyntheticRewriteStrategy(SanitizationStrategy):
                 # No PII detected hence nothing to rewrite
                 out.append(chunk)
                 continue
-            logger.info("Synthetic rewrite (LLM): chunk %d/%d", number, len(chunks))
+            logger.debug("Synthetic rewrite (LLM): chunk %d/%d", number, len(chunks))
             try:
                 prediction = predictor(
                     system_prompt=policy.sanitizer_system_prompt,

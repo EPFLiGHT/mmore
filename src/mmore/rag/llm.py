@@ -87,6 +87,8 @@ _COHERE_MODELS = [
     "command-r-plus-08-2024",
 ]
 
+_HF_DEFAULT_MAX_NEW_TOKENS = 1200
+
 loaders = {
     "OPENAI": ChatOpenAI,
     "ANTHROPIC": ChatAnthropic,
@@ -136,7 +138,14 @@ class LLMConfig:
             max_token_key = "max_new_tokens"
         else:
             max_token_key = "max_completion_tokens"
-        return {"temperature": self.temperature, max_token_key: self.max_new_tokens}
+        kwargs = {"temperature": self.temperature}
+        if self.max_new_tokens is not None:
+            kwargs[max_token_key] = self.max_new_tokens
+        elif self.provider == "HF":
+            # For the privacy pipeline as we dont have to define `max_tokens` in the config
+            # we have a fallback to a default value here
+            kwargs[max_token_key] = _HF_DEFAULT_MAX_NEW_TOKENS
+        return kwargs
 
     @property
     def bind_kwargs(self):

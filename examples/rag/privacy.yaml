@@ -1,6 +1,5 @@
 # Privacy config
-# Commented-out keys show every tunable option with its default.
-# Sections left unset (null) are decided at runtime by the context analyzer.
+# Sections set to null are decided at runtime by the context analyzer.
 
 #domain: global  # global | healthcare | humanitarian, unset => inferred per query
 interactive: true
@@ -15,22 +14,22 @@ context_analyzer:
   #system_prompt: ...
 
 detection:
-  engine: null  # presidio | gliner | llm | openai_filter
+  engine: presidio  # presidio | gliner | llm | openai_filter
   confidence_threshold: 0.7
   entity_types: []  # empty => PERSON, PHONE_NUMBER, EMAIL_ADDRESS, MRN, DATE_TIME, LOCATION, US_SSN, INSURANCE_ID
   #llm: *slm  # only used when engine is `llm`
 
 sanitization:
-  strategy: null  # token_masking | entity_replacement | synthetic_rewrite | presidio
+  strategy: presidio  # token_masking | entity_replacement | synthetic_rewrite | presidio
   consistency: true
   #llm: *slm  # only used when strategy is `synthetic_rewrite`
-  #encryption_key: ...  # for the presidio `encrypt` operator; unset => ephemeral key, values unrecoverable
+  #encryption_key: ...  # for the presidio `encrypt` operator
 
 leakage_adversary:
-  enabled: false
-  max_iterations: 3
+  enabled: true
+  max_iterations: 1
   leakage_threshold: 0.9
-  #abort_on_exhaustion: true
+  abort_on_exhaustion: false
   #strategies:  # defaults to all
   #  - residual_span
   #  - quasi_identifier

@@ -49,6 +49,10 @@ class PrivacyState(NodeOutput, total=False):
     human_feedback: Optional[str]
     hitl_events: List[HITLEvent]
 
+    # True when the revision comes from human, to let the Analyzer differentiate
+    # with the ones from the adversary
+    revision_requested: bool
+
     # Request metadata for the report
     request_id: str
     timestamp: str
