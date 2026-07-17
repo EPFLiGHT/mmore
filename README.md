@@ -221,12 +221,14 @@ If you use mmore in your research, please cite the paper:
 }
 ```
 
+## Star History
+
 <p align="center">
-  <a href="https://www.star-history.com/#EPFLiGHT/mmore&Date">
-     <picture>
-     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date&theme=dark" />
-     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date" />
-     <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=EPFLiGHT/mmore&type=Date" />
+  <a href="https://www.star-history.com/?type=date&repos=EPFLiGHT%2Fmmore">
+   <picture>
+     <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&theme=dark&legend=top-left&sealed_token=aAskSwpQyUnx0LQd021xzF-3mJ59qPdqlUuN5DgT9gLZ4ZJbXKbNQfGO_bYZmNO6x13V57aUA0d8bHeda-MDdNpcI9dPSyuWMwgK5hDqQ2XVwOuRQNi8-3n_r4_6EpUlERIwDdqFsuhSQTql_a60n9d0ePagN7i_oQ8EFI6HsL6VXhbxLczjnyBMBtBx" />
+     <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&legend=top-left&sealed_token=aAskSwpQyUnx0LQd021xzF-3mJ59qPdqlUuN5DgT9gLZ4ZJbXKbNQfGO_bYZmNO6x13V57aUA0d8bHeda-MDdNpcI9dPSyuWMwgK5hDqQ2XVwOuRQNi8-3n_r4_6EpUlERIwDdqFsuhSQTql_a60n9d0ePagN7i_oQ8EFI6HsL6VXhbxLczjnyBMBtBx" />
+     <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=EPFLiGHT/mmore&type=date&legend=top-left&sealed_token=aAskSwpQyUnx0LQd021xzF-3mJ59qPdqlUuN5DgT9gLZ4ZJbXKbNQfGO_bYZmNO6x13V57aUA0d8bHeda-MDdNpcI9dPSyuWMwgK5hDqQ2XVwOuRQNi8-3n_r4_6EpUlERIwDdqFsuhSQTql_a60n9d0ePagN7i_oQ8EFI6HsL6VXhbxLczjnyBMBtBx" />
    </picture>
   </a>
 </p>
