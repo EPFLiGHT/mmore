@@ -14,11 +14,23 @@ import logging
 import os
 import threading
 from collections import OrderedDict
-from typing import Callable, Optional, TypeVar, cast
+from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, TypeVar, Union, cast
+
+if TYPE_CHECKING:
+    from gliner.model import BaseEncoderGLiNER
+    from presidio_analyzer import AnalyzerEngine
+    from transformers import TextGenerationPipeline, TokenClassificationPipeline
 
 logger = logging.getLogger(__name__)
 
-T = TypeVar("T")
+CachedModel = Union[
+    "BaseEncoderGLiNER",
+    "AnalyzerEngine",
+    "TextGenerationPipeline",
+    "TokenClassificationPipeline",
+]
+
+T = TypeVar("T", bound=CachedModel)
 
 _BUDGET_ENV = "MMORE_PRIVACY_MODEL_BUDGET_MB"
 _CACHE_ENABLED_ENV = "MMORE_PRIVACY_MODEL_CACHE"
@@ -65,6 +77,11 @@ def _device_total_bytes() -> Optional[int]:
     return psutil.virtual_memory().total
 
 
+class _Entry(NamedTuple):
+    model: CachedModel
+    size_bytes: int
+
+
 class ModelRegistry:
     """Thread-safe LRU cache of loaded models shared across privacy engines."""
 
@@ -73,7 +90,7 @@ class ModelRegistry:
         self._budget_mb = budget_mb
         self._budget_bytes: Optional[int] = None
         self._budget_ready = False
-        self._entries: OrderedDict[str, tuple[object, int]] = OrderedDict()
+        self._entries: OrderedDict[str, _Entry] = OrderedDict()
         self._total = 0
         self._lock = threading.Lock()
 
@@ -96,18 +113,18 @@ class ModelRegistry:
             entry = self._entries.get(key)
             if entry is not None:
                 self._entries.move_to_end(key)
-                return cast(T, entry[0])
+                return cast(T, entry.model)
 
             budget = self._budget()
             if budget is None:
                 value = loader()
-                self._entries[key] = (value, 0)
+                self._entries[key] = _Entry(value, 0)
                 return value
 
             before = _device_mem_bytes()
             value = loader()
             size = max(_device_mem_bytes() - before, 0)
-            self._entries[key] = (value, size)
+            self._entries[key] = _Entry(value, size)
             self._total += size
             self._evict_until_within_budget(budget, protect=key)
             return value
@@ -119,7 +136,7 @@ class ModelRegistry:
                 return
             if key == protect:
                 continue
-            _, size = self._entries.pop(key)
+            size = self._entries.pop(key).size_bytes
             self._total -= size
             gc.collect()
             _empty_device_cache()
@@ -138,7 +155,7 @@ class ModelRegistry:
             for key in [
                 k for k in self._entries if prefix is None or k.startswith(prefix)
             ]:
-                _, size = self._entries.pop(key)
+                size = self._entries.pop(key).size_bytes
                 self._total -= size
                 freed += size
             if freed > 0:
