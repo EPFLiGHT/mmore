@@ -30,10 +30,10 @@ CachedModel = Union[
     "BaseEncoderGLiNER",
     "AnalyzerEngine",
     "AnonymizerEngine",
-    "BaseChatModel",
-    "Faker",
     "TextGenerationPipeline",
     "TokenClassificationPipeline",
+    "BaseChatModel",
+    "Faker",
 ]
 
 T = TypeVar("T", bound=CachedModel)
