@@ -48,7 +48,7 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _FALLBACK_SIZE = (100, 24)
 _GATE_CARD_TITLE = "Privacy 🛡 · review before the cloud call"
 _VIEW_OPTION_LABEL = (
-    "View the sanitized context (flagged PII in red, replacements in yellow)"
+    "View raw vs sanitized context diff (flagged PII in red, replacements in yellow)"
 )
 _VIEW_LEGEND = "(red = flagged PII, yellow = the replacement)"
 
