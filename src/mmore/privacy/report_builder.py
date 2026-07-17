@@ -81,6 +81,7 @@ def build_report_record(state: PrivacyState) -> ReportRecord:
         hitl_events=_hitl_events(state),
         outcome=_outcome(state, verdict),
         sanitized_query=state.get("sanitized_query", ""),
+        stage_seconds=dict(state.get("stage_seconds", {})),
     )
 
 

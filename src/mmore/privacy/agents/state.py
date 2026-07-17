@@ -6,7 +6,7 @@ Each agent contributes a node that reads what it needs and writes its
 output back.
 """
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from ..detection.base import PIISpan
 from ..leakage import EscalationRecord, LeakageVerdict
@@ -56,6 +56,9 @@ class PrivacyState(NodeOutput, total=False):
     # Request metadata for the report
     request_id: str
     timestamp: str
+
+    # Seconds each agent spent, summed over the escalation loop
+    stage_seconds: Dict[str, float]
 
     # Post-cloud answer model
     answer: str

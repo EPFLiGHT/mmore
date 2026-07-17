@@ -5,9 +5,9 @@ holds only types and counts, never raw information, so it can be persisted and
 shown to the user.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from .config import DetectionEngineType, SanitizationStrategyType
 from .risk import RiskAssessment
@@ -78,3 +78,4 @@ class ReportRecord:
     hitl_events: List[HITLEvent]
     outcome: ReportOutcome
     sanitized_query: str = ""
+    stage_seconds: Dict[str, float] = field(default_factory=dict)

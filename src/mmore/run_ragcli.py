@@ -1,4 +1,5 @@
 import argparse
+import time
 from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -7,7 +8,7 @@ from huggingface_hub.errors import HfHubHTTPError
 from pymilvus.exceptions import MilvusException
 
 from mmore.privacy.config import PrivacyConfig
-from mmore.privacy.ux import PRIVACY_EMOJI, tool_name
+from mmore.privacy.ux import ANSWER_STAGE, PRIVACY_EMOJI, tool_name
 from mmore.privacy.verification import WarningKind
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.pipeline import PRIVACY_CHUNKS_KEY, RAGPipeline
@@ -18,6 +19,7 @@ from mmore.ux import (
     Color,
     Spinner,
     live_status,
+    paused_seconds,
     plural,
     print_in_color,
     quiet_noisy_libs,
@@ -48,6 +50,12 @@ def _join(names: List[str]) -> str:
 def _print_stats(parts: List[str]) -> None:
     """One grey line under the answer: `a | b | c`."""
     print(str_in_color(" | ".join(parts), Color.GRAY))
+
+
+def _privacy_seconds(report: Dict[str, Any]) -> float:
+    """What the pipeline itself cost: every agent but the answer model."""
+    stages = report.get("stage_seconds") or {}
+    return sum(seconds for name, seconds in stages.items() if name != ANSWER_STAGE)
 
 
 class RagCLI:
@@ -237,7 +245,7 @@ class RagCLI:
         print(str_in_color("Type /bye to exit.\n", Color.GRAY))
         while True:
             prompt = (
-                f"{PRIVACY_EMOJI} RAG WITH PRIVACY > "
+                f"RAG WITH PRIVACY {PRIVACY_EMOJI} > "
                 if self.privacy_graph is not None
                 else "RAG > "
             )
@@ -261,10 +269,14 @@ class RagCLI:
 
         with live_status() as status:
             attach(status)
+            start, waiting = time.monotonic(), paused_seconds()
             try:
-                return self.do_rag(query)
+                results, timings = self.do_rag(query)
             finally:
                 detach()
+
+        timings.total_time = time.monotonic() - start - (paused_seconds() - waiting)
+        return results, timings
 
     def set_privacy(self, cmd: str) -> None:
         """`privacy` / `privacy on` / `privacy off` / `privacy <config.yaml>`."""
@@ -537,6 +549,9 @@ class RagCLI:
             parts.append(plural(report["adversary_iterations"], "leak escalation"))
         if report["human_iterations"]:
             parts.append(plural(report["human_iterations"], "revision"))
+        agents = _privacy_seconds(report)
+        if agents:
+            parts.append(f"privacy {agents:.1f}s")
         _print_stats(parts)
 
     def _print_metrics(
@@ -565,7 +580,10 @@ class RagCLI:
         if timings.retrieval_time is not None:
             timed.append(f"retrieval {timings.retrieval_time:.2f}s")
         if timings.generation_time is not None:
-            timed.append(f"generation {timings.generation_time:.2f}s")
+            label = "answer" if report else "generation"
+            timed.append(f"{label} {timings.generation_time:.2f}s")
+        if timings.total_time is not None:
+            timed.append(f"total {timings.total_time:.2f}s")
 
         tokens = []
         ctx_tokens = self._count_tokens(result.get("context"))
@@ -580,7 +598,6 @@ class RagCLI:
                 part += f" @ {gen_tokens / timings.generation_time:.0f} tok/s"
             tokens.append(part)
 
-        # Two lines, always: in privacy mode the line above is the first of them
         if report:
             _print_stats(model + retrieved + timed + tokens)
         else:

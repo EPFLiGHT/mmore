@@ -16,13 +16,16 @@ from ..ux import Color
 PRIVACY_NAME = "Privacy"
 PRIVACY_EMOJI = "🛡"
 
+# The one stage that is not part of the privacy pipeline
+ANSWER_STAGE = "Answer"
+
 FLOW = (
     "Analyzer",
     "Detector",
     "Sanitizer",
     "Adversary",
     "Gate",
-    "Answer",
+    ANSWER_STAGE,
     "Verifier",
 )
 

@@ -35,6 +35,7 @@ class TimingHandler(RunTimer):
         self.retrieval_time: Optional[float] = None
         self.generation_time: Optional[float] = None
         self.completion_tokens: Optional[int] = None
+        self.total_time: Optional[float] = None
 
     def on_retriever_start(self, serialized, query, *, run_id, **kwargs) -> None:
         self._begin(run_id)

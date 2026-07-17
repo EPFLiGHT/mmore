@@ -12,6 +12,7 @@ cannot proceed.
 """
 
 import logging
+import time
 from dataclasses import replace
 from enum import Enum
 from typing import Optional, Protocol
@@ -29,7 +30,7 @@ from .agents.verifier import AdvisoryVerifierAgent
 from .answer import AnswerModel
 from .config import PrivacyConfig
 from .report_builder import build_report_record
-from .ux import Stage, report_stage
+from .ux import ANSWER_STAGE, Stage, report_stage
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +81,7 @@ _STAGES: dict[str, Stage] = {
         "Gate", "waiting for your approval before the answer model call", "reviewing"
     ),
     _Node.ANSWER: Stage(
-        "Answer", "answering from the sanitized context only", "answering"
+        ANSWER_STAGE, "answering from the sanitized context only", "answering"
     ),
     _Node.VERIFIER: Stage(
         "Verifier", "checking the answer for leaks and faithfulness", "verifying"
@@ -101,11 +102,17 @@ def _with_tool(stage: Stage, node_id: str, state: PrivacyState) -> Stage:
 
 
 def _staged(node: NodeFn, node_id: str, stage: Stage) -> NodeFn:
-    """Announce the agent before running its node."""
+    """Announce the agent before running its node, and record what it cost."""
 
     def run(state: PrivacyState) -> PrivacyState:
         report_stage(_with_tool(stage, node_id, state))
-        return node(state)
+        start = time.perf_counter()
+        result = node(state)
+        seconds = dict(state.get("stage_seconds", {}))
+        elapsed = time.perf_counter() - start
+        seconds[stage.agent] = seconds.get(stage.agent, 0.0) + elapsed
+        result["stage_seconds"] = seconds
+        return result
 
     return run
 
