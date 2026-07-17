@@ -112,10 +112,8 @@ class PresidioSanitizationStrategy(SanitizationStrategy):
                 )
                 out.append(result.text)
             except Exception as e:
-                logger.warning(
-                    "Presidio anonymize failed (%s), leaving chunk unchanged", e
-                )
-                out.append(chunk)
+                logger.error("Presidio anonymize failed with error %s", e)
+                raise RuntimeError("Presidio sanitization failed.") from e
         return out
 
 
