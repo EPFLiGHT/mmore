@@ -9,7 +9,7 @@ sanitization strategy from the tool registry and applies it to each chunk.
 """
 
 import logging
-from typing import Callable, List, Optional, Union
+from typing import Callable, List, Optional
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -73,7 +73,7 @@ class SanitizerAgent(BaseAgent):
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
+        config: PrivacyConfig | str,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ) -> Self:
         if not isinstance(config, PrivacyConfig):

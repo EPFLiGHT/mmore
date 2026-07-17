@@ -11,7 +11,7 @@ risk assessment the next agents consume.
 
 import logging
 from collections import Counter
-from typing import Callable, Dict, List, Optional, Union
+from typing import Callable, Dict, List, Optional
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from typing_extensions import Self
@@ -116,7 +116,7 @@ class DetectorAgent(BaseAgent):
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
+        config: PrivacyConfig | str,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ) -> Self:
         if not isinstance(config, PrivacyConfig):

@@ -353,7 +353,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
+        config: PrivacyConfig | str,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ) -> Self:
         if not isinstance(config, PrivacyConfig):
@@ -628,7 +628,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
                 note_label="Human guidance",
                 respect_config_pins=False,
             )
-            from_human_feedback = bool(report)
+            from_human_feedback = True
         else:
             raise ValueError("escalate called without a leak or rejection")
         label = _describe_policy_changes(policy, new_policy)

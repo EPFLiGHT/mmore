@@ -11,7 +11,7 @@ that was done and pauses for human approval via an interruption on the graph.
 
 import logging
 from enum import Enum
-from typing import List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.types import interrupt
@@ -41,7 +41,7 @@ _GATE_CHOICES: List[Tuple[GateDecision, str]] = [
 _CHOICE_BY_NUMBER = {i + 1: decision for i, (decision, _) in enumerate(_GATE_CHOICES)}
 
 
-def _gate_options() -> List[dict]:
+def _gate_options() -> List[Dict[str, int | str]]:
     """The numbered menu surfaced to the human in the interrupt payload."""
     return [
         {"choice": i + 1, "action": decision.value, "label": label}
@@ -49,7 +49,7 @@ def _gate_options() -> List[dict]:
     ]
 
 
-def _as_choice_number(value: object) -> Optional[int]:
+def _as_choice_number(value: int | str | None) -> Optional[int]:
     """Read a menu number from an int or numeric string."""
     if isinstance(value, bool):
         return None
@@ -60,7 +60,9 @@ def _as_choice_number(value: object) -> Optional[int]:
     return None
 
 
-def _interpret_decision(decision: object) -> Optional[GateDecision]:
+def _interpret_decision(
+    decision: Dict[str, int | str | None] | int | str | None,
+) -> Optional[GateDecision]:
     """Map a resume value (a menu number, an action name, or a dict) to a decision."""
     if isinstance(decision, dict):
         return _interpret_decision(decision.get("choice") or decision.get("action"))
@@ -76,7 +78,9 @@ def _interpret_decision(decision: object) -> Optional[GateDecision]:
     return None
 
 
-def _extract_feedback(decision: object) -> Optional[str]:
+def _extract_feedback(
+    decision: Dict[str, int | str | None] | int | str | None,
+) -> Optional[str]:
     """Pull the human's free-text guidance from a structured resume value."""
     if isinstance(decision, dict):
         value = decision.get("feedback")
@@ -149,7 +153,7 @@ class HITLGateAgent(BaseAgent):
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
+        config: PrivacyConfig | str,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ) -> Self:
         if not isinstance(config, PrivacyConfig):
@@ -165,7 +169,7 @@ class HITLGateAgent(BaseAgent):
             )
         base = {"summary": summary, "options": _gate_options()}
         payload = base
-        resume: object = None
+        resume = None
         decision = None
         while decision is None:  # re-prompt until the human gives a valid choice
             resume = interrupt(payload)

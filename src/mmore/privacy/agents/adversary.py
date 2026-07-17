@@ -14,7 +14,7 @@ feedback: which engine, strategy, threshold, or entity labels to change.
 
 import logging
 from dataclasses import replace
-from typing import List, Optional, Union
+from typing import Dict, List, Optional
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -171,11 +171,11 @@ def _describe_policy(policy: PrivacyPolicy) -> str:
     )
 
 
-def _format_guidance(guidance: dict) -> str:
+def _format_guidance(guidance: Dict[str, str]) -> str:
     return "\n".join(f"- {name}: {desc}" for name, desc in guidance.items())
 
 
-def _clamp_confidence(value: object) -> float:
+def _clamp_confidence(value: float | int | str | None) -> float:
     """Coerce a model-provided confidence into ``[0.0, 1.0]``, 0.0 on failure."""
     if isinstance(value, (int, float)):
         return max(0.0, min(1.0, float(value)))
@@ -219,7 +219,7 @@ class AdversarialAgent(BaseAgent):
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
+        config: PrivacyConfig | str,
         checkpointer: Optional[BaseCheckpointSaver] = None,
     ) -> Self:
         if not isinstance(config, PrivacyConfig):
