@@ -175,7 +175,8 @@ class BaseAgent:
         if self.system_prompt:
             messages = [SystemMessage(content=self.system_prompt), *messages]
         llm = self.llm.bind_tools(self._tools) if self._tools else self.llm
-        llm = llm.bind(**self._llm_config.bind_kwargs)
+        if self._llm_config is not None:
+            llm = llm.bind(**self._llm_config.bind_kwargs)
         response = llm.invoke(messages)
         return NodeOutput(messages=[response])
 

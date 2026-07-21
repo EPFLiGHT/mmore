@@ -1,6 +1,6 @@
 """Integration tests for mmore.privacy.agents."""
 
-from typing import Any, Dict, TypedDict
+from typing import Any
 from unittest.mock import patch
 
 import pytest
@@ -8,7 +8,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
 
-from mmore.privacy.agents.base import BaseAgent, clear_llm_cache
+from mmore.privacy.agents.base import BaseAgent, NodeOutput, clear_llm_cache
 from mmore.privacy.agents.config import AgentConfig
 from mmore.privacy.agents.registry import (
     ToolNotRegisteredError,
@@ -233,7 +233,7 @@ def test_clear_llm_cache(isolate_llm_cache):
 # --------------------------------------------------------------------------
 
 
-class _PipeState(TypedDict, total=False):
+class _PipeState(NodeOutput, total=False):
     value: int
     doubled: int
 
@@ -244,8 +244,11 @@ class _DoublerAgent(BaseAgent):
     state_schema = _PipeState
     node_name = "doubler"
 
-    def _node(self, state: _PipeState) -> Dict[str, Any]:
-        return {"doubled": state["value"] * 2}
+    def _node(self, state: _PipeState) -> _PipeState:
+        value = state.get("value")
+        if value is None:
+            raise KeyError("value")
+        return _PipeState(doubled=value * 2)
 
 
 def test_subclass_runs_with_custom_state_schema_and_no_llm():

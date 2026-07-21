@@ -17,8 +17,11 @@ from collections import OrderedDict
 from typing import TYPE_CHECKING, Callable, NamedTuple, Optional, TypeVar, Union, cast
 
 if TYPE_CHECKING:
+    from faker import Faker
     from gliner.model import BaseEncoderGLiNER
+    from langchain_core.language_models.chat_models import BaseChatModel
     from presidio_analyzer import AnalyzerEngine
+    from presidio_anonymizer import AnonymizerEngine
     from transformers import TextGenerationPipeline, TokenClassificationPipeline
 
 logger = logging.getLogger(__name__)
@@ -26,6 +29,9 @@ logger = logging.getLogger(__name__)
 CachedModel = Union[
     "BaseEncoderGLiNER",
     "AnalyzerEngine",
+    "AnonymizerEngine",
+    "BaseChatModel",
+    "Faker",
     "TextGenerationPipeline",
     "TokenClassificationPipeline",
 ]
