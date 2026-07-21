@@ -56,7 +56,7 @@ Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report
 | `adversary_iterations`, `human_iterations` | policy escalations triggered by the adversary agent vs. by the user |
 | `gate_outcome` | `approved`, `re-looped`, `aborted`, or `rejected` |
 | `answer_backend`, `answer_model` | which model answered |
-| `advisory_warnings` | verifier warnings as kind and count |
+| `verifier_warnings` | verifier warnings as kind and count |
 | `hitl_events` | list of gate interactions, one per human decision (each with its decision and any written revise feedback) |
 | `outcome` | `returned`, `returned-with-warnings`, or `aborted-unsafe` |
 
