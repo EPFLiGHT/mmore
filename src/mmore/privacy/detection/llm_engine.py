@@ -25,8 +25,8 @@ logger = logging.getLogger(__name__)
 # --------------------------------------------------------------------------
 
 PII_DETECTION_INSTRUCTION = (
-    "Find every PII occurrence in the input text. For each, return the"
-    "exact substring (not paraphrased), its entity label, and a confidence."
+    "Find every PII occurrence in the input text. For each, return the "
+    "exact substring (not paraphrased), its entity label, and a confidence. "
     "Return spans in the order they appear in the text."
 )
 

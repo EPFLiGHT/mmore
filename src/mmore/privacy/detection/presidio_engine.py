@@ -83,8 +83,8 @@ def clear_presidio_cache() -> None:
 class PresidioEngine(DetectionEngine):
     """Detect PII spans with Microsoft Presidio + custom clinical recognizers.
 
-    Each instance carries its own ``entity_types`` and ``confidence_threshold``,
-    the analyzer is shared across instances via ``_analyzer_cache``.
+    Each instance carries its own ``entity_types`` and ``confidence_threshold``.
+    The model is shared across instances via the global ``MODEL_REGISTRY``.
     """
 
     def __init__(

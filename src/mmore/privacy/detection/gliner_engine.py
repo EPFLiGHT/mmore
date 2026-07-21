@@ -44,8 +44,8 @@ def clear_gliner_cache() -> None:
 class GLiNEREngine(DetectionEngine):
     """Detect PII spans with a GLiNER model.
 
-    Each instance carries its own ``entity_types`` and ``confidence_threshold``,
-    models with the same ``model_name`` are shared via ``_models_cache``.
+    Each instance carries its own ``entity_types`` and ``confidence_threshold``.
+    The model is shared across instances via ``MODEL_REGISTRY``.
     """
 
     def __init__(
