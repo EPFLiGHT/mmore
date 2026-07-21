@@ -109,5 +109,9 @@ class SanitizerAgent(BaseAgent):
             raise ValueError("SanitizerAgent requires 'policy' in the state.")
         chunks = list(state.get("raw_chunks", []))
         spans_per_chunk = list(state.get("spans") or [[] for _ in chunks])
+        if len(spans_per_chunk) != len(chunks):
+            raise ValueError(
+                f"spans/raw_chunks length mismatch: {len(spans_per_chunk)} != {len(chunks)}"
+            )
         sanitized = self.sanitize(policy, chunks, spans_per_chunk)
         return PrivacyState(sanitized_chunks=sanitized)

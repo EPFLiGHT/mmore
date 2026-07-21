@@ -85,7 +85,7 @@ class PresidioEngine(DetectionEngine):
     """Detect PII spans with Microsoft Presidio + custom clinical recognizers.
 
     Each instance carries its own ``sensitive_entities`` and
-    ``confidence_threshold``. The analyzer is shared across instances via the
+    ``confidence_threshold``. The model is shared across instances via the
     global ``MODEL_REGISTRY``.
     """
 
