@@ -19,6 +19,7 @@ from typing_extensions import Self
 
 from ...utils import load_config
 from ..config import PrivacyConfig
+from ..leakage import SAFE_VERDICT
 from .base import BaseAgent
 from .state import PreCloudOutcome, PrivacyState
 
@@ -114,14 +115,15 @@ def build_gate_summary(state: PrivacyState) -> str:
         else "none"
     )
 
-    if verdict is not None:
-        probe = verdict.vector.value if verdict.vector else "none"
+    if verdict is None:
+        gate_verdict = "adversary verdict unavailable"
+    elif verdict == SAFE_VERDICT or verdict.vector is None:
+        gate_verdict = "adversary did not probe (disabled or no sanitized context)"
+    else:
         gate_verdict = (
-            f"adversary cleared the context (strongest probe {probe} "
+            f"adversary cleared the context (strongest probe {verdict.vector.value} "
             f"at confidence {verdict.confidence:.2f})"
         )
-    else:
-        gate_verdict = "adversary verdict unavailable"
 
     return "\n".join(
         [

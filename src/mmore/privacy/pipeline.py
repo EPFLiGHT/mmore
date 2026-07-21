@@ -13,7 +13,7 @@ cannot proceed.
 
 import logging
 from enum import Enum
-from typing import Callable, Optional
+from typing import Optional, Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
@@ -28,8 +28,10 @@ from .config import PrivacyConfig
 
 logger = logging.getLogger(__name__)
 
+
 # A pipeline node: reads the shared state and returns a partial PrivacyState
-NodeFn = Callable[..., PrivacyState]
+class NodeFn(Protocol):
+    def __call__(self, state: PrivacyState) -> PrivacyState: ...
 
 
 class _Node(str, Enum):
