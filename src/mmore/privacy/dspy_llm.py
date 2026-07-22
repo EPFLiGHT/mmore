@@ -1,4 +1,4 @@
-"""Build a DSPy ``BaseLM`` from an ``LLMConfig``."""
+"""DSPy integration: build a ``BaseLM`` from an ``LLMConfig`` then read predictions back."""
 
 import json
 import logging
@@ -10,7 +10,7 @@ import dspy
 
 from ..rag.llm import LLMConfig
 from ..ux import loading_model
-from ._cache import MODEL_REGISTRY
+from .model_cache import MODEL_REGISTRY
 
 if TYPE_CHECKING:
     from transformers import TextGenerationPipeline
@@ -21,6 +21,15 @@ _CACHE_PREFIX = "hf_lm"
 
 _JSON_FENCE_RE = re.compile(r"```(?:json)?\s*(.*?)\s*```", re.DOTALL)
 _JSON_VALUE_RE = re.compile(r"(\[.*\]|\{.*\})", re.DOTALL)
+
+_PROVIDER_PREFIXES = {
+    "OPENAI": "openai",
+    "ANTHROPIC": "anthropic",
+    "MISTRAL": "mistral",
+    "COHERE": "cohere",
+}
+
+_DEFAULT_MAX_TOKENS = 512
 
 
 class TolerantJSONAdapter(dspy.JSONAdapter):
@@ -54,6 +63,23 @@ class TolerantJSONAdapter(dspy.JSONAdapter):
             except (ValueError, TypeError):
                 continue
         return None
+
+
+def clamp_confidence(value: float | int | str | None) -> float:
+    """Force model-provided confidence into ``[0.0, 1.0]`` with 0.0 on failure."""
+    if value is None:
+        return 0.0
+    try:
+        return max(0.0, min(1.0, float(value)))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def format_guidance(options: dict[str, str]) -> str:
+    """Render a name-to-description catalog as a bullet list DSPy input field."""
+    return "\n".join(
+        f"- {name}: {description}" for name, description in options.items()
+    )
 
 
 def _load_local_hf_pipeline(model_name: str) -> "TextGenerationPipeline":
@@ -94,7 +120,7 @@ class LocalHFLM(dspy.BaseLM):
     def __init__(
         self,
         model_name: str,
-        max_tokens: int = 512,
+        max_tokens: int = _DEFAULT_MAX_TOKENS,
         temperature: float = 0.0,
     ):
         super().__init__(
@@ -120,13 +146,12 @@ class LocalHFLM(dspy.BaseLM):
 
     def forward(self, prompt=None, messages=None, **kwargs):
         merged = {**self.kwargs, **kwargs}
-        max_new_tokens = int(merged.get("max_tokens", 512))
         temperature = float(merged.get("temperature", 0.0))
         do_sample = temperature > 0.0
 
         chat_input = messages or [{"role": "user", "content": prompt or ""}]
         gen_kwargs: dict = {
-            "max_new_tokens": max_new_tokens,
+            "max_new_tokens": int(merged.get("max_tokens", _DEFAULT_MAX_TOKENS)),
             "do_sample": do_sample,
             "return_full_text": False,
         }
@@ -160,21 +185,13 @@ def build_dspy_lm(llm_config: LLMConfig) -> dspy.BaseLM:
     if llm_config.provider == "HF" and llm_config.base_url is None:
         return LocalHFLM(
             model_name=llm_config.llm_name,
-            max_tokens=llm_config.max_new_tokens or 512,
+            max_tokens=llm_config.max_new_tokens or _DEFAULT_MAX_TOKENS,
             temperature=llm_config.temperature,
         )
 
-    provider_to_prefix = {
-        "OPENAI": "openai",
-        "ANTHROPIC": "anthropic",
-        "MISTRAL": "mistral",
-        "COHERE": "cohere",
-    }
-    prefix = provider_to_prefix.get(llm_config.provider or "")
-    model = f"{prefix}/{llm_config.llm_name}" if prefix else llm_config.llm_name
-
+    prefix = _PROVIDER_PREFIXES.get(llm_config.provider or "")
     kwargs: dict = {
-        "model": model,
+        "model": f"{prefix}/{llm_config.llm_name}" if prefix else llm_config.llm_name,
         "temperature": llm_config.temperature,
     }
     if llm_config.max_new_tokens is not None:

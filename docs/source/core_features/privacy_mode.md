@@ -42,6 +42,29 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 
 Config errors are reported at startup: a missing `answer.llm`, an unknown `domain`, or an unregistered detection engine fail before any query runs.
 
+## Code layout
+
+Everything lives under `src/mmore/privacy/`:
+
+| Path | Role |
+| --- | --- |
+| `config.py` | `PrivacyConfig` and its enums: what a `privacy.yaml` is loaded into |
+| `pipeline.py` | the LangGraph wiring, including the bounded escalation loop |
+| `runner.py` | drives the compiled graph for one query, validates the config |
+| `gate_ui.py` | terminal front-end for the HITL gate (prompt + raw/sanitized diff) |
+| `report_builder.py` | turns the final graph state into a `ReportRecord` |
+| `agents/` | one module per graph node: `analyzer`, `detector`, `sanitizer`, `adversary`, `gate`, `answer`, `verifier`, plus the shared `BaseAgent`, `PrivacyState` and tool registry |
+| `schemas/` | the data records the agents exchange: `policy`, `risk`, `leakage`, `verification`, `report` |
+| `detection/` | the PII detection engines, each registered as an agent tool |
+| `sanitization/` | the sanitization strategies, each registered as an agent tool |
+| `domains.py` | the per-domain profiles (entity set, prompts, engine and strategy defaults) |
+| `model_cache.py` | process-wide LRU cache so engines and agents share loaded models |
+| `dspy_llm.py` | DSPy backend: builds an LM from an `LLMConfig`, reads predictions back |
+
+Detection engines and sanitization strategies register themselves by importing
+their package, so a new engine only needs a module under `detection/` with a
+`@register_tool` function and an entry in `DETECTION_TOOL_NAMES`.
+
 ## Report schema (for operators)
 
 Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report`:

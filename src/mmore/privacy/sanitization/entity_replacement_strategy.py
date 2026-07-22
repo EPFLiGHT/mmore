@@ -6,18 +6,18 @@ the same original text always maps to the same fake within the same
 ``apply`` call.
 """
 
-from typing import TYPE_CHECKING, Callable, Dict, List, Tuple
+from typing import TYPE_CHECKING, Callable
 
-from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..detection.base import PIISpan
-from ..policy import PrivacyPolicy
+from ..model_cache import MODEL_REGISTRY
+from ..schemas.policy import PrivacyPolicy
 from .base import SanitizationStrategy, apply_replacements, select_non_overlapping
 
 if TYPE_CHECKING:
     from faker import Faker
 
-_CACHE_PREFIX = "faker"
+_CACHE_KEY = "faker"
 
 
 def _load_faker() -> "Faker":
@@ -26,12 +26,7 @@ def _load_faker() -> "Faker":
     return Faker()
 
 
-def clear_faker_cache() -> None:
-    """Drop the cached Faker instance."""
-    MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
-
-
-def _build_label_map(faker: "Faker") -> Dict[str, Callable[[], str]]:
+def _fake_value_builders(faker: "Faker") -> dict[str, Callable[[], str]]:
     return {
         "PERSON": faker.name,
         "EMAIL_ADDRESS": faker.email,
@@ -55,44 +50,36 @@ class EntityReplacementStrategy(SanitizationStrategy):
 
     def apply(
         self,
-        chunks: List[str],
-        spans_per_chunk: List[List[PIISpan]],
+        chunks: list[str],
+        spans_per_chunk: list[list[PIISpan]],
         policy: PrivacyPolicy,
-    ) -> List[str]:
-        faker = MODEL_REGISTRY.get_or_load(_CACHE_PREFIX, _load_faker)
-        label_map = _build_label_map(faker)
-        consistency = bool(policy.consistency)
-        memo: Dict[Tuple[str, str], str] = {}
+    ) -> list[str]:
+        faker = MODEL_REGISTRY.get_or_load(_CACHE_KEY, _load_faker)
+        builders = _fake_value_builders(faker)
+        consistent = bool(policy.consistency)
+        fakes: dict[tuple[str, str], str] = {}
 
-        def fake_for_label(label: str) -> str:
-            gen = label_map.get(label)
-            if gen is None:
-                return faker.pystr(min_chars=8, max_chars=12)
-            return str(gen())
+        def fake_for(span: PIISpan, original: str) -> str:
+            key = (span.label, original)
+            if consistent and key in fakes:
+                return fakes[key]
+            build = builders.get(span.label)
+            fake = str(build()) if build else faker.pystr(min_chars=8, max_chars=12)
+            if consistent:
+                fakes[key] = fake
+            return fake
 
-        def replace(span: PIISpan, original: str) -> str:
-            if consistency:
-                key = (span.label, original)
-                cached = memo.get(key)
-                if cached is not None:
-                    return cached
-                fake = fake_for_label(span.label)
-                memo[key] = fake
-                return fake
-            return fake_for_label(span.label)
-
-        out: List[str] = []
-        for chunk, spans in zip(chunks, spans_per_chunk):
-            kept = select_non_overlapping(list(spans))
-            out.append(apply_replacements(chunk, kept, replace))
-        return out
+        return [
+            apply_replacements(chunk, select_non_overlapping(spans), fake_for)
+            for chunk, spans in zip(chunks, spans_per_chunk)
+        ]
 
 
 @register_tool("sanitize_entity_replacement")
 def sanitize_entity_replacement(
-    chunks: List[str],
-    spans_per_chunk: List[List[PIISpan]],
+    chunks: list[str],
+    spans_per_chunk: list[list[PIISpan]],
     policy: PrivacyPolicy,
-) -> List[str]:
+) -> list[str]:
     """Apply the default-configured entity-replacement strategy."""
     return EntityReplacementStrategy().apply(chunks, spans_per_chunk, policy)

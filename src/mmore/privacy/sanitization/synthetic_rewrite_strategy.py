@@ -1,25 +1,20 @@
 """LLM-driven synthetic-rewrite sanitization strategy.
 
 Rewrites each chunk via a typed DSPy predictor. The LM is taken from the
-current ``dspy.context`.
+current ``dspy.context``.
 """
 
 import logging
-from typing import List
 
 import dspy
 
 from ..agents.registry import register_tool
 from ..detection.base import PIISpan
-from ..policy import PrivacyPolicy
+from ..schemas.policy import PrivacyPolicy
 from .base import SanitizationStrategy
 
 logger = logging.getLogger(__name__)
 
-
-# ========================================================================
-# Prompts
-# ========================================================================
 
 _REWRITE_INSTRUCTION = (
     "Rewrite the chunk so it carries no sensitive personal identifiers while "
@@ -28,11 +23,6 @@ _REWRITE_INSTRUCTION = (
     "given. The detected_entities list flags PII already found in the chunk: "
     "remove or generalize each one."
 )
-
-
-# ========================================================================
-# DSPy signature
-# ========================================================================
 
 
 class _RewriteSignature(dspy.Signature):
@@ -48,16 +38,7 @@ class _RewriteSignature(dspy.Signature):
     )
 
 
-# ========================================================================
-# Predictors and helpers
-# ========================================================================
-
-
-def _build_rewrite_predictor() -> dspy.Predict:
-    return dspy.Predict(_RewriteSignature.with_instructions(_REWRITE_INSTRUCTION))
-
-
-def _format_entities(chunk: str, spans: List[PIISpan]) -> str:
+def _format_entities(chunk: str, spans: list[PIISpan]) -> str:
     """Render spans as newline-separated ``LABEL: text`` for the predictor."""
     return "\n".join(f"{span.label}: {chunk[span.start : span.end]}" for span in spans)
 
@@ -67,16 +48,17 @@ class SyntheticRewriteStrategy(SanitizationStrategy):
 
     def apply(
         self,
-        chunks: List[str],
-        spans_per_chunk: List[List[PIISpan]],
+        chunks: list[str],
+        spans_per_chunk: list[list[PIISpan]],
         policy: PrivacyPolicy,
-    ) -> List[str]:
-        predictor = _build_rewrite_predictor()
-        out: List[str] = []
+    ) -> list[str]:
+        predictor = dspy.Predict(
+            _RewriteSignature.with_instructions(_REWRITE_INSTRUCTION)
+        )
+        sanitized: list[str] = []
         for number, (chunk, spans) in enumerate(zip(chunks, spans_per_chunk), 1):
             if not spans:
-                # No PII detected hence nothing to rewrite
-                out.append(chunk)
+                sanitized.append(chunk)
                 continue
             logger.debug("Synthetic rewrite (LLM): chunk %d/%d", number, len(chunks))
             try:
@@ -89,18 +71,18 @@ class SyntheticRewriteStrategy(SanitizationStrategy):
                 logger.warning(
                     "Synthetic rewrite failed (%s); leaving chunk unchanged", e
                 )
-                out.append(chunk)
+                sanitized.append(chunk)
                 continue
-            sanitized = str(getattr(prediction, "sanitized", "")).strip()
-            out.append(sanitized if sanitized else chunk)
-        return out
+            rewritten = str(getattr(prediction, "sanitized", "")).strip()
+            sanitized.append(rewritten or chunk)
+        return sanitized
 
 
 @register_tool("sanitize_synthetic_rewrite")
 def sanitize_synthetic_rewrite(
-    chunks: List[str],
-    spans_per_chunk: List[List[PIISpan]],
+    chunks: list[str],
+    spans_per_chunk: list[list[PIISpan]],
     policy: PrivacyPolicy,
-) -> List[str]:
+) -> list[str]:
     """Apply the default synthetic-rewrite strategy; needs an LM in ``dspy.context``."""
     return SyntheticRewriteStrategy().apply(chunks, spans_per_chunk, policy)

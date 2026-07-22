@@ -1,9 +1,7 @@
 """Shared constants for the sanitization strategies."""
 
-from typing import Dict
-
 # Strategy names used in YAML configs mapped to the tool names
-SANITIZATION_TOOL_NAMES: Dict[str, str] = {
+SANITIZATION_TOOL_NAMES: dict[str, str] = {
     "token_masking": "sanitize_token_masking",
     "entity_replacement": "sanitize_entity_replacement",
     "synthetic_rewrite": "sanitize_synthetic_rewrite",
@@ -12,7 +10,7 @@ SANITIZATION_TOOL_NAMES: Dict[str, str] = {
 
 
 # Per-strategy guidance so the analyzer can map descriptive feedback to a choice
-SANITIZATION_GUIDANCE: Dict[str, str] = {
+SANITIZATION_GUIDANCE: dict[str, str] = {
     "token_masking": (
         "replace each detected entity with a typed placeholder like [PERSON_1], "
         "the original value is removed entirely"
@@ -31,7 +29,7 @@ SANITIZATION_GUIDANCE: Dict[str, str] = {
 
 
 # Per-operator guidance so the analyzer can map descriptive feedback to a choice
-PRESIDIO_OPERATOR_GUIDANCE: Dict[str, str] = {
+PRESIDIO_OPERATOR_GUIDANCE: dict[str, str] = {
     "replace": "swap each value for its entity label, e.g. <PERSON>",
     "redact": "delete each value entirely, leaving no placeholder",
     "mask": "overwrite each value with a masking character like ***",

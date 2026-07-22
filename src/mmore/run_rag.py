@@ -192,7 +192,7 @@ def _setup_privacy(privacy_config_file: str, mode: str):
 
 def _privacy_stats(results: List[Dict[str, Any]]) -> Dict[str, Any]:
     """Privacy counters for the closing card, aggregated over the whole run."""
-    from mmore.privacy.report import PreCloudOutcome
+    from mmore.privacy.schemas.report import PreCloudOutcome
 
     records = [r["privacy_report"] for r in results if r.get("privacy_report")]
     approved = sum(

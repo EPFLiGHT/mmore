@@ -5,11 +5,11 @@ Replaces each detected PII span with an ``[LABEL_N]`` token. When
 same token within a single ``apply`` call.
 """
 
-from typing import Dict, List, Tuple
+from collections import Counter
 
 from ..agents.registry import register_tool
 from ..detection.base import PIISpan
-from ..policy import PrivacyPolicy
+from ..schemas.policy import PrivacyPolicy
 from .base import SanitizationStrategy, apply_replacements, select_non_overlapping
 
 
@@ -18,38 +18,35 @@ class TokenMaskingStrategy(SanitizationStrategy):
 
     def apply(
         self,
-        chunks: List[str],
-        spans_per_chunk: List[List[PIISpan]],
+        chunks: list[str],
+        spans_per_chunk: list[list[PIISpan]],
         policy: PrivacyPolicy,
-    ) -> List[str]:
-        consistency = bool(policy.consistency)
-        counters: Dict[str, int] = {}
-        memory: Dict[Tuple[str, str], str] = {}
+    ) -> list[str]:
+        consistent = bool(policy.consistency)
+        seen_per_label: Counter[str] = Counter()
+        tokens: dict[tuple[str, str], str] = {}
 
         def token_for(span: PIISpan, original: str) -> str:
-            if consistency:
-                key = (span.label, original)
-                cached = memory.get(key)
-                if cached is not None:
-                    return cached
-            counters[span.label] = counters.get(span.label, 0) + 1
-            token = f"[{span.label}_{counters[span.label]}]"
-            if consistency:
-                memory[(span.label, original)] = token
+            key = (span.label, original)
+            if consistent and key in tokens:
+                return tokens[key]
+            seen_per_label[span.label] += 1
+            token = f"[{span.label}_{seen_per_label[span.label]}]"
+            if consistent:
+                tokens[key] = token
             return token
 
-        out: List[str] = []
-        for chunk, spans in zip(chunks, spans_per_chunk):
-            kept = select_non_overlapping(list(spans))
-            out.append(apply_replacements(chunk, kept, token_for))
-        return out
+        return [
+            apply_replacements(chunk, select_non_overlapping(spans), token_for)
+            for chunk, spans in zip(chunks, spans_per_chunk)
+        ]
 
 
 @register_tool("sanitize_token_masking")
 def sanitize_token_masking(
-    chunks: List[str],
-    spans_per_chunk: List[List[PIISpan]],
+    chunks: list[str],
+    spans_per_chunk: list[list[PIISpan]],
     policy: PrivacyPolicy,
-) -> List[str]:
+) -> list[str]:
     """Apply the default-configured token-masking strategy."""
     return TokenMaskingStrategy().apply(chunks, spans_per_chunk, policy)

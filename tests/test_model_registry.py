@@ -5,8 +5,8 @@ from typing import Callable
 import pytest
 from presidio_analyzer import AnalyzerEngine
 
-from mmore.privacy import _cache
-from mmore.privacy._cache import ModelRegistry
+from mmore.privacy import model_cache as _cache
+from mmore.privacy.model_cache import ModelRegistry
 
 MB = 1024 * 1024
 

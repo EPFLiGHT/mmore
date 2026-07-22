@@ -7,9 +7,8 @@ prompts, and the sanitization defaults. There exists three presets: ``global``,
 """
 
 from dataclasses import dataclass
-from typing import Dict, List
 
-from ..detection.constants import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_ENTITIES
+from .detection.constants import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_ENTITIES
 
 
 class UnknownDomainError(KeyError):
@@ -21,7 +20,7 @@ class DomainProfile:
     """Per-domain defaults consumed by the privacy agents."""
 
     name: str
-    sensitive_entities: List[str]
+    sensitive_entities: list[str]
     analyzer_system_prompt: str
     domain_prompt: str
     sanitizer_system_prompt: str = ""
@@ -29,60 +28,6 @@ class DomainProfile:
     default_confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
     default_strategy: str = "token_masking"
     default_consistency: bool = True
-
-
-_HEALTHCARE_ENTITIES = [
-    "PERSON",
-    "MRN",
-    "HOSPITAL_DATE",
-    "DATE_TIME",
-    "INSURANCE_ID",
-    "US_SSN",
-    "PHONE_NUMBER",
-    "EMAIL_ADDRESS",
-    "LOCATION",
-]
-
-
-PRESIDIO_CLINICAL_PATTERNS = [
-    {
-        "entity": "MRN",
-        "patterns": [
-            ("mrn_with_prefix", r"\bMRN[\s:#]*\d{6,10}\b", 0.9),
-            ("mrn_bare_8_digits", r"\b\d{8}\b", 0.4),
-        ],
-        "context": ["mrn", "medical record", "record number", "patient id"],
-    },
-    {
-        "entity": "HOSPITAL_DATE",
-        "patterns": [
-            ("iso_date", r"\b\d{4}-\d{2}-\d{2}\b", 0.6),
-            ("us_date", r"\b\d{1,2}/\d{1,2}/\d{4}\b", 0.6),
-        ],
-        "context": ["admission", "discharge", "appointment", "hospital", "clinic"],
-    },
-    {
-        "entity": "INSURANCE_ID",
-        "patterns": [
-            ("insurance_alnum", r"\b[A-Z]{2,3}\d{6,12}\b", 0.7),
-        ],
-        "context": ["insurance", "policy", "member id", "subscriber"],
-    },
-]
-
-
-_HUMANITARIAN_ENTITIES = [
-    "PERSON",
-    "LOCATION",
-    "GPS_COORDINATES",
-    "ETHNICITY",
-    "LEGAL_STATUS",
-    "DISPLACEMENT_STATUS",
-    "HOUSEHOLD_ID",
-    "PHONE_NUMBER",
-    "EMAIL_ADDRESS",
-    "DATE_TIME",
-]
 
 
 GLOBAL_PROFILE = DomainProfile(
@@ -105,7 +50,17 @@ GLOBAL_PROFILE = DomainProfile(
 
 HEALTHCARE_PROFILE = DomainProfile(
     name="healthcare",
-    sensitive_entities=list(_HEALTHCARE_ENTITIES),
+    sensitive_entities=[
+        "PERSON",
+        "MRN",
+        "HOSPITAL_DATE",
+        "DATE_TIME",
+        "INSURANCE_ID",
+        "US_SSN",
+        "PHONE_NUMBER",
+        "EMAIL_ADDRESS",
+        "LOCATION",
+    ],
     analyzer_system_prompt=(
         "You classify the privacy sensitivity of a clinical request. Protected "
         "health information (patient names, medical record numbers, insurance "
@@ -125,7 +80,18 @@ HEALTHCARE_PROFILE = DomainProfile(
 
 HUMANITARIAN_PROFILE = DomainProfile(
     name="humanitarian",
-    sensitive_entities=list(_HUMANITARIAN_ENTITIES),
+    sensitive_entities=[
+        "PERSON",
+        "LOCATION",
+        "GPS_COORDINATES",
+        "ETHNICITY",
+        "LEGAL_STATUS",
+        "DISPLACEMENT_STATUS",
+        "HOUSEHOLD_ID",
+        "PHONE_NUMBER",
+        "EMAIL_ADDRESS",
+        "DATE_TIME",
+    ],
     analyzer_system_prompt=(
         "You classify the privacy sensitivity of a humanitarian request. Data "
         "about affected populations (names, precise locations or GPS, "
@@ -145,10 +111,9 @@ HUMANITARIAN_PROFILE = DomainProfile(
 )
 
 
-DOMAIN_PROFILES: Dict[str, DomainProfile] = {
-    GLOBAL_PROFILE.name: GLOBAL_PROFILE,
-    HEALTHCARE_PROFILE.name: HEALTHCARE_PROFILE,
-    HUMANITARIAN_PROFILE.name: HUMANITARIAN_PROFILE,
+DOMAIN_PROFILES: dict[str, DomainProfile] = {
+    profile.name: profile
+    for profile in (GLOBAL_PROFILE, HEALTHCARE_PROFILE, HUMANITARIAN_PROFILE)
 }
 
 

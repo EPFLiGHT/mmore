@@ -315,8 +315,8 @@ class _ScriptedApprover:
 
 
 def test_run_privacy_query_resumes_gate_on_approve():
-    from mmore.privacy.report import PreCloudOutcome
     from mmore.privacy.runner import run_privacy_query
+    from mmore.privacy.schemas.report import PreCloudOutcome
 
     approver = _ScriptedApprover(["1"])
     result = run_privacy_query(
@@ -330,8 +330,8 @@ def test_run_privacy_query_resumes_gate_on_approve():
 
 
 def test_run_privacy_query_reprompts_on_invalid_choice():
-    from mmore.privacy.report import PreCloudOutcome
     from mmore.privacy.runner import run_privacy_query
+    from mmore.privacy.schemas.report import PreCloudOutcome
 
     approver = _ScriptedApprover(["9", "approve"])
     result = run_privacy_query(
@@ -344,8 +344,8 @@ def test_run_privacy_query_reprompts_on_invalid_choice():
 
 
 def test_run_privacy_query_resumes_gate_on_reject():
-    from mmore.privacy.report import PreCloudOutcome
     from mmore.privacy.runner import run_privacy_query
+    from mmore.privacy.schemas.report import PreCloudOutcome
 
     approver = _ScriptedApprover(["3"])
     result = run_privacy_query(
@@ -373,7 +373,7 @@ _GATE_PAYLOAD = {
 
 
 def test_terminal_approver_approve_prints_summary_and_menu(monkeypatch, capsys):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     monkeypatch.setattr("builtins.input", lambda _prompt: "1")
 
@@ -384,7 +384,7 @@ def test_terminal_approver_approve_prints_summary_and_menu(monkeypatch, capsys):
 
 
 def test_terminal_approver_revise_collects_optional_feedback(monkeypatch):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     answers = iter(["2", "also mask job titles"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
@@ -395,7 +395,7 @@ def test_terminal_approver_revise_collects_optional_feedback(monkeypatch):
 
 
 def test_terminal_approver_revise_without_feedback_returns_choice(monkeypatch):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     answers = iter(["retry", ""])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
@@ -404,7 +404,7 @@ def test_terminal_approver_revise_without_feedback_returns_choice(monkeypatch):
 
 
 def test_terminal_approver_reprompt_payload_prints_error(monkeypatch, capsys):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     monkeypatch.setattr("builtins.input", lambda _prompt: "1")
 
@@ -414,7 +414,7 @@ def test_terminal_approver_reprompt_payload_prints_error(monkeypatch, capsys):
 
 
 def test_terminal_approver_without_tty_raises_clear_error(monkeypatch):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     def _eof(_prompt):
         raise EOFError
@@ -439,7 +439,7 @@ def _brand(text: str) -> str:
 
 
 def test_render_chunk_diff_colors_replacements():
-    from mmore.privacy.runner import _render_chunk_diff
+    from mmore.privacy.gate_ui import _render_chunk_diff
 
     raw = "Call John Doe at 555-1234."
     sanitized = "Call [PERSON] at [PHONE_NUMBER]."
@@ -453,7 +453,7 @@ def test_render_chunk_diff_colors_replacements():
 
 
 def test_render_chunk_diff_plain_when_nothing_changed():
-    from mmore.privacy.runner import _render_chunk_diff
+    from mmore.privacy.gate_ui import _render_chunk_diff
 
     rendered = _render_chunk_diff("no pii here", "no pii here")
 
@@ -461,7 +461,7 @@ def test_render_chunk_diff_plain_when_nothing_changed():
 
 
 def test_terminal_approver_view_prints_chunks_then_resumes(monkeypatch, capsys):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     payload = {
         **_GATE_PAYLOAD,
@@ -478,7 +478,7 @@ def test_terminal_approver_view_prints_chunks_then_resumes(monkeypatch, capsys):
 
 
 def test_terminal_approver_view_renders_sanitized_query(monkeypatch, capsys):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     payload = {
         **_GATE_PAYLOAD,
@@ -496,7 +496,7 @@ def test_terminal_approver_view_renders_sanitized_query(monkeypatch, capsys):
 
 
 def test_terminal_approver_view_without_chunks_prints_notice(monkeypatch, capsys):
-    from mmore.privacy.runner import terminal_approver
+    from mmore.privacy.gate_ui import terminal_approver
 
     answers = iter(["view", "3"])
     monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))

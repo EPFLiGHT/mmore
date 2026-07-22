@@ -7,9 +7,8 @@ from huggingface_hub import model_info
 from huggingface_hub.errors import HfHubHTTPError
 from pymilvus.exceptions import MilvusException
 
-from mmore.privacy.config import PrivacyConfig
+from mmore.privacy.config import PrivacyConfig, VerifierCheck
 from mmore.privacy.ux import ANSWER_STAGE, PRIVACY_EMOJI, tool_name
-from mmore.privacy.verification import WarningKind
 from mmore.profiler import enable_profiling_from_env, profile_function
 from mmore.rag.pipeline import PRIVACY_CHUNKS_KEY, RAGPipeline
 from mmore.ragcli_helper import TimingHandler
@@ -35,8 +34,8 @@ logger = setup_logging(RAG_NAME, RAG_EMOJI)
 _CONTEXT_CMD = "/context"
 
 _VERIFIER_FINDINGS = {
-    WarningKind.RESIDUAL_LEAKAGE: "the answer may still reveal sensitive data",
-    WarningKind.FAITHFULNESS: "the answer may not follow from the context",
+    VerifierCheck.RESIDUAL_LEAKAGE: "the answer may still reveal sensitive data",
+    VerifierCheck.FAITHFULNESS: "the answer may not follow from the context",
 }
 
 
@@ -336,7 +335,7 @@ class RagCLI:
                 "No sanitized context yet: ask a question with privacy mode on first."
             )
             return
-        from mmore.privacy.runner import render_chunks
+        from mmore.privacy.gate_ui import render_chunks
 
         query = {
             "raw": result.get("input", ""),
@@ -508,9 +507,9 @@ class RagCLI:
                 f"{bar} checked {names} against the raw context: no issue found"
             )
         for warning in warnings:
-            kind = WarningKind(warning["kind"])
+            kind = VerifierCheck(warning["kind"])
             finding = _VERIFIER_FINDINGS[kind]
-            if kind is WarningKind.RESIDUAL_LEAKAGE and warning["entity_type"]:
+            if kind is VerifierCheck.RESIDUAL_LEAKAGE and warning["entity_type"]:
                 finding = f"{finding} ({warning['entity_type']})"
             detail = f"confidence {warning['confidence']:.2f}"
             if warning["count"] > 1:
