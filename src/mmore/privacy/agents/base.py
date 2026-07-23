@@ -6,16 +6,10 @@ a different state (with or without an LLM), and ``node`` exposes the bound
 node so several agents can be combined into one pipeline graph.
 """
 
-from typing import (
-    Annotated,
-    Callable,
-    ClassVar,
-    List,
-    Optional,
-    TypedDict,
-    Union,
-)
+import logging
+from typing import Annotated, Callable, ClassVar, TypedDict
 
+import dspy
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.runnables.config import RunnableConfig
@@ -26,11 +20,13 @@ from typing_extensions import Self
 
 from ...rag.llm import LLM, LLMConfig
 from ...utils import load_config
-from .._cache import MODEL_REGISTRY
-from ..dspy_llm import get_local_hf_pipeline
+from ..dspy_llm import build_dspy_lm, get_local_hf_pipeline
+from ..model_cache import MODEL_REGISTRY
 from .checkpointer import build_checkpointer
 from .config import AgentConfig
 from .registry import resolve_tools
+
+logger = logging.getLogger(__name__)
 
 _CACHE_PREFIX = "agent_llm"
 
@@ -56,12 +52,6 @@ def _build_chat_model(config: LLMConfig) -> BaseChatModel:
     return LLM.from_config(config)
 
 
-def _get_or_load_llm(config: LLMConfig) -> BaseChatModel:
-    return MODEL_REGISTRY.get_or_load(
-        _llm_cache_key(config), lambda: _build_chat_model(config)
-    )
-
-
 def clear_llm_cache() -> None:
     """Drop all cached agent chat models."""
     MODEL_REGISTRY.clear(prefix=_CACHE_PREFIX)
@@ -70,32 +60,36 @@ def clear_llm_cache() -> None:
 class AgentState(TypedDict):
     """Default typed state shared by all single-node privacy agents."""
 
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 class NodeOutput(TypedDict, total=False):
     """Generic partial state update returned by any agent node."""
 
-    messages: Annotated[List[BaseMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 class BaseAgent:
     """Single LangGraph node compiled from a config."""
 
     state_schema: ClassVar[type] = AgentState
-    node_name: ClassVar[Optional[str]] = None
+    node_name: ClassVar[str | None] = None
+    # Used when the agent needs a DSPy LM but none was configured, None
+    # makes a missing LLM an error instead (i.e. analyzer and adversary leave it to None).
+    fallback_llm_config: ClassVar[LLMConfig | None] = None
 
     def __init__(
         self,
         config,
-        llm_config: Optional[LLMConfig] = None,
-        tools: Optional[List[Callable]] = None,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        llm_config: LLMConfig | None = None,
+        tools: list[Callable] | None = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ):
         self.config = config
         self._llm_config = llm_config
-        self._tools: List[Callable] = list(tools) if tools else []
-        self._llm: Optional[BaseChatModel] = None
+        self._tools: list[Callable] = list(tools) if tools else []
+        self._llm: BaseChatModel | None = None
+        self._dspy_lm: dspy.BaseLM | None = None
         self.checkpointer = checkpointer
         self._owns_checkpointer = False
         self.graph = self._build_graph()
@@ -114,7 +108,7 @@ class BaseAgent:
     def from_config(
         cls,
         config,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ) -> Self:
         if not isinstance(config, AgentConfig):
             config = load_config(config, AgentConfig)
@@ -124,25 +118,54 @@ class BaseAgent:
             checkpointer = build_checkpointer(config)
             owns_checkpointer = True
 
-        tools = resolve_tools(config.tools) if config.tools else []
-
-        agent = cls(config, config.llm, tools, checkpointer)
+        agent = cls(
+            config,
+            config.llm,
+            resolve_tools(config.tools) if config.tools else [],
+            checkpointer,
+        )
         agent._owns_checkpointer = owns_checkpointer
         return agent
 
     @property
-    def llm(self) -> BaseChatModel:
-        """Lazy-load and cache the LLM on first access.
+    def llm_config(self) -> LLMConfig:
+        """The agent's LLM config.
 
         Raises:
             ValueError: if the agent has no LLM configured. An agent whose
-                node never touches the LLM (e.g. the Detector) is valid.
+                node never touches an LLM (e.g. the Detector) is valid.
         """
+        if self._llm_config is None:
+            raise ValueError(f"{type(self).__name__} has no LLM configured.")
+        return self._llm_config
+
+    @property
+    def llm(self) -> BaseChatModel:
+        """Lazy-load and cache the chat model on first access."""
         if self._llm is None:
-            if self._llm_config is None:
-                raise ValueError(f"{type(self).__name__} has no LLM configured.")
-            self._llm = _get_or_load_llm(self._llm_config)
+            config = self.llm_config
+            self._llm = MODEL_REGISTRY.get_or_load(
+                _llm_cache_key(config), lambda: _build_chat_model(config)
+            )
         return self._llm
+
+    @property
+    def dspy_lm(self) -> dspy.BaseLM:
+        """Lazy-build and cache the DSPy LM the agent's predictors run under."""
+        if self._dspy_lm is None:
+            if self._llm_config is None:
+                if self.fallback_llm_config is None:
+                    raise ValueError(
+                        f"{type(self).__name__} requires an LLM but none is configured."
+                    )
+                logger.warning(
+                    "No LLM configured for the %s, falling back to %r",
+                    self.name,
+                    self.fallback_llm_config.llm_name,
+                )
+                self._llm_config = self.fallback_llm_config
+            self._dspy_lm = build_dspy_lm(self._llm_config)
+        return self._dspy_lm
 
     def release(self) -> None:
         """Release LLM and close checkpointer resources if necessary."""
@@ -171,31 +194,20 @@ class BaseAgent:
         return graph.compile(checkpointer=self.checkpointer)
 
     def _node(self, state) -> NodeOutput:
-        messages: List[BaseMessage] = list(state["messages"])
+        messages: list[BaseMessage] = list(state["messages"])
         if self.system_prompt:
             messages = [SystemMessage(content=self.system_prompt), *messages]
         llm = self.llm.bind_tools(self._tools) if self._tools else self.llm
         if self._llm_config is not None:
             llm = llm.bind(**self._llm_config.bind_kwargs)
-        response = llm.invoke(messages)
-        return NodeOutput(messages=[response])
+        return NodeOutput(messages=[llm.invoke(messages)])
 
     def invoke(
         self,
-        query: Union[str, AgentState],
-        config: Optional[RunnableConfig] = None,
+        query: str | AgentState,
+        config: RunnableConfig | None = None,
     ) -> dict:
-        """Run the agent graph on the given query.
-
-        Args:
-            query: A user message string or a pre-built state dict.
-            config: Optional LangGraph runtime config.
-
-        Returns:
-            The final graph state dict.
-        """
+        """Run the agent graph on a user message or a pre-built state dict."""
         if isinstance(query, str):
-            input_state: AgentState = {"messages": [HumanMessage(content=query)]}
-        else:
-            input_state = query
-        return self.graph.invoke(input_state, config=config)
+            query = AgentState(messages=[HumanMessage(content=query)])
+        return self.graph.invoke(query, config=config)

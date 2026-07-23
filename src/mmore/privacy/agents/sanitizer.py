@@ -9,51 +9,36 @@ sanitization strategy from the tool registry and applies it to each chunk.
 """
 
 import logging
-from typing import Callable, List, Optional
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from typing_extensions import Self
 
 from ...rag.llm import LLMConfig
-from ...utils import load_config
-from ..config import PrivacyConfig
+from ..config import PrivacyConfig, as_privacy_config
 from ..detection.base import PIISpan
 from ..detection.constants import DEFAULT_LLM_CONFIG
-from ..dspy_llm import build_dspy_lm
-from ..policy import PrivacyPolicy
+from ..sanitization.base import SanitizationTool
 from ..sanitization.constants import SANITIZATION_TOOL_NAMES
+from ..schemas.policy import PrivacyPolicy
 from .base import BaseAgent
-from .registry import tool_registry
+from .registry import ToolNotRegisteredError, resolve_tool
 from .state import PrivacyState
 
 logger = logging.getLogger(__name__)
 
-
-# ========================================================================
-# Helpers
-# ========================================================================
+_LLM_BACKED_STRATEGY = "synthetic_rewrite"
 
 
-def _resolve_strategy_tool(strategy_short: str) -> Callable[..., List[str]]:
-    """Resolve the strategy short name to a registered sanitization tool callable."""
-    tool_name = SANITIZATION_TOOL_NAMES.get(strategy_short)
+def _resolve_strategy_tool(strategy: str) -> SanitizationTool:
+    """Resolve a strategy short name to its registered sanitization tool."""
+    tool_name = SANITIZATION_TOOL_NAMES.get(strategy)
     if tool_name is None:
-        raise KeyError(
-            f"Unknown sanitization strategy '{strategy_short}'. "
+        raise ToolNotRegisteredError(
+            f"Unknown sanitization strategy '{strategy}'. "
             f"Known strategies: {sorted(SANITIZATION_TOOL_NAMES)}"
         )
-    if tool_name not in tool_registry:
-        raise KeyError(
-            f"Sanitization tool '{tool_name}' is not registered. "
-            f"Available tools: {sorted(tool_registry.keys())}"
-        )
-    return tool_registry[tool_name]
-
-
-# ========================================================================
-# Agent
-# ========================================================================
+    return resolve_tool(tool_name)
 
 
 class SanitizerAgent(BaseAgent):
@@ -61,52 +46,38 @@ class SanitizerAgent(BaseAgent):
 
     state_schema = PrivacyState
     node_name = "sanitizer"
+    fallback_llm_config = DEFAULT_LLM_CONFIG
 
     def __init__(
         self,
         config: PrivacyConfig,
-        llm_config: Optional[LLMConfig] = None,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        llm_config: LLMConfig | None = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ):
-        self._dspy_lm: Optional[dspy.BaseLM] = None
         super().__init__(config, llm_config=llm_config, checkpointer=checkpointer)
 
     @classmethod
     def from_config(
         cls,
         config: PrivacyConfig | str,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ) -> Self:
-        if not isinstance(config, PrivacyConfig):
-            config = load_config(config, PrivacyConfig)
-        llm_config = config.sanitization.llm if config.sanitization else None
+        config = as_privacy_config(config)
+        llm_config = config.sanitization.llm
         if llm_config is None and config.context_analyzer:
             llm_config = config.context_analyzer.llm
         return cls(config, llm_config, checkpointer=checkpointer)
 
-    def _ensure_dspy_lm(self) -> dspy.BaseLM:
-        """Lazily build the DSPy LM when sanitization method requires an LLM."""
-        if self._dspy_lm is None:
-            if self._llm_config is None:
-                logger.warning(
-                    "No sanitization or analyzer LLM configured, falling back "
-                    "to default LLM %r",
-                    DEFAULT_LLM_CONFIG.llm_name,
-                )
-                self._llm_config = DEFAULT_LLM_CONFIG
-            self._dspy_lm = build_dspy_lm(self._llm_config)
-        return self._dspy_lm
-
     def sanitize(
         self,
         policy: PrivacyPolicy,
-        chunks: List[str],
-        spans_per_chunk: List[List[PIISpan]],
-    ) -> List[str]:
+        chunks: list[str],
+        spans_per_chunk: list[list[PIISpan]],
+    ) -> list[str]:
         """Apply ``policy.sanitization_strategy`` to ``chunks``."""
         tool = _resolve_strategy_tool(policy.sanitization_strategy)
-        if policy.sanitization_strategy == "synthetic_rewrite":
-            with dspy.context(lm=self._ensure_dspy_lm()):
+        if policy.sanitization_strategy == _LLM_BACKED_STRATEGY:
+            with dspy.context(lm=self.dspy_lm):
                 return tool(chunks, spans_per_chunk, policy)
         return tool(chunks, spans_per_chunk, policy)
 
@@ -119,10 +90,15 @@ class SanitizerAgent(BaseAgent):
         spans_per_chunk = list(state.get("spans") or [[] for _ in chunks])
         if len(spans_per_chunk) != len(chunks):
             raise ValueError(
-                f"spans/raw_chunks length mismatch: {len(spans_per_chunk)} != {len(chunks)}"
+                f"spans/raw_chunks length mismatch: "
+                f"{len(spans_per_chunk)} != {len(chunks)}"
             )
-        sanitized = self.sanitize(policy, chunks, spans_per_chunk)
-        query = state.get("query", "")
         query_spans = list(state.get("query_spans") or [])
-        sanitized_query = self.sanitize(policy, [query], [query_spans])[0]
-        return PrivacyState(sanitized_chunks=sanitized, sanitized_query=sanitized_query)
+        return PrivacyState(
+            sanitized_chunks=self.sanitize(policy, chunks, spans_per_chunk),
+            # the query is a single item, and because sanitization is done in batch
+            # we take the result at index 0
+            sanitized_query=self.sanitize(
+                policy, [state.get("query", "")], [query_spans]
+            )[0],
+        )

@@ -5,15 +5,15 @@ its own: each graph node announces the agent it is about to run and the RAG
 runner renders it on the surface it owns (a shared bar, or a live status).
 """
 
+import logging
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable
 
 from rich.markup import escape
 
 from ..ux import Color
 
-PRIVACY_NAME = "Privacy"
 PRIVACY_EMOJI = "🛡"
 
 # The one stage that is not part of the privacy pipeline
@@ -40,7 +40,7 @@ _TOOL_NAMES = {
 }
 
 
-def tool_name(tool: Union[str, Enum]) -> str:
+def tool_name(tool: str | Enum) -> str:
     value: str = tool.value if isinstance(tool, Enum) else tool
     return _TOOL_NAMES.get(value, value.replace("_", " ").capitalize())
 
@@ -57,11 +57,11 @@ class Stage:
 StageCallback = Callable[[Stage], None]
 NoticeCallback = Callable[[str], None]
 
-_stage_callback: Optional[StageCallback] = None
-_notice_callback: Optional[NoticeCallback] = None
+_stage_callback: StageCallback | None = None
+_notice_callback: NoticeCallback | None = None
 
 
-def set_stage_callback(callback: Optional[StageCallback]) -> None:
+def set_stage_callback(callback: StageCallback | None) -> None:
     """Route the pipeline's stages to a renderer."""
     global _stage_callback
     _stage_callback = callback
@@ -73,7 +73,7 @@ def report_stage(stage: Stage) -> None:
         _stage_callback(stage)
 
 
-def set_notice_callback(callback: Optional[NoticeCallback]) -> None:
+def set_notice_callback(callback: NoticeCallback | None) -> None:
     """Route the pipeline's one-off notices to a renderer."""
     global _notice_callback
     _notice_callback = callback
@@ -85,6 +85,12 @@ def report_notice(message: str) -> bool:
         return False
     _notice_callback(message)
     return True
+
+
+def notify(message: str, fallback: logging.Logger) -> None:
+    """Surface a one-off event, falling back to the log when nothing renders."""
+    if not report_notice(message):
+        fallback.warning(message)
 
 
 def _draw_stage(surface: Any, stage: Stage) -> None:

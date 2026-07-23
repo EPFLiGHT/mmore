@@ -1,16 +1,20 @@
 """HuggingFace ``openai/privacy-filter`` PII detection engine."""
 
 import logging
-from typing import TYPE_CHECKING, List
+from typing import TYPE_CHECKING
 
 from typing_extensions import Self
 
-from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..config import DetectionConfig, DetectionEngineType
-from ..policy import PrivacyPolicy
+from ..model_cache import MODEL_REGISTRY
+from ..schemas.policy import PrivacyPolicy
 from .base import DetectionEngine, PIISpan
-from .constants import DEFAULT_CONFIDENCE_THRESHOLD, DEFAULT_OPENAI_FILTER_MODEL
+from .constants import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_OPENAI_FILTER_MODEL,
+    threshold_or_default,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -23,10 +27,7 @@ _CACHE_PREFIX = DetectionEngineType.OPENAI_FILTER.value
 def _load_openai_filter_pipeline(model_name: str) -> "TokenClassificationPipeline":
     from transformers import pipeline
 
-    return pipeline(
-        task="token-classification",
-        model=model_name,
-    )
+    return pipeline(task="token-classification", model=model_name)
 
 
 def clear_openai_filter_cache() -> None:
@@ -54,11 +55,7 @@ class OpenAIFilterEngine(DetectionEngine):
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
         return cls(
-            confidence_threshold=(
-                config.confidence_threshold
-                if config.confidence_threshold is not None
-                else DEFAULT_CONFIDENCE_THRESHOLD
-            ),
+            confidence_threshold=threshold_or_default(config.confidence_threshold)
         )
 
     @property
@@ -68,19 +65,19 @@ class OpenAIFilterEngine(DetectionEngine):
             lambda: _load_openai_filter_pipeline(self._model_name),
         )
 
-    def detect(self, text: str) -> List[PIISpan]:
-        raw = self.pipeline(text)
-        spans: List[PIISpan] = []
-        for r in raw:
-            score = float(r["score"])
+    def detect(self, text: str) -> list[PIISpan]:
+        spans: list[PIISpan] = []
+        for prediction in self.pipeline(text):
+            score = float(prediction["score"])
             if score < self._confidence_threshold:
                 continue
-            label = str(r.get("entity_group") or r.get("entity") or "")
             spans.append(
                 PIISpan(
-                    start=int(r["start"]),
-                    end=int(r["end"]),
-                    label=label,
+                    start=int(prediction["start"]),
+                    end=int(prediction["end"]),
+                    label=str(
+                        prediction.get("entity_group") or prediction.get("entity") or ""
+                    ),
                     score=score,
                 )
             )
@@ -88,7 +85,7 @@ class OpenAIFilterEngine(DetectionEngine):
 
 
 @register_tool("detect_pii_openai_filter")
-def detect_pii_openai_filter(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+def detect_pii_openai_filter(text: str, policy: PrivacyPolicy) -> list[PIISpan]:
     """Detect PII spans in ``text`` using an openai/privacy-filter engine
     configured from ``policy``."""
     if policy.sensitive_entities:

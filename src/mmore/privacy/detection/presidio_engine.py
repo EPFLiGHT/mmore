@@ -6,21 +6,22 @@ possibility to add custom clinical recognizers.
 
 import importlib
 import logging
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from typing_extensions import Self
 
 from ...ux import loading_model
-from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..config import DetectionConfig, DetectionEngineType
-from ..domains.profile import PRESIDIO_CLINICAL_PATTERNS
-from ..policy import PrivacyPolicy
+from ..model_cache import MODEL_REGISTRY
+from ..schemas.policy import PrivacyPolicy
 from .base import DetectionEngine, PIISpan
 from .constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_LANGUAGE,
     DEFAULT_PRESIDIO_SPACY_MODEL,
+    PRESIDIO_CLINICAL_PATTERNS,
+    threshold_or_default,
 )
 
 if TYPE_CHECKING:
@@ -37,33 +38,28 @@ def _ensure_spacy_model(model_name: str) -> None:
 
     if spacy.util.is_package(model_name):
         return
-    logger.warning(
-        "spaCy model %r not found, downloading it...",
-        model_name,
-    )
+    logger.warning("spaCy model %r not found, downloading it...", model_name)
     from spacy.cli.download import download
 
     download(model_name)
     importlib.invalidate_caches()
 
 
-def _build_clinical_recognizers() -> "List[PatternRecognizer]":
+def _build_clinical_recognizers() -> "list[PatternRecognizer]":
     """Build the clinical-domain custom recognizers."""
     from presidio_analyzer import Pattern, PatternRecognizer
 
-    recognizers: List[PatternRecognizer] = []
-    for spec in PRESIDIO_CLINICAL_PATTERNS:
-        recognizers.append(
-            PatternRecognizer(
-                supported_entity=spec["entity"],
-                patterns=[
-                    Pattern(name=name, regex=regex, score=score)
-                    for name, regex, score in spec["patterns"]
-                ],
-                context=list(spec["context"]),
-            )
+    return [
+        PatternRecognizer(
+            supported_entity=spec["entity"],
+            patterns=[
+                Pattern(name=name, regex=regex, score=score)
+                for name, regex, score in spec["patterns"]
+            ],
+            context=list(spec["context"]),
         )
-    return recognizers
+        for spec in PRESIDIO_CLINICAL_PATTERNS
+    ]
 
 
 def _load_presidio_analyzer() -> "AnalyzerEngine":
@@ -95,11 +91,12 @@ class PresidioEngine(DetectionEngine):
 
     def __init__(
         self,
-        sensitive_entities: Optional[Sequence[str]] = None,
+        sensitive_entities: Sequence[str] | None = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         language: str = DEFAULT_LANGUAGE,
     ):
-        self._sensitive_entities: Optional[List[str]] = (
+        # None means every entity type Presidio knows about
+        self._sensitive_entities = (
             list(sensitive_entities) if sensitive_entities else None
         )
         self._confidence_threshold = confidence_threshold
@@ -109,11 +106,7 @@ class PresidioEngine(DetectionEngine):
     def from_config(cls, config: DetectionConfig) -> Self:
         return cls(
             sensitive_entities=config.entity_types or None,
-            confidence_threshold=(
-                config.confidence_threshold
-                if config.confidence_threshold is not None
-                else DEFAULT_CONFIDENCE_THRESHOLD
-            ),
+            confidence_threshold=threshold_or_default(config.confidence_threshold),
         )
 
     @property
@@ -122,7 +115,7 @@ class PresidioEngine(DetectionEngine):
             f"{_CACHE_PREFIX}:{DEFAULT_PRESIDIO_SPACY_MODEL}", _load_presidio_analyzer
         )
 
-    def detect(self, text: str) -> List[PIISpan]:
+    def detect(self, text: str) -> list[PIISpan]:
         results = self.analyzer.analyze(
             text=text,
             language=self._language,
@@ -141,7 +134,7 @@ class PresidioEngine(DetectionEngine):
 
 
 @register_tool("detect_pii_presidio")
-def detect_pii_presidio(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+def detect_pii_presidio(text: str, policy: PrivacyPolicy) -> list[PIISpan]:
     """Detect PII spans in ``text`` using a Presidio engine configured from ``policy``."""
     engine = PresidioEngine(
         sensitive_entities=policy.sensitive_entities or None,

@@ -6,22 +6,23 @@ Writes:    policy
 
 One node in the privacy multi-agent pipeline: picks the privacy domain
 (explicit config or inferred from the query and raw chunks) and emits
-the per-request PrivacyPolicy the next agents consume.
+the per-request PrivacyPolicy the next agents consume. On re-entry it is also
+the single policy authority: it hardens the policy from the adversary's
+remediation report or from the human's gate feedback.
 """
 
 import logging
 import re
 import secrets
 from dataclasses import asdict, replace
-from typing import Dict, List, Literal, Optional, Union
+from typing import Literal
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from typing_extensions import Self
 
 from ...rag.llm import LLMConfig
-from ...utils import load_config
-from ..config import PrivacyConfig
+from ..config import PrivacyConfig, as_privacy_config
 from ..detection.constants import (
     DETECTION_DEFAULT_PARAMS,
     DETECTION_GUIDANCE,
@@ -29,20 +30,20 @@ from ..detection.constants import (
     DETECTION_TOOL_NAMES,
     THRESHOLD_LEVELS,
 )
-from ..domains.profile import DOMAIN_PROFILES, get_domain_profile
-from ..dspy_llm import TolerantJSONAdapter, build_dspy_lm
-from ..escalation import apply_entity_guidance
-from ..leakage import EscalationRecord
-from ..policy import PrivacyPolicy
+from ..domains import DOMAIN_PROFILES, get_domain_profile
+from ..dspy_llm import TolerantJSONAdapter, format_guidance
 from ..sanitization.constants import (
     PRESIDIO_OPERATOR_GUIDANCE,
     SANITIZATION_GUIDANCE,
     SANITIZATION_TOOL_NAMES,
 )
+from ..schemas.leakage import EscalationRecord
+from ..schemas.policy import PrivacyPolicy, harden
+from ..schemas.report import PreCloudOutcome
 from ..ux import report_notice
 from .base import BaseAgent
 from .registry import tool_registry
-from .state import PreCloudOutcome, PrivacyState
+from .state import PrivacyState
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +153,9 @@ _DETECTION_INSTRUCTION_DESC = (
 _MAX_ADDITIONAL_ENTITIES = 8
 _LABEL_NON_ID_RE = re.compile(r"[^A-Z0-9_]")
 
+# Values the feedback predictor returns to mean "do not touch this field"
+_UNCHANGED = ("keep", "none", "")
+
 
 # ========================================================================
 # DSPy signatures
@@ -178,16 +182,16 @@ class _EngineSelectSignature(dspy.Signature):
 class _LabelExpandSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
-    additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
+    current_entities: list[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
+    additional_entities: list[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
 
 
 class _FeedbackLabelExpandSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    current_entities: List[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
+    current_entities: list[str] = dspy.InputField(desc=_CURRENT_ENTITIES_DESC)
     feedback: str = dspy.InputField(desc=_FEEDBACK_DESC)
-    additional_entities: List[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
+    additional_entities: list[str] = dspy.OutputField(desc=_ADDITIONAL_ENTITIES_DESC)
 
 
 class _FeedbackPolicySignature(dspy.Signature):
@@ -195,8 +199,8 @@ class _FeedbackPolicySignature(dspy.Signature):
     engine_guidance: str = dspy.InputField(desc=_DETECTION_GUIDANCE_DESC)
     strategy_guidance: str = dspy.InputField(desc=_STRATEGY_GUIDANCE_DESC)
     operator_guidance: str = dspy.InputField(desc=_OPERATOR_GUIDANCE_DESC)
-    available_engines: List[str] = dspy.InputField(desc=_AVAILABLE_ENGINES_DESC)
-    available_strategies: List[str] = dspy.InputField(desc=_AVAILABLE_STRATEGIES_DESC)
+    available_engines: list[str] = dspy.InputField(desc=_AVAILABLE_ENGINES_DESC)
+    available_strategies: list[str] = dspy.InputField(desc=_AVAILABLE_STRATEGIES_DESC)
     requested_engine: str = dspy.OutputField(desc=_REQUESTED_ENGINE_DESC)
     requested_strategy: str = dspy.OutputField(desc=_REQUESTED_STRATEGY_DESC)
     requested_threshold: str = dspy.OutputField(desc=_REQUESTED_THRESHOLD_DESC)
@@ -205,7 +209,7 @@ class _FeedbackPolicySignature(dspy.Signature):
     detection_instruction: str = dspy.OutputField(desc=_DETECTION_INSTRUCTION_DESC)
 
 
-class _PresidioParamsSignature(dspy.Signature):
+class _ThresholdParamsSignature(dspy.Signature):
     query: str = dspy.InputField(desc=_QUERY_DESC)
     context: str = dspy.InputField(desc=_CONTEXT_DESC)
     param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
@@ -214,124 +218,67 @@ class _PresidioParamsSignature(dspy.Signature):
     )
 
 
-class _GLiNERParamsSignature(dspy.Signature):
-    query: str = dspy.InputField(desc=_QUERY_DESC)
-    context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
-    threshold_level: Literal["low", "medium", "high"] = dspy.OutputField(
-        desc=_THRESHOLD_OUTPUT_DESC
-    )
+class _GLiNERParamsSignature(_ThresholdParamsSignature):
     multi_label: bool = dspy.OutputField(
         desc="true to allow overlapping label assignments on the same span"
     )
 
 
-class _OpenAIFilterParamsSignature(dspy.Signature):
-    query: str = dspy.InputField(desc=_QUERY_DESC)
-    context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
-    threshold_level: Literal["low", "medium", "high"] = dspy.OutputField(
-        desc=_THRESHOLD_OUTPUT_DESC
-    )
-
-
-class _LLMDetectionParamsSignature(dspy.Signature):
-    query: str = dspy.InputField(desc=_QUERY_DESC)
-    context: str = dspy.InputField(desc=_CONTEXT_DESC)
-    param_guidance: str = dspy.InputField(desc=_PARAM_GUIDANCE_DESC)
-    threshold_level: Literal["low", "medium", "high"] = dspy.OutputField(
-        desc=_THRESHOLD_OUTPUT_DESC
-    )
-
-
-_PARAM_SIGNATURES: Dict[str, type[dspy.Signature]] = {
-    "presidio": _PresidioParamsSignature,
+# Engines other than GLiNER expose the threshold only
+_PARAM_SIGNATURES: dict[str, type[dspy.Signature]] = {
+    "presidio": _ThresholdParamsSignature,
     "gliner": _GLiNERParamsSignature,
-    "openai_filter": _OpenAIFilterParamsSignature,
-    "llm": _LLMDetectionParamsSignature,
+    "openai_filter": _ThresholdParamsSignature,
+    "llm": _ThresholdParamsSignature,
 }
 
 
 # ========================================================================
-# Predictors and helpers
+# Helpers
 # ========================================================================
 
 
-def _build_domain_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _DomainClassifySignature.with_instructions(_DOMAIN_CLASSIFY_INSTRUCTION)
-    )
+def _predictor(signature: type[dspy.Signature], instruction: str) -> dspy.Predict:
+    return dspy.Predict(signature.with_instructions(instruction))
 
 
-def _build_detection_engine_selector_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _EngineSelectSignature.with_instructions(_ENGINE_SELECT_INSTRUCTION)
-    )
+def _read(prediction: dspy.Prediction, field: str) -> str:
+    """Read one output field as a normalized lowercase string."""
+    return str(getattr(prediction, field, "")).strip().lower()
 
 
-def _build_label_expansion_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _LabelExpandSignature.with_instructions(_LABEL_EXPAND_INSTRUCTION)
-    )
-
-
-def _build_feedback_label_expansion_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _FeedbackLabelExpandSignature.with_instructions(
-            _FEEDBACK_LABEL_EXPAND_INSTRUCTION
-        )
-    )
-
-
-def _build_feedback_policy_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _FeedbackPolicySignature.with_instructions(_FEEDBACK_POLICY_INSTRUCTION)
-    )
-
-
-def _sanitize_label_additions(raw: object, current: List[str]) -> List[str]:
+def _clean_label_additions(raw: object, current: list[str]) -> list[str]:
     """Clean the LLM's proposed labels: uppercase, strip, drop empties and
     labels already in ``current``, cap at the configured maximum."""
     if not isinstance(raw, list):
         return []
-    current_set = set(current)
-    seen: set[str] = set()
-    cleaned: List[str] = []
+    known = set(current)
+    cleaned: list[str] = []
     for item in raw:
         if not isinstance(item, str):
             continue
         label = _LABEL_NON_ID_RE.sub("", item.strip().upper())
-        if not label or label in current_set or label in seen:
+        if not label or label in known:
             continue
-        seen.add(label)
+        known.add(label)
         cleaned.append(label)
         if len(cleaned) >= _MAX_ADDITIONAL_ENTITIES:
             break
     return cleaned
 
 
-def _build_param_predictor(engine: str) -> dspy.Predict | None:
-    """Build the DSPy predictor for the engine's param signature, or None."""
-    sig = _PARAM_SIGNATURES.get(engine)
-    if sig is None:
-        return None
-    return dspy.Predict(sig.with_instructions(_PARAM_SELECT_INSTRUCTION))
-
-
 def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
     """Short, human-readable label for what the guidance actually changed."""
-    changes: List[str] = []
+    changes: list[str] = []
     if new.detection_engine != old.detection_engine:
         changes.append(f"detecting with {new.detection_engine}")
     if new.sanitization_strategy != old.sanitization_strategy:
         changes.append(f"sanitizing with {new.sanitization_strategy}")
-    old_threshold = old.detection_params.get("confidence_threshold")
     new_threshold = new.detection_params.get("confidence_threshold")
-    if new_threshold != old_threshold:
+    if new_threshold != old.detection_params.get("confidence_threshold"):
         changes.append(f"detection threshold {new_threshold}")
-    old_operator = old.sanitization_params.get("operator")
     new_operator = new.sanitization_params.get("operator")
-    if new_operator != old_operator:
+    if new_operator != old.sanitization_params.get("operator"):
         changes.append(f"{new_operator} operator")
     if new.sanitizer_system_prompt != old.sanitizer_system_prompt:
         changes.append("new rewrite instruction")
@@ -341,22 +288,6 @@ def _describe_policy_changes(old: PrivacyPolicy, new: PrivacyPolicy) -> str:
     if added_labels:
         changes.append(f"{added_labels} more entity labels")
     return ", ".join(changes) if changes else "same policy, stricter guidance"
-
-
-def _format_engine_guidance() -> str:
-    return "\n".join(f"- {name}: {desc}" for name, desc in DETECTION_GUIDANCE.items())
-
-
-def _format_strategy_guidance() -> str:
-    return "\n".join(
-        f"- {name}: {desc}" for name, desc in SANITIZATION_GUIDANCE.items()
-    )
-
-
-def _format_operator_guidance() -> str:
-    return "\n".join(
-        f"- {name}: {desc}" for name, desc in PRESIDIO_OPERATOR_GUIDANCE.items()
-    )
 
 
 def _detection_unchanged(old: PrivacyPolicy, new: PrivacyPolicy) -> bool:
@@ -369,31 +300,32 @@ def _detection_unchanged(old: PrivacyPolicy, new: PrivacyPolicy) -> bool:
     )
 
 
-def _pin_rewrite_instruction(prompt: str, instruction: str) -> str:
-    """Append the reviewer's rewrite instruction to the prompt, idempotently."""
-    if not instruction or instruction.lower() in ("none", "keep"):
+def _pin_instruction(prompt: str, instruction: str) -> str:
+    """Append the reviewer's instruction to the prompt, idempotently."""
+    if not instruction or instruction.lower() in _UNCHANGED:
         return prompt
     note = f"Reviewer instruction: {instruction}"
-    if note in prompt:
-        return prompt
-    return f"{prompt} {note}".strip()
+    return prompt if note in prompt else f"{prompt} {note}".strip()
 
 
-def _parse_param_prediction(
-    engine: str, prediction: dspy.Prediction
-) -> Dict[str, Union[float, bool]] | None:
+def _parse_params(engine: str, prediction: dspy.Prediction) -> dict | None:
     """Parse and validate the generated engine parameters."""
-    params: Dict[str, Union[float, bool]] = {}
-    raw_level = str(getattr(prediction, "threshold_level", "")).strip().lower()
-    if raw_level not in THRESHOLD_LEVELS:
+    level = _read(prediction, "threshold_level")
+    if level not in THRESHOLD_LEVELS:
         return None
-    params["confidence_threshold"] = THRESHOLD_LEVELS[raw_level]
+    params: dict[str, float | bool] = {"confidence_threshold": THRESHOLD_LEVELS[level]}
     if engine == "gliner":
-        value = getattr(prediction, "multi_label", None)
-        if not isinstance(value, bool):
+        multi_label = getattr(prediction, "multi_label", None)
+        if not isinstance(multi_label, bool):
             return None
-        params["multi_label"] = value
+        params["multi_label"] = multi_label
     return params
+
+
+def _engine_is_available(engine: str) -> bool:
+    return (
+        engine in DETECTION_TOOL_NAMES and DETECTION_TOOL_NAMES[engine] in tool_registry
+    )
 
 
 # ========================================================================
@@ -410,76 +342,149 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
     def __init__(
         self,
         config: PrivacyConfig,
-        llm_config: Optional[LLMConfig] = None,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        llm_config: LLMConfig | None = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ):
-        self._dspy_lm: Optional[dspy.BaseLM] = None
         super().__init__(config, llm_config=llm_config, checkpointer=checkpointer)
 
     @classmethod
     def from_config(
         cls,
         config: PrivacyConfig | str,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ) -> Self:
-        if not isinstance(config, PrivacyConfig):
-            config = load_config(config, PrivacyConfig)
+        config = as_privacy_config(config)
         llm_config = config.context_analyzer.llm if config.context_analyzer else None
         return cls(config, llm_config, checkpointer=checkpointer)
 
-    def _ensure_dspy_lm(self) -> dspy.BaseLM:
-        """Lazily build the DSPy LM, raising an error if no LLM is configured."""
-        if self._dspy_lm is None:
-            if self._llm_config is None:
-                raise ValueError(
-                    "Analyzer agent requires an LLM to predict privacy policy parameters."
-                )
-            self._dspy_lm = build_dspy_lm(self._llm_config)
-        return self._dspy_lm
+    # -- DSPy calls ------------------------------------------------------
 
-    def _infer_domain(self, query: str, chunks: List[str]) -> str:
-        self._ensure_dspy_lm()
-        predictor = _build_domain_predictor()
+    def _run(
+        self,
+        lm: dspy.BaseLM,
+        signature: type[dspy.Signature],
+        instruction: str,
+        adapter: dspy.Adapter | None = None,
+        **inputs,
+    ) -> dspy.Prediction:
+        with dspy.context(lm=lm, **({"adapter": adapter} if adapter else {})):
+            return _predictor(signature, instruction)(**inputs)
+
+    def _infer_domain(self, query: str, chunks: list[str]) -> str:
+        lm = self.dspy_lm
         try:
-            with dspy.context(lm=self._dspy_lm):
-                prediction = predictor(query=query, context="\n\n".join(chunks))
+            prediction = self._run(
+                lm,
+                _DomainClassifySignature,
+                _DOMAIN_CLASSIFY_INSTRUCTION,
+                query=query,
+                context="\n\n".join(chunks),
+            )
         except Exception as e:
             logger.warning("Domain inference failed (%s); defaulting to 'global'", e)
             return "global"
-        domain = str(getattr(prediction, "domain", "")).strip().lower()
+        domain = _read(prediction, "domain")
         return domain if domain in DOMAIN_PROFILES else "global"
 
-    def _select_engine(self, query: str, chunks: List[str]) -> str | None:
-        """Pick a detection engine via DSPy."""
-        self._ensure_dspy_lm()
-        predictor = _build_detection_engine_selector_predictor()
+    def _select_engine(self, query: str, chunks: list[str]) -> str | None:
+        """Pick a detection engine via DSPy, or None to keep the profile default."""
+        lm = self.dspy_lm
         try:
-            with dspy.context(lm=self._dspy_lm):
-                prediction = predictor(
-                    query=query,
-                    context="\n\n".join(chunks),
-                    engine_guidance=_format_engine_guidance(),
-                )
+            prediction = self._run(
+                lm,
+                _EngineSelectSignature,
+                _ENGINE_SELECT_INSTRUCTION,
+                query=query,
+                context="\n\n".join(chunks),
+                engine_guidance=format_guidance(DETECTION_GUIDANCE),
+            )
         except Exception as e:
             logger.warning(
-                "Engine selection failed (%s), falling back to profile defaults",
+                "Engine selection failed (%s), falling back to profile defaults", e
+            )
+            return None
+        engine = _read(prediction, "engine")
+        return engine if _engine_is_available(engine) else None
+
+    def _select_params(self, engine: str, query: str, chunks: list[str]) -> dict | None:
+        """Pick ``engine``'s tunable params via DSPy."""
+        signature = _PARAM_SIGNATURES.get(engine)
+        if self._llm_config is None or signature is None:
+            return None
+        lm = self.dspy_lm
+        try:
+            prediction = self._run(
+                lm,
+                signature,
+                _PARAM_SELECT_INSTRUCTION,
+                query=query,
+                context="\n\n".join(chunks),
+                param_guidance=DETECTION_PARAM_GUIDANCE.get(engine, ""),
+            )
+        except Exception as e:
+            logger.warning(
+                "Param selection failed for %s (%s), falling back to engine defaults",
+                engine,
                 e,
             )
             return None
-        engine = str(getattr(prediction, "engine", "")).strip().lower()
-        return (
-            engine
-            if engine in DETECTION_TOOL_NAMES
-            and DETECTION_TOOL_NAMES[engine] in tool_registry
-            else None
+        return _parse_params(engine, prediction)
+
+    def _expand_labels(
+        self, query: str, chunks: list[str], current: list[str]
+    ) -> list[str]:
+        """Propose extra sensitive-entity labels via DSPy."""
+        lm = self.dspy_lm
+        try:
+            prediction = self._run(
+                lm,
+                _LabelExpandSignature,
+                _LABEL_EXPAND_INSTRUCTION,
+                adapter=TolerantJSONAdapter(),
+                query=query,
+                context="\n\n".join(chunks),
+                current_entities=list(current),
+            )
+        except Exception as e:
+            logger.warning(
+                "Label expansion failed (%s), keeping the current entity set", e
+            )
+            return []
+        return _clean_label_additions(
+            getattr(prediction, "additional_entities", None), current
         )
 
+    def _expand_labels_from_feedback(
+        self, state: PrivacyState, policy: PrivacyPolicy, feedback: str
+    ) -> list[str]:
+        """Propose sensitive labels that act on the reviewer's guidance."""
+        if self._llm_config is None or not feedback:
+            return []
+        current = list(policy.sensitive_entities)
+        lm = self.dspy_lm
+        try:
+            prediction = self._run(
+                lm,
+                _FeedbackLabelExpandSignature,
+                _FEEDBACK_LABEL_EXPAND_INSTRUCTION,
+                adapter=TolerantJSONAdapter(),
+                query=state.get("query", ""),
+                context="\n\n".join(state.get("raw_chunks", [])),
+                current_entities=current,
+                feedback=feedback,
+            )
+        except Exception as e:
+            logger.warning("Feedback-driven label expansion failed (%s)", e)
+            return []
+        return _clean_label_additions(
+            getattr(prediction, "additional_entities", None), current
+        )
+
+    # -- Policy construction ---------------------------------------------
+
     def _resolve_engine(self, requested: str, profile_default: str) -> str:
-        """Validate the requested engine."""
-        if (
-            requested in DETECTION_TOOL_NAMES
-            and DETECTION_TOOL_NAMES[requested] in tool_registry
-        ):
+        """Validate the engine pinned in the config."""
+        if _engine_is_available(requested):
             return requested
         logger.warning(
             "The given engine (%s) cannot be resolved, falling back to default (%s)",
@@ -488,128 +493,52 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         )
         return profile_default
 
-    def _expand_labels(
-        self, query: str, chunks: List[str], current: List[str]
-    ) -> List[str]:
-        """Propose extra sensitive-entity labels via DSPy."""
-        self._ensure_dspy_lm()
-        predictor = _build_label_expansion_predictor()
-        try:
-            with dspy.context(lm=self._dspy_lm, adapter=TolerantJSONAdapter()):
-                prediction = predictor(
-                    query=query,
-                    context="\n\n".join(chunks),
-                    current_entities=list(current),
-                )
-        except Exception as e:
-            logger.warning(
-                "Label expansion failed (%s), keeping the current entity set", e
-            )
-            return []
-        return _sanitize_label_additions(
-            getattr(prediction, "additional_entities", None), current
-        )
+    def build_policy(self, query: str, chunks: list[str]) -> PrivacyPolicy:
+        """Resolve the domain and merge profile defaults with config overrides."""
+        domain = self.config.domain or self._infer_domain(query, chunks)
+        profile = get_domain_profile(domain)
+        detection_cfg = self.config.detection
+        sanitization_cfg = self.config.sanitization
 
-    def _expand_labels_from_feedback(
-        self, state: PrivacyState, policy: PrivacyPolicy, feedback: str
-    ) -> List[str]:
-        """Propose sensitive labels that act on the reviewer's guidance."""
-        if self._llm_config is None or not feedback:
-            return []
-        current = list(policy.sensitive_entities)
-        self._ensure_dspy_lm()
-        predictor = _build_feedback_label_expansion_predictor()
-        try:
-            with dspy.context(lm=self._dspy_lm, adapter=TolerantJSONAdapter()):
-                prediction = predictor(
-                    query=state.get("query", ""),
-                    context="\n\n".join(state.get("raw_chunks", [])),
-                    current_entities=current,
-                    feedback=feedback,
-                )
-        except Exception as e:
-            logger.warning("Feedback-driven label expansion failed (%s)", e)
-            return []
-        return _sanitize_label_additions(
-            getattr(prediction, "additional_entities", None), current
-        )
+        if detection_cfg.engine:
+            engine = self._resolve_engine(detection_cfg.engine, profile.default_engine)
+        else:
+            engine = self._select_engine(query, chunks) or profile.default_engine
 
-    def _apply_feedback_overrides(
-        self, policy: PrivacyPolicy, feedback: str, respect_config_pins: bool
-    ) -> PrivacyPolicy:
-        """Switch engine/strategy/threshold per the guidance; pins bind the adversary only."""
-        if self._llm_config is None or not feedback:
-            return policy
-        self._ensure_dspy_lm()
-        predictor = _build_feedback_policy_predictor()
-        try:
-            with dspy.context(lm=self._dspy_lm):
-                prediction = predictor(
-                    feedback=feedback,
-                    engine_guidance=_format_engine_guidance(),
-                    strategy_guidance=_format_strategy_guidance(),
-                    operator_guidance=_format_operator_guidance(),
-                    available_engines=list(DETECTION_TOOL_NAMES),
-                    available_strategies=list(SANITIZATION_TOOL_NAMES),
-                )
-        except Exception as e:
-            logger.warning("Feedback policy override failed (%s)", e)
-            return policy
-        engine = str(getattr(prediction, "requested_engine", "")).strip().lower()
-        strategy = str(getattr(prediction, "requested_strategy", "")).strip().lower()
-        threshold = str(getattr(prediction, "requested_threshold", "")).strip().lower()
-        operator = str(getattr(prediction, "requested_operator", "")).strip().lower()
-        instruction = str(getattr(prediction, "rewrite_instruction", "")).strip()
-        detection_instruction = str(
-            getattr(prediction, "detection_instruction", "")
-        ).strip()
-        engine_pinned = respect_config_pins and self.config.detection.engine
-        strategy_pinned = respect_config_pins and self.config.sanitization.strategy
-        threshold_pinned = (
-            respect_config_pins
-            and self.config.detection.confidence_threshold is not None
-        )
-        updates: Dict[str, object] = {}
-        params = dict(policy.detection_params)
-        params_changed = False
-        if engine in DETECTION_TOOL_NAMES and not engine_pinned:
-            updates["detection_engine"] = engine
-            if engine != policy.detection_engine:
-                current_threshold = params.get("confidence_threshold")
-                params = asdict(DETECTION_DEFAULT_PARAMS[engine])
-                if current_threshold is not None:
-                    params["confidence_threshold"] = current_threshold
-                params_changed = True
-        if strategy in SANITIZATION_TOOL_NAMES and not strategy_pinned:
-            updates["sanitization_strategy"] = strategy
-        if threshold in THRESHOLD_LEVELS and not threshold_pinned:
-            params["confidence_threshold"] = THRESHOLD_LEVELS[threshold]
-            params_changed = True
-        if params_changed:
-            updates["detection_params"] = params
-        # Operator and rewrite instruction only apply under their own strategy
-        final = updates.get("sanitization_strategy", policy.sanitization_strategy)
-        if final == "presidio" and operator in PRESIDIO_OPERATOR_GUIDANCE:
-            updates["sanitization_params"] = {
-                "operator": operator,
-                "operator_params": self._operator_params(operator),
+        defaults = asdict(DETECTION_DEFAULT_PARAMS[engine])
+        if detection_cfg.confidence_threshold is not None:
+            detection_params = defaults | {
+                "confidence_threshold": detection_cfg.confidence_threshold
             }
-        if final == "synthetic_rewrite":
-            prompt = _pin_rewrite_instruction(
-                policy.sanitizer_system_prompt, instruction
-            )
-            if prompt != policy.sanitizer_system_prompt:
-                updates["sanitizer_system_prompt"] = prompt
-        final_engine = updates.get("detection_engine", policy.detection_engine)
-        if final_engine == "llm":
-            detector_prompt = _pin_rewrite_instruction(
-                policy.detector_system_prompt, detection_instruction
-            )
-            if detector_prompt != policy.detector_system_prompt:
-                updates["detector_system_prompt"] = detector_prompt
-        return replace(policy, **updates) if updates else policy
+        else:
+            detection_params = self._select_params(engine, query, chunks) or defaults
 
-    def _operator_params(self, operator: str) -> Dict[str, object]:
+        if detection_cfg.entity_types:
+            sensitive_entities = list(detection_cfg.entity_types)
+        else:
+            sensitive_entities = list(profile.sensitive_entities)
+            sensitive_entities += self._expand_labels(query, chunks, sensitive_entities)
+
+        return PrivacyPolicy(
+            domain=domain,
+            sensitive_entities=sensitive_entities,
+            detection_engine=engine,
+            detection_params=detection_params,
+            sanitization_strategy=(
+                sanitization_cfg.strategy or profile.default_strategy
+            ),
+            consistency=(
+                profile.default_consistency
+                if sanitization_cfg.consistency is None
+                else sanitization_cfg.consistency
+            ),
+            domain_prompt=profile.domain_prompt,
+            sanitizer_system_prompt=profile.sanitizer_system_prompt,
+        )
+
+    # -- Escalation ------------------------------------------------------
+
+    def _operator_params(self, operator: str) -> dict[str, object]:
         """Default params for a presidio operator."""
         if operator == "mask":
             return {"masking_char": "*", "chars_to_mask": 128, "from_end": False}
@@ -624,98 +553,102 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             return {"key": key}
         return {}
 
-    def _select_params(
-        self, engine: str, query: str, chunks: List[str]
-    ) -> Dict[str, Union[float, bool]] | None:
-        """Pick ``engine``'s tunable params via DSPy."""
-        if self._llm_config is None:
-            return None
-        predictor = _build_param_predictor(engine)
-        if predictor is None:
-            return None
-        self._ensure_dspy_lm()
+    def _apply_feedback_overrides(
+        self, policy: PrivacyPolicy, feedback: str, respect_config_pins: bool
+    ) -> PrivacyPolicy:
+        """Switch engine/strategy/threshold per the guidance; pins bind the adversary only."""
+        if self._llm_config is None or not feedback:
+            return policy
+        lm = self.dspy_lm
         try:
-            with dspy.context(lm=self._dspy_lm):
-                prediction = predictor(
-                    query=query,
-                    context="\n\n".join(chunks),
-                    param_guidance=DETECTION_PARAM_GUIDANCE.get(engine, ""),
-                )
+            prediction = self._run(
+                lm,
+                _FeedbackPolicySignature,
+                _FEEDBACK_POLICY_INSTRUCTION,
+                feedback=feedback,
+                engine_guidance=format_guidance(DETECTION_GUIDANCE),
+                strategy_guidance=format_guidance(SANITIZATION_GUIDANCE),
+                operator_guidance=format_guidance(PRESIDIO_OPERATOR_GUIDANCE),
+                available_engines=list(DETECTION_TOOL_NAMES),
+                available_strategies=list(SANITIZATION_TOOL_NAMES),
+            )
         except Exception as e:
-            logger.warning(
-                "Param selection failed for %s (%s), falling back to engine defaults",
-                engine,
-                e,
-            )
-            return None
-        return _parse_param_prediction(engine, prediction)
+            logger.warning("Feedback policy override failed (%s)", e)
+            return policy
 
-    def build_policy(self, query: str, chunks: List[str]) -> PrivacyPolicy:
-        """Resolve the domain and merge profile defaults with config overrides."""
-        domain = self.config.domain or self._infer_domain(query, chunks)
-        profile = get_domain_profile(domain)
+        pins = self.config if respect_config_pins else None
+        updates: dict[str, object] = {}
+        params = dict(policy.detection_params)
+        params_changed = False
 
-        detection_cfg = self.config.detection
-        sanitization_cfg = self.config.sanitization
+        engine = _read(prediction, "requested_engine")
+        if engine in DETECTION_TOOL_NAMES and not (pins and pins.detection.engine):
+            updates["detection_engine"] = engine
+            if engine != policy.detection_engine:
+                threshold = params.get("confidence_threshold")
+                params = asdict(DETECTION_DEFAULT_PARAMS[engine])
+                if threshold is not None:
+                    params["confidence_threshold"] = threshold
+                params_changed = True
 
-        if detection_cfg.engine:
-            engine_short = self._resolve_engine(
-                detection_cfg.engine, profile.default_engine
-            )
-        else:
-            engine_short = self._select_engine(query, chunks) or profile.default_engine
+        strategy = _read(prediction, "requested_strategy")
+        if strategy in SANITIZATION_TOOL_NAMES and not (
+            pins and pins.sanitization.strategy
+        ):
+            updates["sanitization_strategy"] = strategy
 
-        defaults = DETECTION_DEFAULT_PARAMS[engine_short]
-        if detection_cfg.confidence_threshold is not None:
-            detection_params = asdict(defaults)
-            detection_params["confidence_threshold"] = (
-                detection_cfg.confidence_threshold
-            )
-        else:
-            selected = self._select_params(engine_short, query, chunks)
-            detection_params = selected if selected is not None else asdict(defaults)
+        threshold_level = _read(prediction, "requested_threshold")
+        if threshold_level in THRESHOLD_LEVELS and not (
+            pins and pins.detection.confidence_threshold is not None
+        ):
+            params["confidence_threshold"] = THRESHOLD_LEVELS[threshold_level]
+            params_changed = True
 
-        strategy = sanitization_cfg.strategy or profile.default_strategy
-        consistency = (
-            sanitization_cfg.consistency
-            if sanitization_cfg.consistency is not None
-            else profile.default_consistency
+        if params_changed:
+            updates["detection_params"] = params
+
+        # Operator and rewrite instruction only apply under their own strategy
+        final_strategy = updates.get(
+            "sanitization_strategy", policy.sanitization_strategy
         )
-        if detection_cfg.entity_types:
-            sensitive_entities = list(detection_cfg.entity_types)
-        else:
-            current_entities = list(profile.sensitive_entities)
-            sensitive_entities = current_entities + self._expand_labels(
-                query, chunks, current_entities
+        operator = _read(prediction, "requested_operator")
+        if final_strategy == "presidio" and operator in PRESIDIO_OPERATOR_GUIDANCE:
+            updates["sanitization_params"] = {
+                "operator": operator,
+                "operator_params": self._operator_params(operator),
+            }
+        if final_strategy == "synthetic_rewrite":
+            prompt = _pin_instruction(
+                policy.sanitizer_system_prompt,
+                str(getattr(prediction, "rewrite_instruction", "")).strip(),
             )
+            if prompt != policy.sanitizer_system_prompt:
+                updates["sanitizer_system_prompt"] = prompt
 
-        return PrivacyPolicy(
-            domain=domain,
-            sensitive_entities=list(sensitive_entities),
-            detection_engine=engine_short,
-            detection_params=detection_params,
-            sanitization_strategy=strategy,
-            consistency=consistency,
-            domain_prompt=profile.domain_prompt,
-            sanitizer_system_prompt=profile.sanitizer_system_prompt,
-        )
+        if updates.get("detection_engine", policy.detection_engine) == "llm":
+            prompt = _pin_instruction(
+                policy.detector_system_prompt,
+                str(getattr(prediction, "detection_instruction", "")).strip(),
+            )
+            if prompt != policy.detector_system_prompt:
+                updates["detector_system_prompt"] = prompt
+
+        return replace(policy, **updates) if updates else policy
 
     def _apply_guidance(
         self,
         state: PrivacyState,
         policy: PrivacyPolicy,
         guidance: str,
-        note_label: str,
+        guidance_label: str,
         respect_config_pins: bool,
     ) -> PrivacyPolicy:
         """Act on a reviewer's guidance text; note-only hardening without one."""
         if not guidance:
-            return apply_entity_guidance(policy)
+            return harden(policy)
         extra_entities = self._expand_labels_from_feedback(state, policy, guidance)
-        new_policy = apply_entity_guidance(
-            policy, extra_entities or None, guidance, note_label=note_label
-        )
-        return self._apply_feedback_overrides(new_policy, guidance, respect_config_pins)
+        hardened = harden(policy, extra_entities or None, guidance, guidance_label)
+        return self._apply_feedback_overrides(hardened, guidance, respect_config_pins)
 
     def _escalate(self, state: PrivacyState, policy: PrivacyPolicy) -> PrivacyState:
         """Re-entry path: harden the policy from the adversary report or gate feedback."""
@@ -724,40 +657,34 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         verdict = state.get("verdict")
         trigger_vector, trigger_entity = None, None
         from_human_feedback = False
+
         if state.get("revision_requested"):
             revision = total_escalations - adversary_escalations + 1
             reason = f"Revision {revision}: acting on your feedback"
             report = (state.get("human_feedback") or "").strip()
             new_policy = self._apply_guidance(
-                state,
-                policy,
-                report,
-                note_label="Human guidance",
-                respect_config_pins=False,
+                state, policy, report, "Human guidance", respect_config_pins=False
             )
             from_human_feedback = bool(report)
         elif verdict is not None and verdict.leaked:
             report = (verdict.recommendation or "").strip()
             new_policy = self._apply_guidance(
-                state,
-                policy,
-                report,
-                note_label="Adversary guidance",
-                respect_config_pins=True,
+                state, policy, report, "Adversary guidance", respect_config_pins=True
             )
             trigger_vector, trigger_entity = verdict.vector, verdict.entity_type
             adversary_escalations += 1
             budget = self.config.leakage_adversary.max_iterations
-            leaked = trigger_entity or "sensitive data"
             vector = (
                 trigger_vector.value.replace("_", " ") if trigger_vector else "a probe"
             )
             reason = (
                 f"Leak {adversary_escalations}/{budget}: the adversary recovered "
-                f"{leaked} via {vector} (confidence {verdict.confidence:.2f})"
+                f"{trigger_entity or 'sensitive data'} via {vector} "
+                f"(confidence {verdict.confidence:.2f})"
             )
         else:
             raise ValueError("escalate called without a leak or a revision")
+
         label = _describe_policy_changes(policy, new_policy)
         record = EscalationRecord(
             iteration=total_escalations + 1,
@@ -774,7 +701,7 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
             policy=new_policy,
             total_escalations=total_escalations + 1,
             adversary_escalations=adversary_escalations,
-            escalation_log=list(state.get("escalation_log", [])) + [record],
+            escalation_log=[*state.get("escalation_log", []), record],
             outcome=PreCloudOutcome.RE_LOOPED,
             human_feedback=None,  # was taken into account already
             revision_requested=False,
@@ -790,8 +717,9 @@ class ContextPolicyAnalyzerAgent(BaseAgent):
         """
         policy = state.get("policy")
         if policy is None:
-            policy = self.build_policy(
-                state.get("query", ""), list(state.get("raw_chunks", []))
+            return PrivacyState(
+                policy=self.build_policy(
+                    state.get("query", ""), list(state.get("raw_chunks", []))
+                )
             )
-            return PrivacyState(policy=policy)
         return self._escalate(state, policy)

@@ -4,16 +4,16 @@ Tools are registered programmatically (typically via the ``@register_tool``
 decorator) and referenced from agent YAML configs by name.
 """
 
-from typing import Callable, Dict, List, Optional
+from typing import Callable
 
-tool_registry: Dict[str, Callable] = {}
+tool_registry: dict[str, Callable] = {}
 
 
 class ToolNotRegisteredError(KeyError):
     """Raised when an agent config references a tool name that was never registered."""
 
 
-def register_tool(name: str, fn: Optional[Callable] = None) -> Callable:
+def register_tool(name: str, fn: Callable | None = None) -> Callable:
     """Register ``fn`` under ``name``. Usable as a decorator or direct call.
 
     Examples:
@@ -26,28 +26,23 @@ def register_tool(name: str, fn: Optional[Callable] = None) -> Callable:
         tool_registry[name] = fn
         return fn
 
-    else:
+    def decorator(f: Callable) -> Callable:
+        tool_registry[name] = f
+        return f
 
-        def decorator(f: Callable) -> Callable:
-            tool_registry[name] = f
-            return f
-
-        return decorator
+    return decorator
 
 
-def resolve_tools(names: List[str]) -> List[Callable]:
+def resolve_tool(name: str) -> Callable:
+    """Resolve a single registered tool name into its callable."""
+    try:
+        return tool_registry[name]
+    except KeyError:
+        raise ToolNotRegisteredError(
+            f"Tool '{name}' is not registered. Available tools: {sorted(tool_registry)}"
+        ) from None
+
+
+def resolve_tools(names: list[str]) -> list[Callable]:
     """Resolve a list of tool names into callables."""
-    resolved: List[Callable] = []
-    for tool in names:
-        if tool not in tool_registry:
-            raise ToolNotRegisteredError(
-                f"Tool '{tool}' is not registered. "
-                f"Available tools: {sorted(tool_registry.keys())}"
-            )
-        resolved.append(tool_registry[tool])
-    return resolved
-
-
-def list_tools() -> List[str]:
-    """Return the names of all currently registered tools."""
-    return list(tool_registry.keys())
+    return [resolve_tool(name) for name in names]

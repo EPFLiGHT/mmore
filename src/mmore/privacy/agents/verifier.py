@@ -15,19 +15,18 @@ the model's answer. It runs the configured advisory checks over the answer:
 """
 
 import logging
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable
 
 import dspy
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from typing_extensions import Self
 
 from ...rag.llm import LLMConfig
-from ...utils import load_config
-from ..config import PrivacyConfig, VerifierCheck
+from ..config import PrivacyConfig, VerifierCheck, as_privacy_config
 from ..detection.constants import DEFAULT_LLM_CONFIG
-from ..dspy_llm import build_dspy_lm
-from ..ux import report_notice
-from ..verification import CLEAN_VERDICT, VerifierVerdict, VerifierWarning, WarningKind
+from ..dspy_llm import clamp_confidence
+from ..schemas.verification import CLEAN_VERDICT, VerifierVerdict, VerifierWarning
+from ..ux import notify
 from .base import BaseAgent
 from .state import PrivacyState
 
@@ -92,29 +91,7 @@ class _FaithfulnessSignature(dspy.Signature):
     confidence: float = dspy.OutputField(desc=_CONFIDENCE_DESC)
 
 
-def _build_residual_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _ResidualLeakageSignature.with_instructions(_RESIDUAL_INSTRUCTION)
-    )
-
-
-def _build_faithfulness_predictor() -> dspy.Predict:
-    return dspy.Predict(
-        _FaithfulnessSignature.with_instructions(_FAITHFULNESS_INSTRUCTION)
-    )
-
-
-def _clamp_confidence(value: object) -> float:
-    """Coerce a model-provided confidence into ``[0.0, 1.0]``, 0.0 on failure."""
-    if isinstance(value, (int, float)):
-        return max(0.0, min(1.0, float(value)))
-    try:
-        return max(0.0, min(1.0, float(str(value))))
-    except (TypeError, ValueError):
-        return 0.0
-
-
-def _clean_flagged(value: object) -> str | None:
+def _flagged_or_none(value: object) -> str | None:
     """Normalize a flagged entity/claim, treating empty or NONE as nothing."""
     text = str(value).strip()
     return text if text and text.upper() != "NONE" else None
@@ -130,91 +107,85 @@ class AdvisoryVerifierAgent(BaseAgent):
 
     state_schema = PrivacyState
     node_name = "advisory_verifier"
+    fallback_llm_config = DEFAULT_LLM_CONFIG
 
     def __init__(
         self,
         config: PrivacyConfig,
-        llm_config: Optional[LLMConfig] = None,
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        llm_config: LLMConfig | None = None,
+        checkpointer: BaseCheckpointSaver | None = None,
     ):
-        self._dspy_lm: Optional[dspy.BaseLM] = None
         self._verifier_cfg = config.verifier
         super().__init__(config, llm_config=llm_config, checkpointer=checkpointer)
 
     @classmethod
     def from_config(
         cls,
-        config: Union[PrivacyConfig, str, dict],
-        checkpointer: Optional[BaseCheckpointSaver] = None,
+        config: PrivacyConfig | str | dict,
+        checkpointer: BaseCheckpointSaver | None = None,
     ) -> Self:
-        if not isinstance(config, PrivacyConfig):
-            config = load_config(config, PrivacyConfig)
+        config = as_privacy_config(config)
         llm_config = config.verifier.llm
         if llm_config is None and config.context_analyzer:
             llm_config = config.context_analyzer.llm
         return cls(config, llm_config, checkpointer=checkpointer)
 
     @property
-    def checks(self) -> List[VerifierCheck]:
+    def checks(self) -> list[VerifierCheck]:
         return list(self._verifier_cfg.checks)
 
     @property
     def warn_threshold(self) -> float:
         return self._verifier_cfg.warn_threshold
 
-    def _ensure_dspy_lm(self) -> dspy.BaseLM:
-        if self._dspy_lm is None:
-            if self._llm_config is None:
-                logger.warning(
-                    "No verifier LLM configured, falling back to default LLM %r",
-                    DEFAULT_LLM_CONFIG.llm_name,
-                )
-                self._llm_config = DEFAULT_LLM_CONFIG
-            self._dspy_lm = build_dspy_lm(self._llm_config)
-        return self._dspy_lm
-
-    def _predict(self, predictor: dspy.Predict, **inputs) -> dspy.Prediction:
-        with dspy.context(lm=self._ensure_dspy_lm()):
-            return predictor(**inputs)
+    def _predict(
+        self, signature: type[dspy.Signature], instruction: str, **inputs
+    ) -> dspy.Prediction:
+        with dspy.context(lm=self.dspy_lm):
+            return dspy.Predict(signature.with_instructions(instruction))(**inputs)
 
     def _check_residual_leakage(
         self, answer: str, sanitized_context: str, raw_context: str
     ) -> VerifierWarning | None:
         prediction = self._predict(
-            _build_residual_predictor(),
+            _ResidualLeakageSignature,
+            _RESIDUAL_INSTRUCTION,
             answer=answer,
             sanitized_context=sanitized_context,
             raw_context=raw_context,
         )
-        confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
+        confidence = clamp_confidence(getattr(prediction, "confidence", 0.0))
         if not getattr(prediction, "leaked", False) or confidence < self.warn_threshold:
             return None
         return VerifierWarning(
-            kind=WarningKind.RESIDUAL_LEAKAGE,
-            flagged=_clean_flagged(getattr(prediction, "entity_type", "")),
+            kind=VerifierCheck.RESIDUAL_LEAKAGE,
+            flagged=_flagged_or_none(getattr(prediction, "entity_type", "")),
             evidence=str(getattr(prediction, "evidence", "")).strip(),
             confidence=confidence,
         )
 
     def _check_faithfulness(self, answer: str, evidence: str) -> VerifierWarning | None:
         prediction = self._predict(
-            _build_faithfulness_predictor(), answer=answer, evidence=evidence
+            _FaithfulnessSignature,
+            _FAITHFULNESS_INSTRUCTION,
+            answer=answer,
+            evidence=evidence,
         )
-        confidence = _clamp_confidence(getattr(prediction, "confidence", 0.0))
+        confidence = clamp_confidence(getattr(prediction, "confidence", 0.0))
         if (
             not getattr(prediction, "unfaithful", False)
             or confidence < self.warn_threshold
         ):
             return None
         return VerifierWarning(
-            kind=WarningKind.FAITHFULNESS,
-            flagged=_clean_flagged(getattr(prediction, "unsupported_claim", "")),
+            kind=VerifierCheck.FAITHFULNESS,
+            flagged=_flagged_or_none(getattr(prediction, "unsupported_claim", "")),
             evidence=str(getattr(prediction, "rationale", "")).strip(),
             confidence=confidence,
         )
 
     def verify(
-        self, answer: str, sanitized_chunks: List[str], raw_chunks: List[str]
+        self, answer: str, sanitized_chunks: list[str], raw_chunks: list[str]
     ) -> VerifierVerdict:
         """Run the configured checks over the answer and the whole context."""
         if not answer.strip() or not self.checks:
@@ -222,36 +193,31 @@ class AdvisoryVerifierAgent(BaseAgent):
 
         sanitized_context = "\n\n".join(c for c in sanitized_chunks if c).strip()
         raw_context = "\n\n".join(c for c in raw_chunks if c).strip()
-
-        checks: List[Tuple[VerifierCheck, Callable[[], VerifierWarning | None]]] = [
-            (
-                VerifierCheck.RESIDUAL_LEAKAGE,
-                lambda: self._check_residual_leakage(
-                    answer, sanitized_context, raw_context
-                ),
+        runners: dict[VerifierCheck, Callable[[], VerifierWarning | None]] = {
+            VerifierCheck.RESIDUAL_LEAKAGE: lambda: self._check_residual_leakage(
+                answer, sanitized_context, raw_context
             ),
-            (
-                VerifierCheck.FAITHFULNESS,
-                lambda: self._check_faithfulness(answer, raw_context),
+            VerifierCheck.FAITHFULNESS: lambda: self._check_faithfulness(
+                answer, raw_context
             ),
-        ]
+        }
 
-        warnings: List[VerifierWarning] = []
-        ran: List[str] = []
-        failed: List[str] = []
-        for check, run in checks:
-            if check not in self.checks:
+        warnings: list[VerifierWarning] = []
+        ran: list[str] = []
+        failed: list[str] = []
+        for check in self.checks:
+            run = runners.get(check)
+            if run is None:
                 continue
             try:
                 warning = run()
             except Exception as e:
                 logger.debug("Verifier check %s failed: %s", check.value, e)
-                message = (
+                notify(
                     f"Verifier: the {check.value} check could not run, "
-                    "its result is unknown for this answer"
+                    "its result is unknown for this answer",
+                    logger,
                 )
-                if not report_notice(message):
-                    logger.warning(message)
                 failed.append(check.value)
                 continue
             ran.append(check.value)

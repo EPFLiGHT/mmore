@@ -15,28 +15,31 @@ import logging
 import time
 from dataclasses import replace
 from enum import Enum
-from typing import Optional, Protocol
+from typing import Protocol
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from .agents.adversary import AdversarialAgent
 from .agents.analyzer import ContextPolicyAnalyzerAgent
+from .agents.answer import AnswerAgent
 from .agents.detector import DetectorAgent
 from .agents.gate import HITLGateAgent
 from .agents.sanitizer import SanitizerAgent
-from .agents.state import PreCloudOutcome, PrivacyState
+from .agents.state import PrivacyState
 from .agents.verifier import AdvisoryVerifierAgent
-from .answer import AnswerModel
 from .config import PrivacyConfig
 from .report_builder import build_report_record
+from .schemas.report import PreCloudOutcome
 from .ux import ANSWER_STAGE, Stage, report_stage
 
 logger = logging.getLogger(__name__)
 
 
-# A pipeline node: reads the shared state and returns a partial PrivacyState
 class NodeFn(Protocol):
+    """A pipeline node: reads the shared state PrivacyState, returns a new updated one."""
+
     def __call__(self, state: PrivacyState) -> PrivacyState: ...
 
 
@@ -108,8 +111,8 @@ def _staged(node: NodeFn, node_id: str, stage: Stage) -> NodeFn:
         report_stage(_with_tool(stage, node_id, state))
         start = time.perf_counter()
         result = node(state)
-        seconds = dict(state.get("stage_seconds", {}))
         elapsed = time.perf_counter() - start
+        seconds = dict(state.get("stage_seconds", {}))
         seconds[stage.agent] = seconds.get(stage.agent, 0.0) + elapsed
         result["stage_seconds"] = seconds
         return result
@@ -144,8 +147,7 @@ def _mark_unsafe_node(state: PrivacyState) -> PrivacyState:
 
 def _report_node(state: PrivacyState) -> PrivacyState:
     """Terminal node: append this request's PII-free report record."""
-    record = build_report_record(state)
-    return PrivacyState(report=[*state.get("report", []), record])
+    return PrivacyState(report=state.get("report", []) + [build_report_record(state)])
 
 
 def build_pipeline_graph(
@@ -159,8 +161,8 @@ def build_pipeline_graph(
     verifier: NodeFn,
     max_iterations: int = 3,
     abort_on_exhaustion: bool = True,
-    checkpointer: Optional[BaseCheckpointSaver] = None,
-):
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
     """Compile the full pipeline from explicit node callables."""
     graph = StateGraph(PrivacyState)
     for node_id, node in (
@@ -209,30 +211,22 @@ def build_pipeline_graph(
 
 def build_privacy_pipeline(
     config: PrivacyConfig,
-    checkpointer: Optional[BaseCheckpointSaver] = None,
-):
+    checkpointer: BaseCheckpointSaver | None = None,
+) -> CompiledStateGraph:
     """Build the full privacy pipeline from a ``PrivacyConfig``.
 
     The agents provide the node callables: the compiled graph owns the single
     shared checkpointer (the agents are used only as node providers, so they
     are built without their own).
     """
-    analyzer = ContextPolicyAnalyzerAgent.from_config(config)
-    detector = DetectorAgent.from_config(config)
-    sanitizer = SanitizerAgent.from_config(config)
-    adversary = AdversarialAgent.from_config(config)
-    gate = HITLGateAgent.from_config(config)
-    answer = AnswerModel.from_config(config)
-    verifier = AdvisoryVerifierAgent.from_config(config)
-
     return build_pipeline_graph(
-        analyzer=analyzer._node,
-        detector=detector._node,
-        sanitizer=sanitizer._node,
-        adversary=adversary._node,
-        gate=gate._node,
-        answer=answer._node,
-        verifier=verifier._node,
+        analyzer=ContextPolicyAnalyzerAgent.from_config(config)._node,
+        detector=DetectorAgent.from_config(config)._node,
+        sanitizer=SanitizerAgent.from_config(config)._node,
+        adversary=AdversarialAgent.from_config(config)._node,
+        gate=HITLGateAgent.from_config(config)._node,
+        answer=AnswerAgent.from_config(config)._node,
+        verifier=AdvisoryVerifierAgent.from_config(config)._node,
         max_iterations=config.leakage_adversary.max_iterations,
         abort_on_exhaustion=config.leakage_adversary.abort_on_exhaustion,
         checkpointer=checkpointer,

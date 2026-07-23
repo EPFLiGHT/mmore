@@ -1,7 +1,7 @@
 """LLM-backed PII detection engine using DSPy for typed structured output."""
 
 import logging
-from typing import List, Optional, Sequence
+from typing import Sequence
 
 import dspy
 from pydantic import BaseModel, Field
@@ -11,21 +11,17 @@ from ...rag.llm import LLMConfig
 from ..agents.registry import register_tool
 from ..config import DetectionConfig
 from ..dspy_llm import build_dspy_lm
-from ..policy import PrivacyPolicy
-from ..ux import report_notice
+from ..schemas.policy import PrivacyPolicy
+from ..ux import notify
 from .base import DetectionEngine, PIISpan
 from .constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_ENTITIES,
     DEFAULT_LLM_CONFIG,
+    threshold_or_default,
 )
 
 logger = logging.getLogger(__name__)
-
-
-def _warn(message: str) -> None:
-    if not report_notice(message):
-        logger.warning(message)
 
 
 # --------------------------------------------------------------------------
@@ -51,22 +47,17 @@ OUTPUT_SPANS_DESC = (
 
 class _DetectedSpan(BaseModel):
     text: str = Field(description=SPAN_TEXT_DESC)
-    label: Optional[str] = Field(default=None, description=SPAN_LABEL_DESC)
-    score: float = Field(
-        default=1.0,
-        ge=0.0,
-        le=1.0,
-        description=SPAN_SCORE_DESC,
-    )
+    label: str | None = Field(default=None, description=SPAN_LABEL_DESC)
+    score: float = Field(default=1.0, ge=0.0, le=1.0, description=SPAN_SCORE_DESC)
 
 
 class _DetectPIISignature(dspy.Signature):
     text: str = dspy.InputField(desc=INPUT_TEXT_DESC)
-    entity_types: List[str] = dspy.InputField(desc=INPUT_ENTITY_TYPES_DESC)
-    spans: List[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
+    entity_types: list[str] = dspy.InputField(desc=INPUT_ENTITY_TYPES_DESC)
+    spans: list[_DetectedSpan] = dspy.OutputField(desc=OUTPUT_SPANS_DESC)
 
 
-def _build_demos() -> List[dspy.Example]:
+def _build_demos() -> list[dspy.Example]:
     return [
         dspy.Example(
             text="John Doe called from 555-1234 about his MRN 87654321.",
@@ -107,18 +98,16 @@ class LLMDetectionEngine(DetectionEngine):
     def __init__(
         self,
         llm_config: LLMConfig,
-        sensitive_entities: Optional[Sequence[str]] = None,
+        sensitive_entities: Sequence[str] | None = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         instruction: str = "",
     ):
         self._llm_config = llm_config
-        self._sensitive_entities: List[str] = (
-            list(sensitive_entities) if sensitive_entities else list(DEFAULT_ENTITIES)
-        )
+        self._sensitive_entities = list(sensitive_entities or DEFAULT_ENTITIES)
         self._confidence_threshold = confidence_threshold
         self._instruction = instruction
-        self._llm: Optional[dspy.BaseLM] = None
-        self._predictor: Optional[dspy.Predict] = None
+        self._llm: dspy.BaseLM | None = None
+        self._predictor: dspy.Predict | None = None
 
     @classmethod
     def from_config(cls, config: DetectionConfig) -> Self:
@@ -133,11 +122,7 @@ class LLMDetectionEngine(DetectionEngine):
         return cls(
             llm_config=llm_config,
             sensitive_entities=config.entity_types or None,
-            confidence_threshold=(
-                config.confidence_threshold
-                if config.confidence_threshold is not None
-                else DEFAULT_CONFIDENCE_THRESHOLD
-            ),
+            confidence_threshold=threshold_or_default(config.confidence_threshold),
         )
 
     @property
@@ -154,36 +139,36 @@ class LLMDetectionEngine(DetectionEngine):
             self._predictor = _build_predictor(self._instruction)
         return self._predictor
 
-    def detect(self, text: str) -> List[PIISpan]:
-        lm = self.llm
-        predictor = self.predictor
+    def detect(self, text: str) -> list[PIISpan]:
         try:
-            with dspy.context(lm=lm):
-                prediction = predictor(text=text, entity_types=self._sensitive_entities)
+            with dspy.context(lm=self.llm):
+                prediction = self.predictor(
+                    text=text, entity_types=self._sensitive_entities
+                )
         except Exception as e:
             logger.debug("LLM detection failed: %s", e)
-            _warn(
+            notify(
                 "Detector: the LLM answer could not be read, this chunk was left "
-                "unscanned (a rule-based engine like presidio is steadier here)"
+                "unscanned (a rule-based engine like presidio is stronger here)",
+                logger,
             )
             return []
 
-        spans: List[PIISpan] = []
+        spans: list[PIISpan] = []
         unusable = 0
         # Maps repeated fragments to successive occurrences
         search_cursors: dict[str, int] = {}
-        for s in getattr(prediction, "spans", None) or []:
+        for predicted in getattr(prediction, "spans", None) or []:
             try:
-                fragment = str(s.text)
-                label = str(s.label) if s.label else ""
-                score = float(s.score)
+                fragment = str(predicted.text)
+                label = str(predicted.label) if predicted.label else ""
+                score = max(0.0, min(1.0, float(predicted.score)))
             except (AttributeError, TypeError, ValueError):
                 unusable += 1
                 continue
             if not fragment or not label:
                 unusable += 1
                 continue
-            score = max(0.0, min(1.0, score))
             if score < self._confidence_threshold:
                 continue
             start = text.find(fragment, search_cursors.get(fragment, 0))
@@ -199,21 +184,22 @@ class LLMDetectionEngine(DetectionEngine):
                 )
             )
         if unusable:
-            _warn(
+            notify(
                 f"Detector: the LLM returned {unusable} unusable span(s), "
-                f"ignored them and kept {len(spans)}"
+                f"ignored them and kept {len(spans)}",
+                logger,
             )
         return spans
 
 
 @register_tool("detect_pii_llm")
-def detect_pii_llm(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+def detect_pii_llm(text: str, policy: PrivacyPolicy) -> list[PIISpan]:
     """Detect PII spans in ``text`` using an LLM engine configured from ``policy``.
 
     The policy's ``sensitive_entities`` set the engine's entity labels and
     ``detection_params`` (e.g. ``confidence_threshold``) are forwarded to the
     engine constructor. The LLM backend uses ``DEFAULT_LLM_CONFIG`` since
-    the policy does not carry an ``LLMConfig``; setup code wanting a custom
+    the policy does not carry an ``LLMConfig``: setup code wanting a custom
     LLM should build ``LLMDetectionEngine.from_config(detection_cfg)`` and
     register its ``detect()`` under a distinct tool name.
     """

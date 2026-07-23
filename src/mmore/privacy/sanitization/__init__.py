@@ -1,7 +1,6 @@
 """Sanitization strategies exposed as agent tools."""
 
 from .base import SanitizationStrategy, apply_replacements, select_non_overlapping
-from .constants import SANITIZATION_TOOL_NAMES
 from .entity_replacement_strategy import (
     EntityReplacementStrategy,
     sanitize_entity_replacement,
@@ -21,7 +20,6 @@ __all__ = [
     "EntityReplacementStrategy",
     "PresidioOperator",
     "PresidioSanitizationStrategy",
-    "SANITIZATION_TOOL_NAMES",
     "SanitizationStrategy",
     "SyntheticRewriteStrategy",
     "TokenMaskingStrategy",

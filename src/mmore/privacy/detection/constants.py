@@ -1,7 +1,6 @@
 """Shared defaults for the PII detection engines."""
 
 from dataclasses import dataclass
-from typing import Dict
 
 from ...rag.llm import LLMConfig
 
@@ -16,13 +15,57 @@ DEFAULT_LLM_CONFIG = LLMConfig(
     max_new_tokens=512,
 )
 
-THRESHOLD_LEVELS: Dict[str, float] = {
+THRESHOLD_LEVELS: dict[str, float] = {
     "low": 0.5,
     "medium": 0.7,
     "high": 0.85,
 }
 
 DEFAULT_CONFIDENCE_THRESHOLD = THRESHOLD_LEVELS["medium"]
+
+
+def threshold_or_default(value: float | None) -> float:
+    return DEFAULT_CONFIDENCE_THRESHOLD if value is None else value
+
+
+DEFAULT_ENTITIES = [
+    "PERSON",
+    "PHONE_NUMBER",
+    "EMAIL_ADDRESS",
+    "MRN",
+    "DATE_TIME",
+    "LOCATION",
+    "US_SSN",
+    "INSURANCE_ID",
+]
+
+
+# Custom clinical recognizers added on top of Presidio's built-in ones
+PRESIDIO_CLINICAL_PATTERNS = [
+    {
+        "entity": "MRN",
+        "patterns": [
+            ("mrn_with_prefix", r"\bMRN[\s:#]*\d{6,10}\b", 0.9),
+            ("mrn_bare_8_digits", r"\b\d{8}\b", 0.4),
+        ],
+        "context": ["mrn", "medical record", "record number", "patient id"],
+    },
+    {
+        "entity": "HOSPITAL_DATE",
+        "patterns": [
+            ("iso_date", r"\b\d{4}-\d{2}-\d{2}\b", 0.6),
+            ("us_date", r"\b\d{1,2}/\d{1,2}/\d{4}\b", 0.6),
+        ],
+        "context": ["admission", "discharge", "appointment", "hospital", "clinic"],
+    },
+    {
+        "entity": "INSURANCE_ID",
+        "patterns": [
+            ("insurance_alnum", r"\b[A-Z]{2,3}\d{6,12}\b", 0.7),
+        ],
+        "context": ["insurance", "policy", "member id", "subscriber"],
+    },
+]
 
 
 # Short engine names used in YAML configs mapped to the tool names
@@ -35,7 +78,7 @@ DETECTION_TOOL_NAMES = {
 
 
 # Per-engine guidance for the analyzer's engine selector
-DETECTION_GUIDANCE: Dict[str, str] = {
+DETECTION_GUIDANCE: dict[str, str] = {
     "presidio": (
         "Presidio: rule-based detection + spaCy NER, augmented with the "
         "clinical recognizers shipped. Precise but cautious, and the weakest of "
@@ -71,35 +114,22 @@ DETECTION_GUIDANCE: Dict[str, str] = {
 
 
 @dataclass
-class BaseDetectionParams:
+class DetectionParams:
+    """Tunable parameter every engine accepts."""
+
     confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD
 
 
 @dataclass
-class PresidioParams(BaseDetectionParams):
-    pass
-
-
-@dataclass
-class GLiNERParams(BaseDetectionParams):
+class GLiNERParams(DetectionParams):
     multi_label: bool = False
 
 
-@dataclass
-class OpenAIFilterParams(BaseDetectionParams):
-    pass
-
-
-@dataclass
-class LLMDetectionParams(BaseDetectionParams):
-    pass
-
-
-DETECTION_DEFAULT_PARAMS: Dict[str, BaseDetectionParams] = {
-    "presidio": PresidioParams(),
+DETECTION_DEFAULT_PARAMS: dict[str, DetectionParams] = {
+    "presidio": DetectionParams(),
     "gliner": GLiNERParams(),
-    "openai_filter": OpenAIFilterParams(),
-    "llm": LLMDetectionParams(),
+    "openai_filter": DetectionParams(),
+    "llm": DetectionParams(),
 }
 
 _CONFIDENCE_THRESHOLD_GUIDANCE = (
@@ -110,7 +140,7 @@ _CONFIDENCE_THRESHOLD_GUIDANCE = (
 )
 
 # Per-engine guidance for the analyzer's engine parameter selector
-DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
+DETECTION_PARAM_GUIDANCE: dict[str, str] = {
     "presidio": (
         "Presidio (rule-based + spaCy NER + clinical recognizers).\n"
         f"{_CONFIDENCE_THRESHOLD_GUIDANCE}"
@@ -129,14 +159,3 @@ DETECTION_PARAM_GUIDANCE: Dict[str, str] = {
         f"{_CONFIDENCE_THRESHOLD_GUIDANCE}"
     ),
 }
-
-DEFAULT_ENTITIES = [
-    "PERSON",
-    "PHONE_NUMBER",
-    "EMAIL_ADDRESS",
-    "MRN",
-    "DATE_TIME",
-    "LOCATION",
-    "US_SSN",
-    "INSURANCE_ID",
-]

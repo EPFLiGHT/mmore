@@ -29,7 +29,7 @@ class PresidioOperator(str, Enum):
     See https://microsoft.github.io/presidio/anonymizer/ for more info.
     """
 
-    REPLACE = "replace"
+    REPLACE = "replace"  # default
     REDACT = "redact"
     MASK = "mask"
     HASH = "hash"

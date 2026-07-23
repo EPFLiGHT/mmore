@@ -1,20 +1,21 @@
 """GLiNER-based PII detection engine."""
 
 import logging
-from typing import TYPE_CHECKING, List, Optional, Sequence
+from typing import TYPE_CHECKING, Sequence
 
 from typing_extensions import Self
 
 from ...ux import loading_model
-from .._cache import MODEL_REGISTRY
 from ..agents.registry import register_tool
 from ..config import DetectionConfig, DetectionEngineType
-from ..policy import PrivacyPolicy
+from ..model_cache import MODEL_REGISTRY
+from ..schemas.policy import PrivacyPolicy
 from .base import DetectionEngine, PIISpan
 from .constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_ENTITIES,
     DEFAULT_GLINER_MODEL,
+    threshold_or_default,
 )
 
 if TYPE_CHECKING:
@@ -54,14 +55,12 @@ class GLiNEREngine(DetectionEngine):
     def __init__(
         self,
         model_name: str = DEFAULT_GLINER_MODEL,
-        sensitive_entities: Optional[Sequence[str]] = None,
+        sensitive_entities: Sequence[str] | None = None,
         confidence_threshold: float = DEFAULT_CONFIDENCE_THRESHOLD,
         multi_label: bool = False,
     ):
         self._model_name = model_name
-        self._sensitive_entities: List[str] = (
-            list(sensitive_entities) if sensitive_entities else list(DEFAULT_ENTITIES)
-        )
+        self._sensitive_entities = list(sensitive_entities or DEFAULT_ENTITIES)
         self._confidence_threshold = confidence_threshold
         self._multi_label = multi_label
 
@@ -70,23 +69,19 @@ class GLiNEREngine(DetectionEngine):
         """Build an engine from a ``DetectionConfig``."""
         return cls(
             sensitive_entities=config.entity_types or None,
-            confidence_threshold=(
-                config.confidence_threshold
-                if config.confidence_threshold is not None
-                else DEFAULT_CONFIDENCE_THRESHOLD
-            ),
+            confidence_threshold=threshold_or_default(config.confidence_threshold),
         )
 
     @property
     def model(self) -> "BaseEncoderGLiNER":
-        """Lazy-load and cache the LLM on first access."""
+        """Lazy-load and cache the model on first access."""
         return MODEL_REGISTRY.get_or_load(
             f"{_CACHE_PREFIX}:{self._model_name}",
             lambda: _load_gliner_model(self._model_name),
         )
 
-    def detect(self, text: str) -> List[PIISpan]:
-        raw = self.model.predict_entities(
+    def detect(self, text: str) -> list[PIISpan]:
+        predictions = self.model.predict_entities(
             text=text,
             labels=self._sensitive_entities,
             threshold=self._confidence_threshold,
@@ -94,17 +89,17 @@ class GLiNEREngine(DetectionEngine):
         )
         return [
             PIISpan(
-                start=int(r["start"]),
-                end=int(r["end"]),
-                label=str(r["label"]),
-                score=float(r["score"]),
+                start=int(p["start"]),
+                end=int(p["end"]),
+                label=str(p["label"]),
+                score=float(p["score"]),
             )
-            for r in raw
+            for p in predictions
         ]
 
 
 @register_tool("detect_pii_gliner")
-def detect_pii_gliner(text: str, policy: PrivacyPolicy) -> List[PIISpan]:
+def detect_pii_gliner(text: str, policy: PrivacyPolicy) -> list[PIISpan]:
     """Detect PII spans in ``text`` using a GLiNER engine configured from ``policy``."""
     engine = GLiNEREngine(
         sensitive_entities=policy.sensitive_entities or None,

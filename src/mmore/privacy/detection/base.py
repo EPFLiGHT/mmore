@@ -6,7 +6,9 @@ Each engine implements ``DetectionEngine.detect`` and returns a list of
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List
+from typing import Callable
+
+from ..schemas.policy import PrivacyPolicy
 
 
 @dataclass
@@ -23,5 +25,9 @@ class DetectionEngine(ABC):
     """Abstract base for PII detection backends."""
 
     @abstractmethod
-    def detect(self, text: str) -> List[PIISpan]:
+    def detect(self, text: str) -> list[PIISpan]:
         """Return all PII spans found in ``text``."""
+
+
+# A registered detection tool: scan one text under a policy
+DetectionTool = Callable[[str, PrivacyPolicy], list[PIISpan]]
