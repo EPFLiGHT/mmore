@@ -35,6 +35,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 `privacy.yaml` is loaded directly as `PrivacyConfig`, so its fields sit at the top level (no `privacy:` wrapper). See `examples/rag/privacy.yaml` for a full example. Main fields:
 
 - `domain`: `global`, `healthcare`, or `humanitarian`. Leave it out to let the analyzer guess it.
+- `context_analyzer.llm`: the analyzer's LLM. The detector, sanitizer, adversary, and verifier fall back to it when they don't set their own.
 - `interactive`: the HITL gate. In `local` mode it prompts in the terminal (queries run one at a time); in `api` mode it auto-approves with a warning. Set `false` for unattended runs.
 - `detection.engine`: one engine, either `presidio`, `gliner`, `llm`, or `openai_filter`.
 - `sanitization.strategy`: `token_masking`, `entity_replacement`, `synthetic_rewrite`, or `presidio`.
@@ -62,6 +63,7 @@ Everything lives under `src/mmore/privacy/`:
 | `domains.py` | the per-domain profiles (label set, prompts, and defaults) |
 | `model_cache.py` | pipeline cache so engines and agents share loaded models |
 | `dspy_llm.py` | DSPy backend: builds an LM from an `LLMConfig` for specific output formats |
+| `ux.py` | reports each agent's stage to the RAG progress display |
 
 ## Report schema
 
@@ -78,7 +80,10 @@ Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report
 | `gate_outcome` | `approved`, `re-looped`, `aborted`, or `rejected` |
 | `answer_backend`, `answer_model` | which model answered |
 | `verifier_warnings` | verifier warnings as kind and count |
+| `verifier_checks_run`, `verifier_checks_failed` | which advisory checks ran and which errored |
 | `hitl_events` | list of gate interactions, one per human decision (each with its decision and any written revise feedback) |
+| `sanitized_query` | the query after sanitization |
+| `stage_seconds` | time spent per agent |
 | `outcome` | `returned`, `returned-with-warnings`, or `aborted-unsafe` |
 
 ## See also
