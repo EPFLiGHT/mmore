@@ -1,16 +1,20 @@
 # Privacy mode
 
-Privacy mode adds a multi-agent privacy pipeline between MMORE's retriever and the answer model, so only cleaned and checked context ever reaches the LLM. It runs at query time only: the vector DB keeps the raw corpus unchanged, and the pipeline works on the top-k chunks retrieved for each request.
+Privacy mode adds a multi-agent privacy pipeline between MMORE's retriever and the answer model, so only cleaned and checked context ever reaches the LLM.
 
-Turn it on by pointing the `rag` command at a privacy config:
+It runs at query time only: the vector DB keeps the raw corpus unchanged, and the pipeline works on the top-k chunks retrieved for each request.
+
+Command:
 
 ```bash
 mmore rag --config-file examples/rag/config.yaml --privacy examples/rag/privacy.yaml
 ```
 
-Without the flag, the RAG chain, output schema, and saved results stay exactly as before. The flag itself carries the config path; there is no separate boolean and no `enabled` key.
+We recommend using the mmore TUI, where privacy mode is available in both RAG and RAG CLI.
 
-## Trust boundary
+![alt text](<CleanShot 2026-07-23 at 21.14.31.png>)
+
+## Description
 
 The pipeline runs this chain over the retrieved chunks:
 
@@ -24,7 +28,7 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 4. The **leakage adversary** attacks the sanitized context. If it finds a leak, it loops back to the analyzer to tighten the policy (limited by `leakage_adversary.max_iterations`). When an escalation changes only the sanitization side, detection is skipped and the previous spans are reused. If the loop exhausts its iterations without the adversary clearing the context, the request is aborted as unsafe by default; set `leakage_adversary.abort_on_exhaustion: false` to instead proceed to the gate with the best-effort sanitized context.
 5. The **HITL gate** is the trust boundary. With `interactive: false` it approves automatically and the graph finishes in one pass. With `interactive: true` it pauses before any context leaves for the answer model: in `local` mode a terminal prompt shows the PII-free summary and asks to approve, revise (with optional feedback), or reject; in `api` mode the gate auto-approves with a startup warning. Revise feedback can be descriptive: the analyzer maps it onto the available tools (detection engine, sanitization strategy, threshold level, presidio anonymization operator, a custom rewrite instruction for the synthetic-rewrite LLM, or a custom detection instruction for the LLM detector).
 6. The **answer model** sees only the sanitized context, the sanitized query, and the domain prompt. It never reads the raw chunks or the raw query.
-7. The **verifier** checks the answer for leftover PII and faithfulness, and raises type and count warnings. It is advisory only: it warns but does not loop back.
+7. The **verifier** checks the answer for leftover PII and faithfulness, and raises type and count warnings to guide the user.
 
 ## Configuration
 
@@ -40,8 +44,6 @@ analyzer -> detector -> sanitizer -> leakage_adversary -> (HITL gate) -> answer 
 - `answer.llm`: any `LLMConfig` backend (API or self-hosted/vLLM).
 - `verifier.checks` and `verifier.warn_threshold`: the advisory checks run over the answer. Omit `checks` to run all (`residual_leakage`, `faithfulness`). You can also pass a subset.
 
-Config errors are reported at startup: a missing `answer.llm`, an unknown `domain`, or an unregistered detection engine fail before any query runs.
-
 ## Code layout
 
 Everything lives under `src/mmore/privacy/`:
@@ -49,23 +51,19 @@ Everything lives under `src/mmore/privacy/`:
 | Path | Role |
 | --- | --- |
 | `config.py` | `PrivacyConfig` and its enums: what a `privacy.yaml` is loaded into |
-| `pipeline.py` | the LangGraph wiring, including the bounded escalation loop |
-| `runner.py` | drives the compiled graph for one query, validates the config |
-| `gate_ui.py` | terminal front-end for the HITL gate (prompt + raw/sanitized diff) |
+| `pipeline.py` | the graph wiring |
+| `runner.py` | runs the compiled graph for one query|
+| `gate_ui.py` | terminal front-end for the HITL gate (raw/sanitized difference) |
 | `report_builder.py` | turns the final graph state into a `ReportRecord` |
 | `agents/` | one module per graph node: `analyzer`, `detector`, `sanitizer`, `adversary`, `gate`, `answer`, `verifier`, plus the shared `BaseAgent`, `PrivacyState` and tool registry |
-| `schemas/` | the data records the agents exchange: `policy`, `risk`, `leakage`, `verification`, `report` |
+| `schemas/` | the data formats in the pipeline: `policy`, `risk`, `leakage`, `verification`, `report` |
 | `detection/` | the PII detection engines, each registered as an agent tool |
 | `sanitization/` | the sanitization strategies, each registered as an agent tool |
-| `domains.py` | the per-domain profiles (entity set, prompts, engine and strategy defaults) |
-| `model_cache.py` | process-wide LRU cache so engines and agents share loaded models |
-| `dspy_llm.py` | DSPy backend: builds an LM from an `LLMConfig`, reads predictions back |
+| `domains.py` | the per-domain profiles (label set, prompts, and defaults) |
+| `model_cache.py` | pipeline cache so engines and agents share loaded models |
+| `dspy_llm.py` | DSPy backend: builds an LM from an `LLMConfig` for specific output formats |
 
-Detection engines and sanitization strategies register themselves by importing
-their package, so a new engine only needs a module under `detection/` with a
-`@register_tool` function and an entry in `DETECTION_TOOL_NAMES`.
-
-## Report schema (for operators)
+## Report schema
 
 Each request adds one `ReportRecord`, shown on the RAG output as `privacy_report`:
 
