@@ -1607,7 +1607,7 @@ def interactive_gate_graph():
 
 
 # A gate resume value: a menu number, an action name, or a {choice, feedback} map
-GateResume = str | dict[str, str]
+GateResume = int | str | dict[str, str | int]
 
 
 class ScriptedApprover:
@@ -1906,4 +1906,69 @@ def test_gpu_pipeline_uses_slm_for_detection_and_sanitization(isolated_tool_regi
 
     # A sanitized context and an answer come out (we dont check quality here)
     assert isinstance(result.sanitized_chunks[0], str) and result.sanitized_chunks[0]
+    assert isinstance(result.answer, str) and result.answer.strip()
+
+
+@pytest.mark.gpu
+def test_gpu_hitl_feedback_reenters_loop():
+    from mmore.privacy.agents.analyzer import ContextPolicyAnalyzerAgent
+    from mmore.privacy.runner import run_privacy_query, setup_privacy
+    from mmore.privacy.schemas.report import HITLDecision, PreCloudOutcome
+
+    small_llm = LLMConfig(llm_name="Qwen/Qwen2.5-0.5B-Instruct", max_new_tokens=64)
+    config = PrivacyConfig(
+        domain="healthcare",
+        interactive=True,
+        detection=DetectionConfig(
+            engine=DetectionEngineType.PRESIDIO,
+            confidence_threshold=0.4,
+            entity_types=["PERSON", "PHONE_NUMBER"],
+        ),
+        sanitization=SanitizationConfig(
+            strategy=SanitizationStrategyType.TOKEN_MASKING, consistency=True
+        ),
+        leakage_adversary=LeakageAdversaryConfig(enabled=False),
+        verifier=VerifierConfig(checks=[]),
+        answer=CloudLLMConfig(llm=small_llm),
+        context_analyzer=AnalyzerConfig(llm=small_llm),
+    )
+
+    # The human revises with feedback the first time, then approves the second time
+    feedback = "also treat home addresses as sensitive"
+    approver = ScriptedApprover([{"choice": 2, "feedback": feedback}, "1"])
+
+    _skip_unless_presidio()
+    _skip_unless_local_llm(small_llm.llm_name)
+
+    # Capture the policy the analyzer emits on each pass to prove the re-loop
+    emitted_policies = []
+    real_node = ContextPolicyAnalyzerAgent._node
+
+    def spy_node(self, state):
+        update = real_node(self, state)
+        policy = update.get("policy")
+        if policy is not None:
+            emitted_policies.append(policy)
+        return update
+
+    with patch.object(ContextPolicyAnalyzerAgent, "_node", spy_node):
+        graph, _, _ = setup_privacy(config, interactive_ok=True)
+        result = run_privacy_query(
+            graph, "Summarize the note.", [_CLINICAL_NOTE], approver=approver
+        )
+
+    # The gate feedback sent the request back through the analyzer
+    assert len(emitted_policies) == 2
+    assert feedback in emitted_policies[1].domain_prompt
+
+    # The run recorded revise-then-approve and produced an answer
+    record = result.record
+    assert record is not None
+    assert record.human_iterations == 1
+    assert [event.decision for event in record.hitl_events] == [
+        HITLDecision.RETRY,
+        HITLDecision.APPROVE,
+    ]
+    assert record.hitl_events[0].human_feedback == feedback
+    assert result.outcome == PreCloudOutcome.APPROVED
     assert isinstance(result.answer, str) and result.answer.strip()
