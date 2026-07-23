@@ -12,7 +12,7 @@ mmore rag --config-file examples/rag/config.yaml --privacy examples/rag/privacy.
 
 We recommend using the mmore TUI, where privacy mode is available in both RAG and RAG CLI.
 
-![alt text](<CleanShot 2026-07-23 at 21.14.31.png>)
+![mmore TUI privacy mode](../doc_images/backend_image_9.png)
 
 ## Description
 
