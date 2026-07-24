@@ -252,7 +252,7 @@ def process_files_default(
     # post-processing (chunking)
     default_config = {
         "pp_modules": [{"type": "chunker"}],
-        "output": {"output_path": output_path},
+        "output": {"output_path": f"{output_path}/results.jsonl"},
     }
     config: PPPipelineConfig = load_config(default_config, PPPipelineConfig)
     pipeline = PPPipeline.from_config(config)
