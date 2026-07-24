@@ -5368,7 +5368,7 @@ requires-dist = [
     { name = "mammoth", marker = "extra == 'process'", specifier = ">=1.8" },
     { name = "markdown", marker = "extra == 'process'", specifier = ">=3.5" },
     { name = "markdownify", marker = "extra == 'process'", specifier = ">=0.12" },
-    { name = "marker-pdf", marker = "extra == 'process'", specifier = ">=1.6" },
+    { name = "marker-pdf", marker = "extra == 'process'", specifier = ">=1.10.2,<2" },
     { name = "milvus-lite", marker = "extra == 'index'", specifier = "==2.5.1" },
     { name = "milvus-model", marker = "extra == 'index'", specifier = ">=0.2.12" },
     { name = "mmore", extras = ["api", "index"], marker = "extra == 'colvision'" },
