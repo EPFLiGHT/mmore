@@ -72,6 +72,10 @@ class DispatcherConfig:
     distributed: bool = False
     scheduler_file: Optional[str] = None
     processor_config: Optional[Dict] = None
+
+    ## AJ : adding new variable, represents map PDF EXTENSION -> PROCESSOR (set pref for each document format)
+    processor_selection: Optional[Dict[str, str]] = None
+
     process_batch_sizes: Optional[List[Dict[str, float]]] = None
     batch_multiplier: int = 1
     extract_images: bool = False
@@ -91,6 +95,9 @@ class DispatcherConfig:
             distributed=config.get("distributed", False),
             scheduler_file=config.get("scheduler_file"),
             processor_config=config.get("processor_config"),
+
+            # AJ ; RETRIEVING PROCESSOR_SELECTION FROM YAML
+            processor_selection=config.get("processor_selection"),
             process_batch_sizes=config.get("process_batch_sizes"),
             batch_multiplier=config.get("batch_multiplier", 1),
             extract_images=config.get("extract_images", False),
@@ -116,6 +123,9 @@ class DispatcherConfig:
             "scheduler_file": self.scheduler_file,
             "output_path": self.output_path,
             "processor_config": self.processor_config,
+
+            #AJ : GET PROCESSOR PREF DICTS 
+            "processor_selection": self.processor_selection,
             "process_batch_sizes": self.process_batch_sizes,
             "batch_multiplier": self.batch_multiplier,
             "extract_images": self.extract_images,
@@ -194,9 +204,20 @@ class Dispatcher:
             processor: [] for processor in ProcessorRegistry.get_processors()
         }
 
+         # AJ : get all preferred processors from the configuration file
+        all_processor_preferences = self.config.processor_selection or {} # empty dic if config.selection EMPTY
+
         for file_path_list in self.result.file_paths.values():
             for file in file_path_list:
-                processor = AutoProcessor.from_file(file)
+
+                # AJ : retrieve preferred processor for current file (using file extension), give it to AutoProcessor
+                preferred_processor_for_file = all_processor_preferences.get(file.file_extension)
+                processor = AutoProcessor.from_file(file, preferred_processor_for_file)
+
+                # AJ : if no processor found, ignore the file
+                if processor is None:
+                    continue 
+
                 logger.debug(
                     f"Assigned file {file.file_path} to processor: {processor}"
                 )
