@@ -37,8 +37,11 @@ pdf_extractor: fast
 force_redownload: false
 
 # Optional EZproxy prefix for institutional access to paywalled PDFs.
-# Example for EPFL: "https://login.proxy.epfl.ch"
-# pdf_proxy_prefix: "https://login.proxy.epfl.ch"
+# Most people should leave this unset. Only set it if your institution
+# actually runs EZproxy, and use the host your own library publishes.
+# If your institution grants access by VPN instead (EPFL works this way),
+# leave it unset and connect to the VPN. See the docs for details.
+# pdf_proxy_prefix: "https://ezproxy.example.edu"
 
 # HTTP User-Agent header sent on every outbound request. Identify your
 # caller honestly so rate-limiters / abuse desks can reach you. OpenAlex

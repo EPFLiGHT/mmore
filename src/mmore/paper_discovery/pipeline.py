@@ -94,6 +94,7 @@ class PaperDiscoveryPipeline:
     def _enrich_with_pdf_text(self, papers: List[Paper]) -> None:
         cfg = self.config
         cached = succeeded = paywalled = errored = skipped = 0
+        login_pages = 0
 
         with progress(total=len(papers), desc="PDFs", unit="paper") as bar:
             for paper in papers:
@@ -127,6 +128,8 @@ class PaperDiscoveryPipeline:
                         elif result.errored:
                             errored += 1
                         else:
+                            if result.login_page:
+                                login_pages += 1
                             skipped += 1
 
                 bar.set_postfix_str(
@@ -147,12 +150,24 @@ class PaperDiscoveryPipeline:
             errored,
             skipped,
         )
-        if paywalled and not cfg.pdf_proxy_prefix:
+        if login_pages:
+            logger.warning(
+                "%d downloads returned a sign-in page instead of a PDF. "
+                "This pipeline cannot log in for you. If you set "
+                "`pdf_proxy_prefix`, check the host is your institution's "
+                "real EZproxy and that you can reach it. If your institution "
+                "grants access by VPN instead, unset `pdf_proxy_prefix` and "
+                "connect to the VPN.",
+                login_pages,
+            )
+
+        if paywalled:
             logger.info(
-                "Tip: %d PDFs were blocked by publisher paywalls. Set "
-                "`pdf_proxy_prefix` in your config to use institutional "
-                "access (e.g. EPFL: 'https://login.proxy.epfl.ch'), or "
-                "set `download_pdfs: false` to skip PDFs entirely.",
+                "%d PDFs were refused by the publisher (401/402/403/429). "
+                "Publishers commonly block automated tools by User-Agent "
+                "even when your institution has a subscription, so being on "
+                "the VPN does not always help. Set `download_pdfs: false` to "
+                "skip PDFs and keep metadata and abstracts only.",
                 paywalled,
             )
 

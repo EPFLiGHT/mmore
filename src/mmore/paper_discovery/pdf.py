@@ -16,15 +16,28 @@ logger = logging.getLogger(__name__)
 # not per-paper warnings.
 PAYWALL_STATUSES = {401, 402, 403, 429}
 
+# Substrings that mark an HTML body as a sign-in page rather than content.
+# A proxy that needs authentication answers 200 OK with one of these, which
+# would otherwise be counted as a silent skip.
+LOGIN_PAGE_MARKERS = (
+    "shibboleth",
+    "tequila",
+    'name="saml',
+    'type="password"',
+    "discovery service",
+    "institutional login",
+)
+
 
 @dataclass
 class DownloadResult:
-    """Outcome of a single PDF fetch — lets the pipeline summarize at the end."""
+    """Outcome of a single PDF fetch. The pipeline tallies these at the end."""
 
     path: Optional[str] = None  # local file path on success
     paywalled: bool = False  # publisher returned 401/402/403/429
-    errored: bool = False  # network/timeout/other — actionable
+    errored: bool = False  # network/timeout/other, actionable
     status: Optional[int] = None  # last seen HTTP status, if any
+    login_page: bool = False  # got an auth page instead of the PDF
 
 
 def download_pdf(
@@ -36,14 +49,14 @@ def download_pdf(
 ) -> DownloadResult:
     """Returns a DownloadResult describing what happened.
 
-    1. Optionally wrap URL through an EZproxy prefix.
+    1. Optionally wrap URL through a proxy prefix.
     2. GET the URL.
     3. If response looks like a PDF, save it.
     4. Otherwise parse the HTML for the first PDF-looking <a href>, follow it.
 
     The polite default User-Agent identifies this tool honestly. Publishers
-    that block automated tools will return 401/402/403/429 — that is their
-    call, and we surface it as paywalled, not as an error.
+    that block automated tools return 401/402/403/429. That is their call,
+    and we report it as paywalled rather than as an error.
     """
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": user_agent}
@@ -67,6 +80,10 @@ def download_pdf(
     if _looks_like_pdf(r):
         return DownloadResult(path=_save_pdf(r.content, url, save_dir))
 
+    if _looks_like_login_page(r):
+        logger.debug("download_pdf got a sign-in page for %s", url)
+        return DownloadResult(status=r.status_code, login_page=True)
+
     pdf_url = _find_pdf_link(r.text, base=url)
     if not pdf_url:
         return DownloadResult(status=r.status_code)
@@ -87,18 +104,24 @@ def download_pdf(
 
     if r2.status_code == 200 and _looks_like_pdf(r2):
         return DownloadResult(path=_save_pdf(r2.content, pdf_url, save_dir))
+    if _looks_like_login_page(r2):
+        return DownloadResult(status=r2.status_code, login_page=True)
     return DownloadResult(status=r2.status_code)
 
 
 def _proxify(url: str, prefix: Optional[str]) -> str:
     """Wrap a URL through an EZproxy-style prefix for institutional access.
 
-    EPFL example:
-        prefix = "https://login.proxy.epfl.ch"
+    Example, using your own library's proxy host:
+        prefix = "https://ezproxy.example.edu"
         url    = "https://onlinelibrary.wiley.com/doi/pdf/10.1111/cogs.13256"
-        ->     "https://login.proxy.epfl.ch/login?url=https%3A%2F%2F..."
+        ->     "https://ezproxy.example.edu/login?url=https%3A%2F%2F..."
 
-    No-op when prefix is None or URL is already proxied.
+    Only useful if your institution runs EZproxy. Institutions that grant
+    access by IP recognition over VPN need no prefix at all, the direct URL
+    already works once you are on the VPN.
+
+    No-op when prefix is None or the URL is already proxied.
     """
     if not prefix or prefix in url:
         return url
@@ -112,6 +135,19 @@ def _looks_like_pdf(response: requests.Response) -> bool:
     if response.url.lower().endswith(".pdf"):
         return True
     return response.content[:5] == b"%PDF-"
+
+
+def _looks_like_login_page(response: requests.Response) -> bool:
+    """True when an HTML body is a sign-in form rather than content.
+
+    A proxy that cannot authenticate the caller answers 200 OK with its
+    login page. Without this check the pipeline would file that as a
+    silent skip and the user would see no reason for the failure.
+    """
+    if "html" not in response.headers.get("Content-Type", "").lower():
+        return False
+    body = response.text[:20000].lower()
+    return any(marker in body for marker in LOGIN_PAGE_MARKERS)
 
 
 def expected_pdf_path(url: str, save_dir: str) -> Path:

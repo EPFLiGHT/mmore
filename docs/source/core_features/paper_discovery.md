@@ -122,7 +122,7 @@ Fields are **nullable on purpose** — sources differ in what they return. `null
 | `force_redownload` | `false` | Set `true` to ignore the on-disk cache and re-fetch every PDF |
 | `pdf_extractor` | `"fast"` | Which mmore PDF processor to use. `"fast"` = PyMuPDF-backed, no models loaded. `"full"` = marker + surya for better parsing (slow, downloads models) |
 | `multimodal_output_file` | `null` | If set, also write a JSONL of `MultimodalSample` records that mmore's post-process / index / RAG pipelines can consume directly (see [Feeding results into mmore's index / RAG](#-feeding-results-into-mmores-index--rag)) |
-| `pdf_proxy_prefix` | `null` | Optional EZproxy prefix for institutional access (see *Paywalled PDFs* below) |
+| `pdf_proxy_prefix` | `null` | EZproxy host, only if your institution runs one. Leave unset for VPN-based access (see *Paywalled PDFs* below) |
 | `user_agent` | `mmore-paper-discovery/1.0 …` | HTTP `User-Agent` header sent on every outbound request — see below |
 | `arxiv_category_map` | `null` | Maps a substring of your category title to an arXiv code (e.g. `Foundational` → `cs.LG`) — adds `cat:<code>` to the arXiv query |
 | `arxiv_enable_pair_query` | `true` | Runs one extra arXiv search per category that requires the top two terms together (better precision). Turn off if you'd rather save a few seconds per category |
@@ -155,27 +155,50 @@ To force a full re-download (e.g. after a publisher updates a paper), set `force
 
 ## 🔒 Paywalled PDFs
 
-Many publishers (Wiley, ACM, MDPI, …) block direct PDF downloads from automated tools by design. **mmore does not disguise itself as a browser** — that would violate publisher terms of service and risk getting the project's default User-Agent blocklisted for every user. Two supported options:
+Expect a chunk of your run to come back without full text. Some of that you can fix, some of it you cannot. Read this section before spending time on it.
 
-### Institutional access via EZproxy (recommended)
+### There are two different reasons a PDF fails
 
-Set `pdf_proxy_prefix` in your config to your institution's EZproxy URL. Every paywalled URL will be wrapped through the proxy automatically:
+They look the same in the summary line but have completely different fixes.
+
+**1. You don't have access.** Your institution has no subscription to that journal. Nothing in this pipeline can fix that. Request the paper through your library instead.
+
+**2. You have access, but the publisher blocks automated tools.** This is the common one, and it surprises people. Publishers like Wiley, ACM, and Science return `403` to anything that doesn't look like a browser, *regardless of whether your institution subscribes*. You can click the same link in your browser and get the PDF, then watch the pipeline get refused for the identical URL.
+
+mmore does **not** work around this by pretending to be a browser. Spoofing the User-Agent violates most publishers' terms of service, and a spoofed default would get the project's identifier blocklisted for every user of the library. That's a deliberate choice, not an oversight.
+
+### How your institution grants access matters
+
+Two common models. Check which one yours uses before touching any config.
+
+**VPN and IP recognition.** You connect to your institution's VPN, the publisher sees an institutional IP, and access is granted automatically. **Leave `pdf_proxy_prefix` unset.** The direct URL already works. EPFL works this way.
+
+**EZproxy.** Your library gives you a hostname that rewrites URLs. If, and only if, your institution runs one, set:
 
 ```yaml
-pdf_proxy_prefix: "https://login.proxy.epfl.ch"
+pdf_proxy_prefix: "https://ezproxy.example.edu"
 ```
 
-The proxy handles SAML/Shibboleth authentication and the publisher sees a valid institutional session.
+Use the exact host your library publishes. Do not guess it. A wrong host either fails DNS or serves you a login page, and neither yields a PDF.
 
-**Caveat:** the first request through the proxy may redirect to your institution's login page, which a script cannot fill in. The simplest workaround for v1 is to sign in once in a browser to seed the session cookie, then run the pipeline.
+Even with the right host, an EZproxy that needs an interactive sign-in will return its login page instead of the PDF. The pipeline detects this and warns you:
+
+```
+12 downloads returned a sign-in page instead of a PDF. This pipeline
+cannot log in for you.
+```
+
+There is no headless workaround for that today. The pipeline cannot complete a SAML or Shibboleth login.
 
 ### Skip PDFs entirely
+
+If full text isn't essential, this is the cheapest path and it always works:
 
 ```yaml
 download_pdfs: false
 ```
 
-The pipeline still collects metadata + abstracts; only the `extracted_text` field is left empty.
+You still get every paper's metadata and abstract. Only `extracted_text` is left empty.
 
 ## 📄 PDF text extraction
 

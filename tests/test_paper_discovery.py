@@ -8,6 +8,7 @@ from mmore.paper_discovery.boolean import (
     build_boolean_queries,
     load_synonyms,
 )
+from mmore.paper_discovery.pdf import _looks_like_login_page, _proxify
 from mmore.paper_discovery.schema import Paper, SourceName, SynonymEntry
 from mmore.paper_discovery.sources._utils import coerce_year, first_year
 from mmore.paper_discovery.sources.arxiv import (
@@ -125,6 +126,58 @@ class TestArxivSimplification:
         )
         assert 'all:"LLM"' in queries
         assert not any("AND" in q for q in queries)
+
+
+# ---------------------------------------------------------------------------
+# Login-page detection
+# ---------------------------------------------------------------------------
+
+
+class TestLooksLikeLoginPage:
+    def _resp(self, body, ctype="text/html; charset=UTF-8"):
+        r = MagicMock()
+        r.headers = {"Content-Type": ctype}
+        r.text = body
+        return r
+
+    def test_detects_a_shibboleth_page(self):
+        assert _looks_like_login_page(
+            self._resp("<html><body>Shibboleth Identity Provider</body></html>")
+        )
+
+    def test_detects_a_password_form(self):
+        assert _looks_like_login_page(
+            self._resp('<form><input type="password" name="pw"></form>')
+        )
+
+    def test_ignores_non_html(self):
+        # A real PDF must never be mistaken for a login page.
+        assert not _looks_like_login_page(
+            self._resp("%PDF-1.7 ...", ctype="application/pdf")
+        )
+
+    def test_ignores_ordinary_article_html(self):
+        assert not _looks_like_login_page(
+            self._resp("<html><body>Abstract: we introduce...</body></html>")
+        )
+
+
+class TestProxify:
+    def test_wraps_the_url_when_a_prefix_is_set(self):
+        out = _proxify("https://x.com/a.pdf", "https://ezproxy.example.edu")
+        assert out.startswith("https://ezproxy.example.edu/login?url=")
+        assert "https%3A%2F%2Fx.com%2Fa.pdf" in out
+
+    def test_is_a_noop_without_a_prefix(self):
+        assert _proxify("https://x.com/a.pdf", None) == "https://x.com/a.pdf"
+
+    def test_does_not_double_wrap(self):
+        already = "https://ezproxy.example.edu/login?url=https%3A%2F%2Fx.com"
+        assert _proxify(already, "https://ezproxy.example.edu") == already
+
+    def test_tolerates_a_trailing_slash_on_the_prefix(self):
+        out = _proxify("https://x.com/a.pdf", "https://ezproxy.example.edu/")
+        assert "//login?url=" not in out
 
 
 # ---------------------------------------------------------------------------

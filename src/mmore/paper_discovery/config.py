@@ -53,11 +53,14 @@ class PaperDiscoveryConfig:
                                `"my-lab-pipeline/1.0 (mailto:alice@example.com)"`.
                                OpenAlex routes UAs with a contact address
                                into a faster, more reliable pool.
-      pdf_proxy_prefix:        Optional EZproxy-style prefix that wraps
-                               every PDF URL for institutional access
-                               (e.g. "https://login.proxy.epfl.ch").
-                               Leave None to fetch URLs directly -
-                               expect 403s on paywalled publishers.
+      pdf_proxy_prefix:        Optional EZproxy prefix that wraps every PDF
+                               URL, e.g. "https://ezproxy.example.edu".
+                               Only set this if your institution actually
+                               runs EZproxy, and use the host your library
+                               publishes. Institutions that grant access by
+                               IP recognition over VPN need no prefix, the
+                               direct URL already works once you are on the
+                               VPN. Leave None by default.
       arxiv_category_map:      Substring-of-category-title -> arXiv
                                category code (e.g. "Foundational" ->
                                "cs.LG"). Adds `cat:<code>` to the arXiv
