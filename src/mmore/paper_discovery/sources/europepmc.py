@@ -4,7 +4,8 @@ from typing import List, Optional
 
 import requests
 
-from ..schema import Paper
+from ..schema import Paper, SourceName
+from ._utils import first_year
 from .base import SourceAdapter
 
 logger = logging.getLogger(__name__)
@@ -67,7 +68,7 @@ class EuropePmcAdapter(SourceAdapter):
             None,
         )
         landing = next((u.get("url") for u in urls), None)
-        year = _coerce_year(entry)
+        year = first_year(entry, "pubYear", "firstPublicationDate")
 
         return Paper(
             title=entry.get("title"),
@@ -75,7 +76,7 @@ class EuropePmcAdapter(SourceAdapter):
             url=pdf_url or landing,
             abstract=entry.get("abstractText"),
             year=year,
-            source="europepmc",
+            source=SourceName.EUROPEPMC,
             search_category=category_title,
         )
 
@@ -95,14 +96,3 @@ def _parse_authors(entry: dict) -> Optional[List[str]]:
         return None
     parts = [p.strip() for p in raw.split(",") if p.strip()]
     return parts or None
-
-
-def _coerce_year(entry: dict) -> Optional[int]:
-    for key in ("pubYear", "firstPublicationDate"):
-        v = entry.get(key)
-        if v:
-            try:
-                return int(str(v)[:4])
-            except ValueError:
-                continue
-    return None

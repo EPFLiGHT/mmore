@@ -7,7 +7,8 @@ the rest of the module works without it.
 import logging
 from typing import List
 
-from ..schema import Paper
+from ..schema import Paper, SourceName
+from ._utils import coerce_year
 from .base import SourceAdapter
 
 logger = logging.getLogger(__name__)
@@ -54,8 +55,8 @@ class GoogleScholarAdapter(SourceAdapter):
                         authors=list(bib.get("author") or []) or None,
                         url=item.get("pub_url") or item.get("eprint_url"),
                         abstract=bib.get("abstract"),
-                        year=_safe_year(bib.get("pub_year")),
-                        source="google_scholar",
+                        year=coerce_year(bib.get("pub_year")),
+                        source=SourceName.GOOGLE_SCHOLAR,
                         search_category=category_title,
                     )
                 )
@@ -66,10 +67,3 @@ class GoogleScholarAdapter(SourceAdapter):
                     "Empty Google Scholar yield — possible captcha/throttling"
                 )
         return papers
-
-
-def _safe_year(value):
-    try:
-        return int(value) if value else None
-    except (TypeError, ValueError):
-        return None

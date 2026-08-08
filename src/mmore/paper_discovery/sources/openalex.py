@@ -4,7 +4,8 @@ from typing import Dict, List, Optional
 
 import requests
 
-from ..schema import Paper
+from ..schema import Paper, SourceName
+from ._utils import coerce_year
 from .base import SourceAdapter
 
 logger = logging.getLogger(__name__)
@@ -73,8 +74,8 @@ class OpenAlexAdapter(SourceAdapter):
             authors=authors or None,
             url=pdf_url or landing,
             abstract=_rebuild_abstract(work.get("abstract_inverted_index")),
-            year=_coerce_int(work.get("publication_year")),
-            source="openalex",
+            year=coerce_year(work.get("publication_year")),
+            source=SourceName.OPENALEX,
             search_category=category_title,
         )
 
@@ -86,10 +87,3 @@ def _rebuild_abstract(inverted: Optional[Dict[str, List[int]]]) -> Optional[str]
     pairs = [(pos, tok) for tok, positions in inverted.items() for pos in positions]
     pairs.sort()
     return " ".join(tok for _, tok in pairs)
-
-
-def _coerce_int(value) -> Optional[int]:
-    try:
-        return int(value) if value is not None else None
-    except (TypeError, ValueError):
-        return None

@@ -1,3 +1,4 @@
+import json
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -7,7 +8,8 @@ from mmore.paper_discovery.boolean import (
     build_boolean_queries,
     load_synonyms,
 )
-from mmore.paper_discovery.schema import Paper, SynonymEntry
+from mmore.paper_discovery.schema import Paper, SourceName, SynonymEntry
+from mmore.paper_discovery.sources._utils import coerce_year, first_year
 from mmore.paper_discovery.sources.arxiv import (
     _build_simplified_queries,
     _extract_terms,
@@ -123,6 +125,52 @@ class TestArxivSimplification:
         )
         assert 'all:"LLM"' in queries
         assert not any("AND" in q for q in queries)
+
+
+# ---------------------------------------------------------------------------
+# Shared source helpers
+# ---------------------------------------------------------------------------
+
+
+class TestCoerceYear:
+    def test_handles_the_shapes_each_source_returns(self):
+        assert coerce_year(2024) == 2024  # OpenAlex: int
+        assert coerce_year("2024") == 2024  # Google Scholar: year string
+        assert coerce_year("2024-01-15T00:00:00Z") == 2024  # arXiv: ISO date
+        assert coerce_year(" 2024 ") == 2024  # padded
+
+    def test_returns_none_when_unusable(self):
+        assert coerce_year(None) is None
+        assert coerce_year("") is None
+        assert coerce_year("n/a") is None
+
+    def test_first_year_takes_the_first_parseable_key(self):
+        entry = {"pubYear": "", "firstPublicationDate": "2019-04-02"}
+        assert first_year(entry, "pubYear", "firstPublicationDate") == 2019
+
+    def test_first_year_returns_none_when_no_key_parses(self):
+        assert first_year({"pubYear": "n/a"}, "pubYear", "missing") is None
+
+
+# ---------------------------------------------------------------------------
+# SourceName enum
+# ---------------------------------------------------------------------------
+
+
+class TestSourceName:
+    def test_serializes_as_plain_string(self):
+        # The (str, Enum) mixin is what keeps papers.jsonl unchanged.
+        # Without it json.dumps would emit "SourceName.ARXIV".
+        payload = json.dumps(Paper(title="t", source=SourceName.ARXIV).to_dict())
+        assert '"source": "arxiv"' in payload
+
+    def test_compares_equal_to_its_string_value(self):
+        assert SourceName.OPENALEX == "openalex"
+
+    def test_covers_every_registered_source(self):
+        from mmore.paper_discovery.sources import REGISTRY
+
+        assert {s.value for s in SourceName} == set(REGISTRY)
 
 
 # ---------------------------------------------------------------------------

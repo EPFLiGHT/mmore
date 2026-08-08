@@ -14,7 +14,8 @@ from typing import Dict, List, Optional
 
 import requests
 
-from ..schema import Paper
+from ..schema import Paper, SourceName
+from ._utils import coerce_year
 from .base import SourceAdapter
 
 logger = logging.getLogger(__name__)
@@ -159,7 +160,7 @@ def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
         title = _text(entry, "atom:title")
         summary = _text(entry, "atom:summary")
         pub = _text(entry, "atom:published")
-        year = _coerce_year(pub)
+        year = coerce_year(pub)
         authors = [
             name
             for a in entry.findall("atom:author", NS)
@@ -179,7 +180,7 @@ def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
                 url=pdf_url or landing,
                 abstract=(summary or "").strip() or None,
                 year=year,
-                source="arxiv",
+                source=SourceName.ARXIV,
                 search_category=category_title,
             )
         )
@@ -189,12 +190,3 @@ def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
 def _text(elem, path: str) -> Optional[str]:
     node = elem.find(path, NS)
     return node.text if node is not None else None
-
-
-def _coerce_year(date_str: Optional[str]) -> Optional[int]:
-    if not date_str or len(date_str) < 4:
-        return None
-    try:
-        return int(date_str[:4])
-    except ValueError:
-        return None

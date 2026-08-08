@@ -1,10 +1,22 @@
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Dict, List, Literal, Optional
+from enum import Enum
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 if TYPE_CHECKING:
     from ..type import MultimodalSample
 
-SourceName = Literal["arxiv", "openalex", "europepmc", "google_scholar"]
+
+class SourceName(str, Enum):
+    """Which repository a `Paper` came from.
+
+    Subclasses `str` so members serialize as their plain value
+    (`"arxiv"`, not `"SourceName.ARXIV"`) with no custom JSON encoder.
+    """
+
+    ARXIV = "arxiv"
+    OPENALEX = "openalex"
+    EUROPEPMC = "europepmc"
+    GOOGLE_SCHOLAR = "google_scholar"
 
 
 @dataclass

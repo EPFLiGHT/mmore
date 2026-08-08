@@ -135,9 +135,13 @@ def _save_pdf(content: bytes, url: str, save_dir: str) -> str:
 def _find_pdf_link(html: str, base: str) -> Optional[str]:
     soup = BeautifulSoup(html, "html.parser")
     for a in soup.find_all("a", href=True):
-        href = a["href"].lower()
-        if href.endswith(".pdf") or "/pdf" in href or "/epdf" in href:
-            return urljoin(base, a["href"])
+        # bs4 types an attribute as str | list[str]; join covers the rare
+        # multi-valued case so the rest of the function sees one string.
+        raw = a["href"]
+        href = " ".join(raw) if isinstance(raw, list) else str(raw)
+        lowered = href.lower()
+        if lowered.endswith(".pdf") or "/pdf" in lowered or "/epdf" in lowered:
+            return urljoin(base, href)
     return None
 
 

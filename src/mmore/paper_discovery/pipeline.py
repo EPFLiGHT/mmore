@@ -1,4 +1,4 @@
-"""End-to-end orchestrator: synonyms + categories -> deduplicated papers.json."""
+"""End-to-end orchestrator: synonyms + categories -> deduplicated papers.jsonl."""
 
 import json
 import logging
@@ -8,30 +8,12 @@ from typing import List
 import yaml
 from dacite import from_dict
 
+from ..ux import progress
 from .boolean import build_boolean_queries, load_synonyms
 from .config import CategoriesFile, PaperDiscoveryConfig
 from .pdf import download_pdf, expected_pdf_path, extract_text
 from .schema import CategoryQuery, Paper
 from .sources import get_adapter
-
-try:
-    from tqdm.auto import tqdm
-except ImportError:  # pragma: no cover
-    # tqdm isn't in paper_discovery's hard deps - if missing, run silently
-    # but still expose the methods we touch (set_postfix).
-    class _NoTqdm:
-        def __init__(self, iterable, **_kwargs):
-            self._iterable = iterable
-
-        def __iter__(self):
-            return iter(self._iterable)
-
-        def set_postfix(self, **_kwargs):
-            pass
-
-    def tqdm(iterable, **kwargs):  # type: ignore[no-redef]
-        return _NoTqdm(iterable, **kwargs)
-
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +27,7 @@ class PaperDiscoveryPipeline:
          and optionally download + extract text from PDFs.
 
     Results are written to `config.output_file` and also returned. Ctrl+C
-    during stage 2 writes a partial `papers.json` before exiting.
+    during stage 2 writes a partial `papers.jsonl` before exiting.
     """
 
     def __init__(self, config: PaperDiscoveryConfig):
@@ -54,8 +36,8 @@ class PaperDiscoveryPipeline:
     def run(self) -> List[Paper]:
         """Run the full pipeline and return the deduplicated `Paper` list.
 
-        Side effect: writes `papers.json` to `config.output_file`. Safe to
-        interrupt with Ctrl+C — partial results are saved.
+        Side effect: writes JSONL to `config.output_file`. Safe to
+        interrupt with Ctrl+C, partial results are saved.
         """
         cfg = self.config
         synonyms = load_synonyms(cfg.synonyms_path)
@@ -112,47 +94,45 @@ class PaperDiscoveryPipeline:
     def _enrich_with_pdf_text(self, papers: List[Paper]) -> None:
         cfg = self.config
         cached = succeeded = paywalled = errored = skipped = 0
-        bar = tqdm(papers, desc="PDFs", unit="paper")
-        for paper in bar:
-            if not paper.url:
-                skipped += 1
-                bar.set_postfix(
-                    ok=succeeded, cache=cached, paywall=paywalled, err=errored
-                )
-                continue
 
-            # Cache hit - skip the HTTP fetch entirely.
-            if not cfg.force_redownload:
-                cached_path = expected_pdf_path(paper.url, cfg.pdf_dir)
-                if cached_path.exists():
-                    paper.extracted_text = (
-                        extract_text(str(cached_path), mode=cfg.pdf_extractor) or None
-                    )
-                    cached += 1
-                    succeeded += 1
-                    bar.set_postfix(
-                        ok=succeeded, cache=cached, paywall=paywalled, err=errored
-                    )
-                    continue
+        with progress(total=len(papers), desc="PDFs", unit="paper") as bar:
+            for paper in papers:
+                if not paper.url:
+                    skipped += 1
+                else:
+                    cached_path = expected_pdf_path(paper.url, cfg.pdf_dir)
+                    if not cfg.force_redownload and cached_path.exists():
+                        # Cache hit - skip the HTTP fetch entirely.
+                        paper.extracted_text = (
+                            extract_text(str(cached_path), mode=cfg.pdf_extractor)
+                            or None
+                        )
+                        cached += 1
+                        succeeded += 1
+                    else:
+                        result = download_pdf(
+                            paper.url,
+                            cfg.pdf_dir,
+                            user_agent=cfg.user_agent,
+                            proxy_prefix=cfg.pdf_proxy_prefix,
+                        )
+                        if result.path:
+                            paper.extracted_text = (
+                                extract_text(result.path, mode=cfg.pdf_extractor)
+                                or None
+                            )
+                            succeeded += 1
+                        elif result.paywalled:
+                            paywalled += 1
+                        elif result.errored:
+                            errored += 1
+                        else:
+                            skipped += 1
 
-            result = download_pdf(
-                paper.url,
-                cfg.pdf_dir,
-                user_agent=cfg.user_agent,
-                proxy_prefix=cfg.pdf_proxy_prefix,
-            )
-            if result.path:
-                paper.extracted_text = (
-                    extract_text(result.path, mode=cfg.pdf_extractor) or None
+                bar.set_postfix_str(
+                    f"ok={succeeded} cache={cached} paywall={paywalled} err={errored}"
                 )
-                succeeded += 1
-            elif result.paywalled:
-                paywalled += 1
-            elif result.errored:
-                errored += 1
-            else:
-                skipped += 1
-            bar.set_postfix(ok=succeeded, cache=cached, paywall=paywalled, err=errored)
+                bar.update()
 
         total = succeeded + paywalled + errored + skipped
         fresh = succeeded - cached
