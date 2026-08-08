@@ -3,7 +3,6 @@
 import json
 import logging
 from pathlib import Path
-from typing import List
 
 import yaml
 from dacite import from_dict
@@ -19,25 +18,20 @@ logger = logging.getLogger(__name__)
 
 
 class PaperDiscoveryPipeline:
-    """End-to-end Paper Discovery orchestrator.
+    """Runs a Paper Discovery job from one config.
 
-    Drives the two pipeline stages off a single `PaperDiscoveryConfig`:
-      1. Stage 1 (offline): build boolean queries from synonyms + categories.
-      2. Stage 2 (online): fetch papers from each registered source, dedupe,
-         and optionally download + extract text from PDFs.
-
-    Results are written to `config.output_file` and also returned. Ctrl+C
-    during stage 2 writes a partial `papers.jsonl` before exiting.
+    Stage 1 builds boolean queries offline. Stage 2 queries each source,
+    dedupes the results, and optionally downloads PDFs and extracts text.
     """
 
     def __init__(self, config: PaperDiscoveryConfig):
         self.config = config
 
-    def run(self) -> List[Paper]:
-        """Run the full pipeline and return the deduplicated `Paper` list.
+    def run(self) -> list[Paper]:
+        """Run both stages and return the deduplicated papers.
 
-        Side effect: writes JSONL to `config.output_file`. Safe to
-        interrupt with Ctrl+C, partial results are saved.
+        Also writes them to `config.output_file`. Ctrl+C is safe, whatever
+        has been collected so far still gets written.
         """
         cfg = self.config
         synonyms = load_synonyms(cfg.synonyms_path)
@@ -45,8 +39,8 @@ class PaperDiscoveryPipeline:
         queries = build_boolean_queries(synonyms, categories)
         logger.info("Built %d category queries", len(queries))
 
-        all_papers: List[Paper] = []
-        deduped: List[Paper] = []
+        all_papers: list[Paper] = []
+        deduped: list[Paper] = []
         try:
             for q in queries:
                 all_papers.extend(self._fetch_one(q))
@@ -69,9 +63,9 @@ class PaperDiscoveryPipeline:
         self._write_output(deduped)
         return deduped
 
-    def _fetch_one(self, query: CategoryQuery) -> List[Paper]:
+    def _fetch_one(self, query: CategoryQuery) -> list[Paper]:
         cfg = self.config
-        out: List[Paper] = []
+        out: list[Paper] = []
         for src_name in cfg.sources:
             extra: dict = {}
             if src_name == "arxiv":
@@ -91,7 +85,7 @@ class PaperDiscoveryPipeline:
             out.extend(papers)
         return out
 
-    def _enrich_with_pdf_text(self, papers: List[Paper]) -> None:
+    def _enrich_with_pdf_text(self, papers: list[Paper]) -> None:
         cfg = self.config
         cached = succeeded = paywalled = errored = skipped = 0
         login_pages = 0
@@ -171,7 +165,7 @@ class PaperDiscoveryPipeline:
                 paywalled,
             )
 
-    def _write_output(self, papers: List[Paper]) -> None:
+    def _write_output(self, papers: list[Paper]) -> None:
         cfg = self.config
         out_path = Path(cfg.output_file)
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -183,12 +177,9 @@ class PaperDiscoveryPipeline:
         if cfg.multimodal_output_file:
             self._write_multimodal_jsonl(papers, cfg.multimodal_output_file)
 
-    def _write_multimodal_jsonl(self, papers: List[Paper], path: str) -> None:
-        """Also emit results as JSONL of `MultimodalSample`.
-
-        Feeds directly into mmore post-process / index / rag without a
-        second processing pass.
-        """
+    def _write_multimodal_jsonl(self, papers: list[Paper], path: str) -> None:
+        """Write the results again as `MultimodalSample` JSONL, which mmore
+        post-process, index and rag can read without re-processing."""
         from ..type import MultimodalSample
 
         out_path = Path(path)
@@ -214,20 +205,15 @@ class PaperDiscoveryPipeline:
 
 
 def _load_categories(path: str) -> dict:
-    """Load `categories.yaml` via the `CategoriesFile` dataclass.
-
-    The YAML file must hold a top-level `categories` key whose value is
-    a mapping `{category_name -> [word, ...]}`. The dataclass wrapper
-    gives us schema validation for free.
-    """
+    """Read `categories.yaml`, validated through the `CategoriesFile` dataclass."""
     with open(path, "r", encoding="utf-8") as f:
         data = yaml.safe_load(f)
     return from_dict(CategoriesFile, data).categories
 
 
-def _dedupe(papers: List[Paper]) -> List[Paper]:
+def _dedupe(papers: list[Paper]) -> list[Paper]:
     seen = set()
-    out: List[Paper] = []
+    out: list[Paper] = []
     for p in papers:
         key = (p.title or "").strip().lower()
         if not key or key in seen:

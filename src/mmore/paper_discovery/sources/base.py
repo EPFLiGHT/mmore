@@ -1,44 +1,38 @@
-"""Source adapter protocol. Every adapter follows the same shape:
+"""The contract every source adapter implements.
 
     adapter = MySourceAdapter(user_agent=..., max_pages=..., max_results=...)
     papers = adapter.search(query, category_title)
 
-The constructor kwargs (`user_agent`, `max_pages`, `max_results`, and any
-source-specific extras) are passed in by `get_adapter()` at runtime — they
-are NOT part of the Protocol surface. The Protocol only pins the public
-contract that the pipeline relies on: a `name` attribute and `search()`.
-
-Adapters MUST NOT raise on network errors. Return [] and log instead.
+Constructor kwargs are supplied by `get_adapter()` and are not part of the
+protocol. Only `name` and `search()` are.
 """
 
-from typing import List, Protocol
+from typing import Protocol
 
 from ..schema import Paper
 
 
 class SourceAdapter(Protocol):
-    """Read-only protocol every source adapter satisfies.
+    """A searchable paper repository.
 
     Implementations live in `sources/<source>.py` and are registered in
-    `sources/__init__.py::REGISTRY`. They are constructed by `get_adapter()`
-    with the kwargs documented in the module docstring above.
+    `REGISTRY`.
     """
 
     name: str
 
-    def search(self, query: str, category_title: str) -> List[Paper]:
-        """Run one search against this source.
+    def search(self, query: str, category_title: str) -> list[Paper]:
+        """Search this source for one category.
 
         Args:
-          query:          Boolean query string built by Stage 1
-                          (e.g. `("LLM" OR "GPT") AND ("crisis" OR ...)`).
-                          Some adapters simplify it before sending - that's OK.
-          category_title: Human-readable category name. Stored on each
-                          returned `Paper.search_category` so downstream
-                          consumers can group results.
+          query: Boolean query from stage 1, such as
+            `("LLM" OR "GPT") AND ("crisis" OR ...)`. Adapters may simplify
+            it to suit their own query language.
+          category_title: Category name, stored on each result's
+            `search_category` so callers can group them.
 
         Returns:
-          List of `Paper` objects. MUST be empty on any failure (network,
-          parse, throttle); MUST NOT raise. The pipeline depends on this.
+          Matching papers, or an empty list on any failure. Never raises,
+          the pipeline depends on that.
         """
         ...

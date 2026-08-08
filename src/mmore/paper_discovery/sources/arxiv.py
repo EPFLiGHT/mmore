@@ -1,16 +1,16 @@
 """arXiv adapter.
 
-arXiv's query language is term-based — it chokes on rich boolean expressions —
-so we simplify the input query into a small set of `all:"<term>"` queries.
+arXiv's query language is term-based and chokes on rich boolean
+expressions, so we reduce each query to a few `all:"<term>"` searches.
 
-Strict rate limit: 1 request / 3 seconds (arXiv ToS). Do NOT lower this.
+Rate limited to 1 request per 3 seconds by arXiv's terms of use. Do not
+lower that.
 """
 
 import logging
 import re
 import time
 import xml.etree.ElementTree as ET
-from typing import Dict, List, Optional
 
 import requests
 
@@ -21,8 +21,8 @@ from .base import SourceAdapter
 logger = logging.getLogger(__name__)
 
 API_URL = "http://export.arxiv.org/api/query"
-RATE_LIMIT_SECONDS = 3.0  # arXiv ToS — do not lower.
-BACKOFF_SECONDS = 30.0  # Cooldown after a 429 — arXiv recovers quickly with space.
+RATE_LIMIT_SECONDS = 3.0  # arXiv terms of use. Do not lower.
+BACKOFF_SECONDS = 30.0  # Cooldown after a 429. arXiv recovers quickly given room.
 REQUEST_TIMEOUT = 60  # arXiv cold queries often take 30-45s.
 NS = {"atom": "http://www.w3.org/2005/Atom"}
 
@@ -43,7 +43,7 @@ class ArxivAdapter(SourceAdapter):
         user_agent: str = "mmore-paper-discovery/1.0",
         max_pages: int = 2,
         max_results: int = 50,
-        category_map: Optional[Dict[str, str]] = None,
+        category_map: dict[str, str] | None = None,
         enable_pair_query: bool = True,
     ):
         self.headers = {"User-Agent": user_agent}
@@ -52,7 +52,7 @@ class ArxivAdapter(SourceAdapter):
         self.category_map = category_map or {}
         self.enable_pair_query = enable_pair_query
 
-    def search(self, query: str, category_title: str) -> List[Paper]:
+    def search(self, query: str, category_title: str) -> list[Paper]:
         terms = _extract_terms(query)
         if not terms:
             logger.info("arXiv: no usable terms from query, skipping")
@@ -67,7 +67,7 @@ class ArxivAdapter(SourceAdapter):
         if cat_code:
             simplified.append(f"cat:{cat_code}")
 
-        papers: List[Paper] = []
+        papers: list[Paper] = []
         for q in simplified:
             for page in range(self.max_pages):
                 start = page * 25
@@ -109,7 +109,7 @@ class ArxivAdapter(SourceAdapter):
                     return papers[: self.max_results]
         return papers
 
-    def _cat_code_for(self, category_title: str) -> Optional[str]:
+    def _cat_code_for(self, category_title: str) -> str | None:
         title_lower = category_title.lower()
         for needle, code in self.category_map.items():
             if needle.lower() in title_lower:
@@ -117,29 +117,22 @@ class ArxivAdapter(SourceAdapter):
         return None
 
 
-def _extract_terms(boolean_query: str) -> List[str]:
+def _extract_terms(boolean_query: str) -> list[str]:
     """Pull double-quoted phrases out of the boolean string."""
     quoted = re.findall(r'"([^"]+)"', boolean_query)
     return [t for t in quoted if t.lower() not in STOPWORDS]
 
 
 def _build_simplified_queries(
-    terms: List[str],
+    terms: list[str],
     top_n: int = MAX_SIMPLIFIED_TERMS,
     enable_pair: bool = True,
-) -> List[str]:
-    """Turn a list of terms into per-term standalone arXiv queries.
+) -> list[str]:
+    """Build one `all:"<term>"` query per term, keeping the first `top_n`.
 
-    Every term in `chosen` (= `terms[:top_n]`) gets its own
-    `all:"<term>"` standalone query.
-
-    When `enable_pair=True` (the default), one extra targeted query is
-    appended that ANDs the top two terms: `all:"chosen[0]" AND
-    all:"chosen[1]"`. The intent is to bias toward results that contain
-    both lead concepts without doing combinatorial `O(n^2)` pair
-    queries (which would blow past the 3-second rate limit).
-
-    Set `enable_pair=False` to suppress this single extra query.
+    With `enable_pair`, adds a single query requiring the top two terms
+    together, which favours papers about both concepts. Only the top pair,
+    since every extra query costs another 3 seconds.
     """
     chosen = terms[:top_n]
     queries = [f'all:"{t}"' for t in chosen]
@@ -148,14 +141,14 @@ def _build_simplified_queries(
     return queries
 
 
-def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
+def _parse_atom(xml_text: str, category_title: str) -> list[Paper]:
     try:
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
         logger.warning("arXiv parse failed: %s", e)
         return []
 
-    out: List[Paper] = []
+    out: list[Paper] = []
     for entry in root.findall("atom:entry", NS):
         title = _text(entry, "atom:title")
         summary = _text(entry, "atom:summary")
@@ -187,6 +180,6 @@ def _parse_atom(xml_text: str, category_title: str) -> List[Paper]:
     return out
 
 
-def _text(elem, path: str) -> Optional[str]:
+def _text(elem, path: str) -> str | None:
     node = elem.find(path, NS)
     return node.text if node is not None else None

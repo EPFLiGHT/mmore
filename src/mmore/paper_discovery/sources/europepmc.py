@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import List, Optional
 
 import requests
 
@@ -27,8 +26,8 @@ class EuropePmcAdapter(SourceAdapter):
         self.max_pages = max_pages
         self.max_results = max_results
 
-    def search(self, query: str, category_title: str) -> List[Paper]:
-        papers: List[Paper] = []
+    def search(self, query: str, category_title: str) -> list[Paper]:
+        papers: list[Paper] = []
         cursor = "*"
         for _ in range(self.max_pages):
             params = {
@@ -81,7 +80,7 @@ class EuropePmcAdapter(SourceAdapter):
         )
 
 
-def _parse_authors(entry: dict) -> Optional[List[str]]:
+def _parse_authors(entry: dict) -> list[str] | None:
     """Prefer the structured `authorList.author[].fullName` (available with
     `resultType=core`). Fall back to naively splitting the pre-joined
     `authorString` when the structured shape is missing - imperfect

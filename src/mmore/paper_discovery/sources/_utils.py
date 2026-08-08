@@ -1,9 +1,7 @@
 """Helpers shared by the source adapters."""
 
-from typing import Optional
 
-
-def coerce_year(value: object) -> Optional[int]:
+def coerce_year(value: object) -> int | None:
     """Best-effort publication year from whatever a source returned.
 
     Handles the shapes the adapters actually see: an int (OpenAlex), a
@@ -24,7 +22,7 @@ def coerce_year(value: object) -> Optional[int]:
         return None
 
 
-def first_year(entry: dict, *keys: str) -> Optional[int]:
+def first_year(entry: dict, *keys: str) -> int | None:
     """First key in `keys` that yields a usable year via `coerce_year`.
 
     Args:

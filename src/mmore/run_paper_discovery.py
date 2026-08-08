@@ -1,10 +1,12 @@
 # mmore/run_paper_discovery.py
-"""Entrypoint for `mmore paper-discovery --config-file <yaml>`."""
+"""Entrypoint for `mmore paper-discovery --config-file <yaml>`.
+
+No `load_dotenv()` here, unlike the other entrypoints. Every source this
+pipeline talks to is anonymous, so there are no secrets to load.
+"""
 
 import argparse
 import time
-
-from dotenv import load_dotenv
 
 from mmore.profiler import enable_profiling_from_env, profile_function
 
@@ -12,8 +14,6 @@ from .paper_discovery.config import PaperDiscoveryConfig
 from .paper_discovery.logging_config import logger
 from .paper_discovery.pipeline import PaperDiscoveryPipeline
 from .utils import load_config
-
-load_dotenv()
 
 
 @profile_function()

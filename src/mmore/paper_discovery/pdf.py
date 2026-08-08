@@ -1,9 +1,8 @@
-"""PDF download + text extraction. Generic by design — never raises on remote errors."""
+"""Download PDFs and pull text out of them. Never raises on remote errors."""
 
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 from urllib.parse import quote, urljoin
 
 import requests
@@ -33,10 +32,10 @@ LOGIN_PAGE_MARKERS = (
 class DownloadResult:
     """Outcome of a single PDF fetch. The pipeline tallies these at the end."""
 
-    path: Optional[str] = None  # local file path on success
+    path: str | None = None  # local file path on success
     paywalled: bool = False  # publisher returned 401/402/403/429
     errored: bool = False  # network/timeout/other, actionable
-    status: Optional[int] = None  # last seen HTTP status, if any
+    status: int | None = None  # last seen HTTP status, if any
     login_page: bool = False  # got an auth page instead of the PDF
 
 
@@ -45,18 +44,21 @@ def download_pdf(
     save_dir: str,
     user_agent: str = "mmore-paper-discovery/1.0",
     timeout: int = 30,
-    proxy_prefix: Optional[str] = None,
+    proxy_prefix: str | None = None,
 ) -> DownloadResult:
-    """Returns a DownloadResult describing what happened.
+    """Fetch one PDF, following a landing page if that is what we get.
 
-    1. Optionally wrap URL through a proxy prefix.
-    2. GET the URL.
-    3. If response looks like a PDF, save it.
-    4. Otherwise parse the HTML for the first PDF-looking <a href>, follow it.
+    Args:
+      url: Where the PDF is, or a page that links to it.
+      save_dir: Directory to cache the file in.
+      user_agent: Sent on the request. The default identifies this tool
+        honestly rather than posing as a browser.
+      timeout: Per-request timeout in seconds.
+      proxy_prefix: Optional EZproxy host to route through.
 
-    The polite default User-Agent identifies this tool honestly. Publishers
-    that block automated tools return 401/402/403/429. That is their call,
-    and we report it as paywalled rather than as an error.
+    Returns:
+      A `DownloadResult` saying what happened, including whether the
+      publisher refused us and whether we hit a sign-in page.
     """
     Path(save_dir).mkdir(parents=True, exist_ok=True)
     headers = {"User-Agent": user_agent}
@@ -109,19 +111,15 @@ def download_pdf(
     return DownloadResult(status=r2.status_code)
 
 
-def _proxify(url: str, prefix: Optional[str]) -> str:
-    """Wrap a URL through an EZproxy-style prefix for institutional access.
+def _proxify(url: str, prefix: str | None) -> str:
+    """Route a URL through an EZproxy host.
 
-    Example, using your own library's proxy host:
-        prefix = "https://ezproxy.example.edu"
-        url    = "https://onlinelibrary.wiley.com/doi/pdf/10.1111/cogs.13256"
-        ->     "https://ezproxy.example.edu/login?url=https%3A%2F%2F..."
+        "https://ezproxy.example.edu" + "https://wiley.com/x.pdf"
+        -> "https://ezproxy.example.edu/login?url=https%3A%2F%2F..."
 
-    Only useful if your institution runs EZproxy. Institutions that grant
-    access by IP recognition over VPN need no prefix at all, the direct URL
-    already works once you are on the VPN.
-
-    No-op when prefix is None or the URL is already proxied.
+    Does nothing without a prefix, or if the URL is already routed. Only
+    relevant where the institution runs EZproxy, since VPN and IP
+    recognition need no rewriting.
     """
     if not prefix or prefix in url:
         return url
@@ -140,9 +138,8 @@ def _looks_like_pdf(response: requests.Response) -> bool:
 def _looks_like_login_page(response: requests.Response) -> bool:
     """True when an HTML body is a sign-in form rather than content.
 
-    A proxy that cannot authenticate the caller answers 200 OK with its
-    login page. Without this check the pipeline would file that as a
-    silent skip and the user would see no reason for the failure.
+    A proxy that cannot authenticate us answers 200 OK with its login page.
+    Detecting it is what stops the pipeline recording a silent skip.
     """
     if "html" not in response.headers.get("Content-Type", "").lower():
         return False
@@ -151,10 +148,9 @@ def _looks_like_login_page(response: requests.Response) -> bool:
 
 
 def expected_pdf_path(url: str, save_dir: str) -> Path:
-    """Where a PDF for `url` would be cached. Pure - no I/O.
+    """Where a PDF for `url` would be cached. No I/O.
 
-    Used both by `_save_pdf` (on write) and by the pipeline's cache check
-    (on read), so the two stay in sync.
+    Shared by the writer and the pipeline's cache check so the two agree.
     """
     name = Path(url.split("?", 1)[0]).name or "paper"
     if not name.lower().endswith(".pdf"):
@@ -168,7 +164,7 @@ def _save_pdf(content: bytes, url: str, save_dir: str) -> str:
     return str(path)
 
 
-def _find_pdf_link(html: str, base: str) -> Optional[str]:
+def _find_pdf_link(html: str, base: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
     for a in soup.find_all("a", href=True):
         # bs4 types an attribute as str | list[str]; join covers the rare
@@ -182,21 +178,16 @@ def _find_pdf_link(html: str, base: str) -> Optional[str]:
 
 
 def extract_text(pdf_path: str, mode: str = "fast") -> str:
-    """Extract text from a PDF using mmore's unified `PDFProcessor`.
+    """Pull text out of a PDF using mmore's own `PDFProcessor`.
 
     Args:
       pdf_path: Local path to the PDF.
-      mode:     Which PDFProcessor path to invoke.
-                  - "fast" (default): `process_fast`, the PyMuPDF-backed
-                    path. No marker/surya models are loaded.
-                  - "full": `process`, the full marker + surya pipeline
-                    used by `mmore process`. Better layout handling on
-                    complex PDFs; downloads model weights on first use.
+      mode: `"fast"` uses the PyMuPDF path and loads no models. `"full"`
+        uses marker and surya, which handles complex layouts better but
+        downloads weights on first use. Unknown values fall back to fast.
 
-    Both modes go through the same `PDFProcessor` class so behaviour
-    stays consistent with the rest of mmore. Imports are lazy so that
-    `paper_discovery` modules stay cheap to import when PDF extraction
-    is not used.
+    Returns:
+      The extracted text, or an empty string if extraction failed.
     """
     try:
         from ..process.processors.base import ProcessorConfig

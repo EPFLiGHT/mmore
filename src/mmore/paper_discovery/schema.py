@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from ..type import MultimodalSample
@@ -9,8 +9,8 @@ if TYPE_CHECKING:
 class SourceName(str, Enum):
     """Which repository a `Paper` came from.
 
-    Subclasses `str` so members serialize as their plain value
-    (`"arxiv"`, not `"SourceName.ARXIV"`) with no custom JSON encoder.
+    Subclasses `str` so members serialize as their plain value, `"arxiv"`
+    rather than `"SourceName.ARXIV"`, with no custom JSON encoder.
     """
 
     ARXIV = "arxiv"
@@ -21,12 +21,12 @@ class SourceName(str, Enum):
 
 @dataclass
 class CategoryQuery:
-    """Boolean query for one category - output of Stage 1, input to Stage 2."""
+    """A boolean query for one category. Stage 1 builds these, stage 2 runs them."""
 
     combination_title: str
     boolean_combination: str
 
-    def to_dict(self) -> Dict[str, str]:
+    def to_dict(self) -> dict[str, str]:
         return {
             "combination_title": self.combination_title,
             "boolean_combination": self.boolean_combination,
@@ -35,18 +35,22 @@ class CategoryQuery:
 
 @dataclass
 class Paper:
-    """One academic paper, normalized across all sources."""
+    """One paper, in the same shape whichever source it came from.
 
-    title: Optional[str] = None
-    authors: Optional[List[str]] = None
-    url: Optional[str] = None
-    abstract: Optional[str] = None
-    year: Optional[int] = None
-    extracted_text: Optional[str] = None
-    source: Optional[SourceName] = None
-    search_category: Optional[str] = None
+    Every field is optional because sources differ in what they return.
+    `None` means we do not know, not that the value is empty.
+    """
 
-    def to_dict(self) -> Dict[str, Any]:
+    title: str | None = None
+    authors: list[str] | None = None
+    url: str | None = None
+    abstract: str | None = None
+    year: int | None = None
+    extracted_text: str | None = None
+    source: SourceName | None = None
+    search_category: str | None = None
+
+    def to_dict(self) -> dict[str, Any]:
         return {
             "title": self.title,
             "authors": self.authors,
@@ -59,21 +63,18 @@ class Paper:
         }
 
     def to_multimodal_sample(self, pdf_path: str = "") -> "MultimodalSample":
-        """Convert this Paper into a `mmore.type.MultimodalSample`.
+        """Convert to mmore's document shape so index and rag can read it.
 
-        The result plugs directly into mmore's downstream pipelines
-        (post-process -> index -> rag) so a Paper Discovery run does
-        not need a second pass through `mmore process`.
+        Args:
+          pdf_path: Path to the cached PDF, if one was downloaded.
 
-        - `text` uses the extracted PDF body if available, otherwise
-          the abstract, otherwise the title.
-        - `metadata.file_path` points at the cached PDF when known.
-        - Paper-specific fields (title, authors, year, source, url,
-          search_category, abstract) live under `metadata.extra` so
-          they survive the JSONL round-trip.
+        Returns:
+          A `MultimodalSample` whose text is the extracted PDF body, falling
+          back to the abstract and then the title. The paper's own fields go
+          in `metadata.extra` so nothing is lost through JSONL.
         """
-        # Local import - mmore.type is core, but keeping the schema
-        # module free of heavy imports at load time is still cheaper.
+        # Imported here rather than at module scope to keep this module
+        # cheap to import when only the dataclasses are needed.
         from ..type import DocumentMetadata, MultimodalSample
 
         body = self.extracted_text or self.abstract or self.title or ""
@@ -103,7 +104,7 @@ class Paper:
 
 @dataclass
 class SynonymEntry:
-    """One row of the synonym table."""
+    """A canonical word and the terms that mean the same thing."""
 
     word: str
-    synonyms: List[str] = field(default_factory=list)
+    synonyms: list[str] = field(default_factory=list)

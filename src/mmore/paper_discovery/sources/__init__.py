@@ -7,13 +7,10 @@ one with the constructor kwargs forwarded from `PaperDiscoveryConfig`.
 To add a new source: implement the `SourceAdapter` protocol in a new module
 and register it here.
 
-Google Scholar is opt-in - the adapter itself defers importing `scholarly`
-to its `search()` call, so registering the class unconditionally is safe.
-If a user enables `google_scholar` in their config without installing
-`scholarly`, the adapter logs a warning and returns `[]`.
+Google Scholar is registered unconditionally. Its adapter imports
+`scholarly` lazily inside `search()`, so a missing package logs a warning
+and returns nothing rather than breaking the import.
 """
-
-from typing import Dict, Type
 
 from .arxiv import ArxivAdapter
 from .base import SourceAdapter
@@ -21,7 +18,7 @@ from .europepmc import EuropePmcAdapter
 from .google_scholar import GoogleScholarAdapter
 from .openalex import OpenAlexAdapter
 
-REGISTRY: Dict[str, Type[SourceAdapter]] = {
+REGISTRY: dict[str, type[SourceAdapter]] = {
     "openalex": OpenAlexAdapter,
     "europepmc": EuropePmcAdapter,
     "arxiv": ArxivAdapter,
@@ -33,11 +30,11 @@ def get_adapter(name: str, **kwargs) -> SourceAdapter:
     """Instantiate the adapter registered under `name`.
 
     Args:
-      name:    Source key from `PaperDiscoveryConfig.sources`
-               (e.g. `"openalex"`, `"arxiv"`).
-      kwargs:  Forwarded to the adapter constructor — typically
-               `user_agent`, `max_pages`, `max_results`, and source-specific
-               extras (e.g. `category_map`, `enable_pair_query` for arXiv).
+      name: Source key from `PaperDiscoveryConfig.sources`, such as
+        `"openalex"` or `"arxiv"`.
+      kwargs: Passed to the adapter constructor. Usually `user_agent`,
+        `max_pages` and `max_results`, plus source-specific extras such as
+        arXiv's `category_map` and `enable_pair_query`.
 
     Raises:
       ValueError: if `name` is not in `REGISTRY`.

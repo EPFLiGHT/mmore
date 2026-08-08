@@ -1,6 +1,5 @@
 import logging
 import time
-from typing import Dict, List, Optional
 
 import requests
 
@@ -27,8 +26,8 @@ class OpenAlexAdapter(SourceAdapter):
         self.max_pages = max_pages
         self.max_results = max_results
 
-    def search(self, query: str, category_title: str) -> List[Paper]:
-        papers: List[Paper] = []
+    def search(self, query: str, category_title: str) -> list[Paper]:
+        papers: list[Paper] = []
         cursor = "*"
 
         for _ in range(self.max_pages):
@@ -80,7 +79,7 @@ class OpenAlexAdapter(SourceAdapter):
         )
 
 
-def _rebuild_abstract(inverted: Optional[Dict[str, List[int]]]) -> Optional[str]:
+def _rebuild_abstract(inverted: dict[str, list[int]] | None) -> str | None:
     """OpenAlex returns abstracts as {token: [positions]} not a string."""
     if not inverted:
         return None

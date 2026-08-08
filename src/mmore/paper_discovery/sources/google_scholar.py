@@ -1,11 +1,11 @@
-"""Google Scholar adapter — opt-in, best-effort. Captcha-prone.
+"""Google Scholar adapter. Opt-in and best-effort, since Scholar serves
+captchas to automated callers.
 
-Requires the optional `scholarly` package. We import lazily so that
-the rest of the module works without it.
+Needs the optional `scholarly` package, imported lazily so the rest of the
+module works without it.
 """
 
 import logging
-from typing import List
 
 from ..schema import Paper, SourceName
 from ._utils import coerce_year
@@ -30,7 +30,7 @@ class GoogleScholarAdapter(SourceAdapter):
         del user_agent, max_pages
         self.max_results = max_results
 
-    def search(self, query: str, category_title: str) -> List[Paper]:
+    def search(self, query: str, category_title: str) -> list[Paper]:
         try:
             from scholarly import scholarly
         except ImportError:
@@ -40,7 +40,7 @@ class GoogleScholarAdapter(SourceAdapter):
             )
             return []
 
-        papers: List[Paper] = []
+        papers: list[Paper] = []
         try:
             results = scholarly.search_pubs(query)
             for _ in range(self.max_results):
@@ -64,6 +64,6 @@ class GoogleScholarAdapter(SourceAdapter):
             logger.warning("Google Scholar request failed: %s", e)
             if not papers:
                 logger.warning(
-                    "Empty Google Scholar yield — possible captcha/throttling"
+                    "Google Scholar returned nothing, possibly a captcha or throttling"
                 )
         return papers
