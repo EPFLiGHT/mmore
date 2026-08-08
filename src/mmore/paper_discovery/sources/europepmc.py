@@ -63,7 +63,7 @@ class EuropePmcAdapter(SourceAdapter):
     def _to_paper(self, entry: dict, category_title: str) -> Paper:
         urls = entry.get("fullTextUrlList", {}).get("fullTextUrl", [])
         pdf_url = next(
-            (u.get("url") for u in urls if u.get("docementStyle", "").lower() == "pdf"),
+            (u.get("url") for u in urls if u.get("documentStyle", "").lower() == "pdf"),
             None,
         )
         landing = next((u.get("url") for u in urls), None)

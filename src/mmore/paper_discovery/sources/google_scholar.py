@@ -22,6 +22,11 @@ class GoogleScholarAdapter(SourceAdapter):
         max_pages: int = 1,
         max_results: int = 20,
     ):
+        # `scholarly` drives its own HTTP transport and pagination, so
+        # user_agent and max_pages are accepted for parity with the other
+        # adapters (get_adapter passes the same kwargs to all of them) but
+        # cannot be forwarded.
+        del user_agent, max_pages
         self.max_results = max_results
 
     def search(self, query: str, category_title: str) -> List[Paper]:

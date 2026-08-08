@@ -30,10 +30,9 @@ def load_synonyms(path: Union[str, Path]) -> List[SynonymEntry]:
 
     Args:
       path: Path to a `.jsonl` file. Each non-empty line must be a JSON
-            object with a `word` (or `WORD`) key, plus a `synonyms` (or
-            `SYNONYMS AND NEAR SYNONYMS`) key holding either:
-              - a list of strings, or
-              - a single string with terms separated by `,` or `;`.
+            object with a `word` key and a `synonyms` key holding either
+            a list of strings or a single string with terms separated by
+            `,` or `;`.
 
             Example:
                 {"word": "Foundation model", "synonyms": ["LLM", "GPT"]}
@@ -42,7 +41,7 @@ def load_synonyms(path: Union[str, Path]) -> List[SynonymEntry]:
     Returns:
       List of `SynonymEntry`, one per row (rows missing `word` are
       skipped). Term whitespace is normalized and `"` characters are
-      stripped; case is preserved on the stored value but lookups in
+      stripped. Case is preserved on the stored value but lookups in
       `build_boolean_queries` are case-insensitive.
     """
     path = Path(path)
@@ -51,8 +50,8 @@ def load_synonyms(path: Union[str, Path]) -> List[SynonymEntry]:
 
     entries: List[SynonymEntry] = []
     for row in rows:
-        word = row.get("word") or row.get("WORD")
-        raw = row.get("synonyms") or row.get("SYNONYMS AND NEAR SYNONYMS") or ""
+        word = row.get("word")
+        raw = row.get("synonyms") or ""
         if isinstance(raw, str):
             synonyms_raw = [s.strip() for s in re.split(r"[,;]", raw) if s.strip()]
         else:

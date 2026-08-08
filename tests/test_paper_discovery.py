@@ -12,7 +12,7 @@ from mmore.paper_discovery.sources.arxiv import (
     _build_simplified_queries,
     _extract_terms,
 )
-from mmore.paper_discovery.sources.europepmc import _parse_authors
+from mmore.paper_discovery.sources.europepmc import EuropePmcAdapter, _parse_authors
 from mmore.paper_discovery.sources.openalex import OpenAlexAdapter, _rebuild_abstract
 
 # ---------------------------------------------------------------------------
@@ -126,8 +126,38 @@ class TestArxivSimplification:
 
 
 # ---------------------------------------------------------------------------
-# Synonym loading: JSONL / quote sanitization
+# Europe PMC parsing
 # ---------------------------------------------------------------------------
+
+
+class TestEuropePmcToPaper:
+    def _entry(self, urls):
+        return {
+            "title": "A Paper",
+            "fullTextUrlList": {"fullTextUrl": urls},
+            "pubYear": "2024",
+        }
+
+    def test_prefers_pdf_url_over_landing_page(self):
+        # Regression: the key was misspelled `docementStyle`, so this branch
+        # never matched and every result fell through to the landing page.
+        adapter = EuropePmcAdapter()
+        entry = self._entry(
+            [
+                {"url": "http://x/landing", "documentStyle": "html"},
+                {"url": "http://x/paper.pdf", "documentStyle": "pdf"},
+            ]
+        )
+        assert adapter._to_paper(entry, "Cat").url == "http://x/paper.pdf"
+
+    def test_falls_back_to_first_url_when_no_pdf(self):
+        adapter = EuropePmcAdapter()
+        entry = self._entry([{"url": "http://x/landing", "documentStyle": "html"}])
+        assert adapter._to_paper(entry, "Cat").url == "http://x/landing"
+
+    def test_url_is_none_when_no_urls(self):
+        adapter = EuropePmcAdapter()
+        assert adapter._to_paper(self._entry([]), "Cat").url is None
 
 
 class TestEuropePmcParseAuthors:

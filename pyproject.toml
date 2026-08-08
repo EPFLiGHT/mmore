@@ -175,13 +175,8 @@ websearch = [
 ]
 
 paper_discovery = [
-    # PDF text extraction goes through mmore.process.PDFProcessor for
-    # consistency with the rest of mmore. The fast path uses PyMuPDF
-    # (no marker models loaded), so runtime cost is small even though
-    # the install pulls the full `process` stack.
     "mmore[process]",
     "requests>=2.31",
-    "beautifulsoup4>=4.13",
 ]
 
 dev = ["pytest>=8.3.4", "pytest-timeout>=2.3.1", "ruff>=0.4.0", "pyright"]

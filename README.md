@@ -15,7 +15,7 @@
 ## Massive Multimodal Open RAG & Extraction
 
 mmore is an open-source, end-to-end pipeline to ingest, process, index, and retrieve knowledge from heterogeneous files: PDFs, Office docs, spreadsheets, emails, images, audio, video, and web pages. It standardizes content into a unified multimodal format, supports distributed CPU/GPU processing, and provides hybrid dense+sparse retrieval with an integrated RAG service (CLI, APIs).
-https://github.com/EPFLiGHT/mmore/pull/319/conflict?name=.github%252Fworkflows%252Fpyright.yml&ancestor_oid=e880609d900c8d1ca113e404d0d60dc5604ddc65&base_oid=652683914c68996968fa4d333618d000927a80eb&head_oid=104f07055d58c2e6c1420d89649cd5de5e57f32e
+
 👉 Read the paper for more details (arXiv): [mmore: Massive Multimodal Open RAG & Extraction](https://arxiv.org/abs/2509.11937)
 
 
