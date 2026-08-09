@@ -8,6 +8,7 @@ from multiprocessing import Manager, Process, set_start_method
 from typing import Any, Dict, List, Optional, Tuple, cast
 
 import pymupdf
+import pymupdf4llm
 import torch
 from marker.config.parser import ConfigParser
 from marker.converters.pdf import PdfConverter
@@ -21,6 +22,8 @@ from ..utils import clean_image, clean_text
 from .base import Processor, ProcessorConfig
 
 IMG_REGEX = r"!\[\]\(_page_\d+_[A-Za-z0-9_]+\.(jpeg|jpg|png|gif)\)"
+
+MD_IMG_REGEX = re.compile(r"!\[]\(([^)]*)\)")
 
 
 @dataclass
@@ -72,7 +75,7 @@ class PDFProcessor(Processor):
 
     @staticmethod
     def load_models(
-        disable_image_extraction: bool = False, device: Optional[str] = None
+            disable_image_extraction: bool = False, device: Optional[str] = None
     ):
         artifact_dict = PDFProcessor._get_artifacts(device)
 
@@ -231,7 +234,7 @@ class PDFProcessor(Processor):
         prev_end = 0
         for match in separators:
             page_id = int(match.group(1))
-            page_content = text[prev_end : match.start()]
+            page_content = text[prev_end: match.start()]
             page_texts.append((page_id, page_content))
             prev_end = match.end()
         trailing = text[prev_end:]
@@ -261,16 +264,17 @@ class PDFProcessor(Processor):
 
         return paragraph_starts, clean_text
 
+
     def process_fast(self, file_path: str) -> MultimodalSample:
         pdf_doc = pymupdf.Document(file_path)
-        all_text_parts = []
-        embedded_images = []
+        all_text_parts: List[str] = []
+        embedded_images: List[Image.Image] = []
         paragraph_starts: List[
             Tuple[int, int, int]
         ] = []  # (char_offset, page_num, para_index)
-        current_position = 0
 
-        def _extract_images(pdf_doc, xref) -> Optional[Image.Image]:
+        def _extract_image(pdf_doc: pymupdf.Document, xref: int) -> Optional[Image.Image]:
+            """Extract an embedded image XObject at its native resolution as RGB."""
             try:
                 base_image = pdf_doc.extract_image(xref)
                 image_bytes = base_image.get("image")
@@ -296,34 +300,58 @@ class PDFProcessor(Processor):
                 )
                 return None
 
-        for page_num, page in enumerate(pdf_doc):  # pyright: ignore[reportArgumentType]
-            text = clean_text(page.get_text())  # type: ignore[attr-defined]
+        current_position = 0
 
-            if text.strip():
-                para_idx = 0
-                offset_in_page = 0
-                for segment in text.split("\n\n"):
-                    if segment.strip():
-                        paragraph_starts.append(
-                            (current_position + offset_in_page, page_num, para_idx)
-                        )
-                        para_idx += 1
-                    offset_in_page += len(segment) + 2  # +2 for the "\n\n" separator
+        md_pages = pymupdf4llm.to_markdown(
+            pdf_doc,
+            page_chunks=True,
+            write_images=False,
+        )
 
-                all_text_parts.append(text)
-                current_position += len(text)
+        # track xref to detect images that are reused across the pdf
+        seen_xrefs: set[int] = set()
+
+        for page_num, page in enumerate(md_pages):
+            text = cast(str, page["text"])
+            text = MD_IMG_REGEX.sub("", text)
+
+            # keep_two_line_breaks preserves the blank lines that separate
+            # Markdown blocks, which the paragraph_starts split relies on.
+            text = clean_text(text, keep_two_line_breaks=True)
 
             if self.config.extract_images:
-                for img_info in page.get_images(full=False):
-                    image = _extract_images(pdf_doc, img_info[0])
-                    if image and clean_image(image):
-                        # clean image filters images below size 512x512 and variance below 100, these are defaults and can be changed
+                for img_info in pdf_doc[page_num].get_images(full=True):
+                    xref = img_info[0]
+                    if xref in seen_xrefs:
+                        continue
+                    seen_xrefs.add(xref)
+                    image = _extract_image(pdf_doc, xref)
+
+                    if image is not None and clean_image(
+                            image
+                    ):
                         embedded_images.append(image)
-                        attachment_text = self.config.attachment_tag
-                        all_text_parts.append(attachment_text)
-                        current_position += len(attachment_text)
-            else:
-                embedded_images = []
+                        text = (
+                            f"{text}\n\n{self.config.attachment_tag}"
+                            if text.strip()
+                            else self.config.attachment_tag
+                        )
+
+            if not text.strip():
+                continue
+
+            para_idx = 0
+            offset_in_page = 0
+            for segment in text.split("\n\n"):
+                if segment.strip():
+                    paragraph_starts.append(
+                        (current_position + offset_in_page, page_num, para_idx)
+                    )
+                    para_idx += 1
+                offset_in_page += len(segment) + 2  # +2 for the "\n\n" separator
+
+            all_text_parts.append(text)
+            current_position += len(text)
 
         paragraph_starts.append((current_position, -1, -1))
         metadata = PDFMetadata(file_path=file_path, paragraph_starts=paragraph_starts)
@@ -348,7 +376,7 @@ class PDFProcessor(Processor):
         return batches
 
     def _process_parallel(
-        self, files_paths, gpu_id, extract_images, output_queue, error_queue
+            self, files_paths, gpu_id, extract_images, output_queue, error_queue
     ):
         try:
             torch.cuda.set_device(gpu_id)
