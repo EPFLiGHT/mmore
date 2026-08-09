@@ -75,7 +75,7 @@ class PDFProcessor(Processor):
 
     @staticmethod
     def load_models(
-            disable_image_extraction: bool = False, device: Optional[str] = None
+        disable_image_extraction: bool = False, device: Optional[str] = None
     ):
         artifact_dict = PDFProcessor._get_artifacts(device)
 
@@ -234,7 +234,7 @@ class PDFProcessor(Processor):
         prev_end = 0
         for match in separators:
             page_id = int(match.group(1))
-            page_content = text[prev_end: match.start()]
+            page_content = text[prev_end : match.start()]
             page_texts.append((page_id, page_content))
             prev_end = match.end()
         trailing = text[prev_end:]
@@ -264,7 +264,6 @@ class PDFProcessor(Processor):
 
         return paragraph_starts, clean_text
 
-
     def process_fast(self, file_path: str) -> MultimodalSample:
         pdf_doc = pymupdf.Document(file_path)
         all_text_parts: List[str] = []
@@ -273,7 +272,9 @@ class PDFProcessor(Processor):
             Tuple[int, int, int]
         ] = []  # (char_offset, page_num, para_index)
 
-        def _extract_image(pdf_doc: pymupdf.Document, xref: int) -> Optional[Image.Image]:
+        def _extract_image(
+            pdf_doc: pymupdf.Document, xref: int
+        ) -> Optional[Image.Image]:
             """Extract an embedded image XObject at its native resolution as RGB."""
             try:
                 base_image = pdf_doc.extract_image(xref)
@@ -327,9 +328,7 @@ class PDFProcessor(Processor):
                     seen_xrefs.add(xref)
                     image = _extract_image(pdf_doc, xref)
 
-                    if image is not None and clean_image(
-                            image
-                    ):
+                    if image is not None and clean_image(image):
                         embedded_images.append(image)
                         text = (
                             f"{text}\n\n{self.config.attachment_tag}"
@@ -376,7 +375,7 @@ class PDFProcessor(Processor):
         return batches
 
     def _process_parallel(
-            self, files_paths, gpu_id, extract_images, output_queue, error_queue
+        self, files_paths, gpu_id, extract_images, output_queue, error_queue
     ):
         try:
             torch.cuda.set_device(gpu_id)
