@@ -163,11 +163,29 @@ The project supports multiple file types and utilizes various AI-based tools for
 mmore also uses [Dask Distributed](https://distributed.dask.org/en/latest/) to manage distributed execution.
 
 ## 🔧 Customization
+### Custom Processors
 The system is designed to be extensible, allowing you to register custom processors for handling new file types or specialized processing. To implement a new processor you need to inherit the `Processor` class and implement only two methods:
 - `accepts`: defines which file types your processor supports (e.g. docx)
 - `process`: how to process a single file (input:file type, output: Multimodal sample, see other processors for reference)
 
 For a minimal example, see [`TextProcessor`](https://github.com/EPFLiGHT/mmore/blob/main/src/mmore/process/processors/txt_processor.py).
+
+### Processor Preferences
+For file extensions supported by multiple processors, a preferred processor can be selected in `dispatcher_config`.
+You can add a processor preference by specifying the file extension and the processor name in `processor_selection`, for example:
+
+```yaml
+dispatcher_config:
+  processor_selection:
+    ".pdf": PDFProcessor
+    ".docx": DOCXProcessor
+```
+
+Each key is a file extension, including the leading dot, and each value is the processor class name.
+
+If no processor is specified for an extension, the first compatible processor is used.
+
+⚠️ If the selected processor is not compatible with the file, the file is skipped.
 
 ## 🧹 Post-processing
 

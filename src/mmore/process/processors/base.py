@@ -66,45 +66,33 @@ class ProcessorRegistry:
         return cls._registry
 
 
-# AJ : Added processor preferrences in the method's arguments
 class AutoProcessor:
     @classmethod
     def from_file(
-        cls, 
+        cls,
         file: FileDescriptor,
-        preferred_processor: Optional[str] = None, #new argument
+        preferred_processor: Optional[str] = None,
     ):
         """
         Determine and return the appropriate processor for the given file.
 
         Args:
             file (FileDescriptor): The file descriptor to process.
+            preferred_processor (Optional[str]): the preferred processor to process the file.
 
         Returns:
             Processor: The appropriate processor for the file, or None if no processor is found.
         """
 
+        for processor in ProcessorRegistry.get_processors():
+            if processor.accepts(file) and (
+                preferred_processor is None
+                or processor.__name__ == preferred_processor
+            ):
+                return processor
 
-        # AJ : if there is a preference, return processor corresponding to preferrence if it exists.
-        # AJ : No preference => return first processor which accepts the file
-
-        if(preferred_processor is not None):
-            for processor in ProcessorRegistry.get_processors():
-                if(
-                    processor.__name__ == preferred_processor
-                    and processor.accepts(file)
-                ):
-                    return processor
-
-            return None
-        
-        else:
-            for processor in ProcessorRegistry.get_processors():
-                if processor.accepts(file):
-                    return processor
-
-            logger.warning(f"No registered processor found for file {file}")
-            return None
+        logger.warning(f"No registered processor found for file {file}")
+        return None
 
 
 class Processor(ABC):
