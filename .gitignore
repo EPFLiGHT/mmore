@@ -128,8 +128,16 @@ test*.sh
 .venv
 
 # Examples
-examples/outputs
+examples/outputs/
 outputs/
+
+# Paper Discovery local artifacts
+examples/paper_discovery/pdf_cache/
+examples/paper_discovery/papers.json
+examples/paper_discovery/papers.jsonl
+examples/paper_discovery/papers.samples.jsonl
+# ...but keep the small committed sample of the output format
+!examples/paper_discovery/papers.sample.jsonl
 
 paper/
 chitchat/

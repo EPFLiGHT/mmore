@@ -1,0 +1,10 @@
+# Categories drive the pipeline: each category produces one search per
+# source. The list under each name MUST reference canonical `word`
+# entries in your synonyms file (lookup is case-insensitive).
+categories:
+  Broad Foundational Search:
+    - Foundation model
+    - Machine Learning
+  Humanitarian AI Search:
+    - Foundation model
+    - Humanitarian & Crisis Response

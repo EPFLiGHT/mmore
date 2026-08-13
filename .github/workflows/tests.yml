@@ -33,7 +33,7 @@ jobs:
         run: |
           uv venv .venv
           source .venv/bin/activate
-          uv pip install -e ".[process,index,rag,api,cpu,dev,websearch,privacy]"
+          uv pip install -e ".[process,index,rag,api,cpu,dev,websearch,privacy,paper_discovery]"
 
       - name: Show installed cohere and langchain-cohere versions
         run: |

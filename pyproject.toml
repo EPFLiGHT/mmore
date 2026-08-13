@@ -170,7 +170,7 @@ tui = [
 ]
 
 all = [
-    "mmore[process,rag,api,websearch,tui,privacy]",
+    "mmore[process,rag,api,websearch,tui,privacy,paper_discovery]",
 ]
 
 cpu = [
@@ -185,6 +185,11 @@ cu126 = [
 websearch = [
     "tavily-python>=0.3.0",
     "ddgs>=6.0",
+]
+
+paper_discovery = [
+    "mmore[process]",
+    "requests>=2.31",
 ]
 
 dev = ["pytest>=8.3.4", "pytest-timeout>=2.3.1", "ruff>=0.4.0", "pyright"]

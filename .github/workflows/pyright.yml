@@ -22,7 +22,7 @@ jobs:
         run: pipx install uv
 
       - name: Install base dependencies
-        run: uv venv .venv && source .venv/bin/activate && uv pip install -e ".[process,index,rag,api,tui,cpu,dev,websearch,privacy]"
+        run: uv venv .venv && source .venv/bin/activate && uv pip install -e ".[process,index,rag,api,tui,cpu,dev,websearch,privacy,paper_discovery]"
 
       - name: Run Pyright (base)
         continue-on-error: true

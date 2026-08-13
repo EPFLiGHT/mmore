@@ -1,0 +1,64 @@
+# Synonyms file - JSONL, one {"word": ..., "synonyms": [...]} object per line.
+synonyms_path: examples/paper_discovery/synonyms.jsonl
+
+# Categories live in their own YAML, loaded via the `CategoriesFile`
+# dataclass. Keeps PaperDiscoveryConfig flat and lets you swap category
+# sets without touching the rest of the pipeline config.
+categories_path: examples/paper_discovery/categories.yaml
+
+output_file: examples/paper_discovery/papers.jsonl
+pdf_dir: examples/paper_discovery/pdf_cache
+
+# Optional. If set, the pipeline ALSO writes results as JSONL of
+# MultimodalSample records (mmore's canonical processed-document shape).
+# That file plugs directly into `mmore process` post-processing,
+# `mmore index`, and the RAG pipeline - no re-processing needed.
+multimodal_output_file: examples/paper_discovery/papers.samples.jsonl
+
+sources:
+  - openalex
+  - europepmc
+  - arxiv
+  # - google_scholar  # opt-in, captcha-prone. Requires `pip install scholarly`.
+  #                   See docs/core_features/paper_discovery.md.
+
+download_pdfs: true
+max_pages: 2
+max_results: 25
+
+# Which mmore PDFProcessor path to use for text extraction.
+#   "fast" - PyMuPDF-backed process_fast(). No models loaded. Good default.
+#   "full" - marker + surya (mmore process). Better on complex layouts,
+#            but downloads model weights on first use and wants a GPU.
+pdf_extractor: fast
+
+# Reuse PDFs already in pdf_dir from previous runs. Set true to force
+# re-downloading everything (e.g. after a publisher updates a paper).
+force_redownload: false
+
+# Optional EZproxy prefix for institutional access to paywalled PDFs.
+# Most people should leave this unset. Only set it if your institution
+# actually runs EZproxy, and use the host your own library publishes.
+# If your institution grants access by VPN instead (EPFL works this way),
+# leave it unset and connect to the VPN. See the docs for details.
+# pdf_proxy_prefix: "https://ezproxy.example.edu"
+
+# HTTP User-Agent header sent on every outbound request. Identify your
+# caller honestly so rate-limiters / abuse desks can reach you. OpenAlex
+# routes UAs with a contact address into a faster pool.
+user_agent: "mmore-paper-discovery/1.0 (https://github.com/EPFLiGHT/mmore)"
+
+# Custom labels for arXiv category codes. Each key is a substring matched
+# (case-insensitive) against the human-readable category title; the value
+# is the arXiv category code injected into the arXiv query as
+# `cat:<code>`. Categories without a match here just don't get a `cat:`
+# clause - the search still runs.
+arxiv_category_map:
+  Foundational: cs.LG
+  Humanitarian: cs.CY
+
+# When true (default), the arXiv adapter adds one extra targeted query
+# that ANDs the top two simplified terms (`all:"X" AND all:"Y"`) on top
+# of the standalone per-term queries. Set false to skip - saves one
+# 3-second round-trip per category.
+arxiv_enable_pair_query: true
