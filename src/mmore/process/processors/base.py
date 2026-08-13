@@ -86,8 +86,7 @@ class AutoProcessor:
 
         for processor in ProcessorRegistry.get_processors():
             if processor.accepts(file) and (
-                preferred_processor is None
-                or processor.__name__ == preferred_processor
+                preferred_processor is None or processor.__name__ == preferred_processor
             ):
                 return processor
 

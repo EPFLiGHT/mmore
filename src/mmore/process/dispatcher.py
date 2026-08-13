@@ -201,8 +201,9 @@ class Dispatcher:
 
         for file_path_list in self.result.file_paths.values():
             for file in file_path_list:
-
-                preferred_processor_for_file = all_processor_preferences.get(file.file_extension)
+                preferred_processor_for_file = all_processor_preferences.get(
+                    file.file_extension
+                )
                 processor = AutoProcessor.from_file(file, preferred_processor_for_file)
 
                 if processor is None:
