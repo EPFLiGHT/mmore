@@ -67,7 +67,7 @@ process = [
     "trafilatura>=1.12",
     "clean-text",
     "Unidecode",
-    "chonkie>=0.2.1,<1",
+    "chonkie>=0.2.1,<2",
     "langdetect>=1.0.9",
     "argostranslate",
     "langid",
