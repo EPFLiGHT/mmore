@@ -105,6 +105,7 @@ class JudgeResult:
     web_query: Optional[str] = None
     retrieve_params: Optional[Dict[str, Any]] = None
     llm_invoked: bool = False
+    raw_llm_response: Optional[str] = None
     raw_decision: Optional[str] = None
     coerced_decision: bool = False
 

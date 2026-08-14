@@ -11,29 +11,32 @@ from rich.console import Console, Group
 from rich.panel import Panel
 from rich.text import Text
 
-console = Console()
+from mmore.ux import Color
+
+console = Console(highlight=False)
+
+# Role styles derived from the shared palette (mmore.ux.Color)
+ACCENT = Color.ACCENT
+ACCENT2 = Color.ACCENT2
+MUTED = Color.GRAY
+OK = f"bold {Color.GREEN}"
+WARN = str(Color.YELLOW)
+ERR = f"bold {Color.RED}"
 
 QSTYLE = Style(
     [
-        ("qmark", "fg:#5fd7ff bold"),
+        ("qmark", f"fg:{ACCENT} bold"),
         ("question", "bold"),
-        ("answer", "fg:#ff5fd7 bold"),
-        ("pointer", "fg:#5fd7ff bold"),
-        ("highlighted", "fg:#5fd7ff bold"),
-        ("selected", "fg:#ff5fd7"),
-        ("instruction", "fg:#808080 italic"),
-        ("disabled", "fg:#ffaf00 italic"),
+        ("answer", f"fg:{Color.MMORE} bold"),
+        ("pointer", f"fg:{ACCENT} bold"),
+        ("highlighted", f"fg:{ACCENT} bold"),
+        ("selected", f"fg:{Color.MMORE}"),
+        ("instruction", f"fg:{MUTED} italic"),
+        ("disabled", f"fg:{Color.ORANGE} italic"),
     ]
 )
 QMARK = "▸"
 
-# Palette
-ACCENT = "bright_cyan"
-ACCENT2 = "magenta"
-MUTED = "grey58"
-OK = "bold green"
-WARN = "yellow"
-ERR = "bold red"
 
 BANNER = r"""
 
@@ -50,7 +53,7 @@ def _mmore_logo(text: str) -> Text:
     """Color the banner like the mmore GitHub logo.
 
     Strategy, per character:
-    - The second `M` (columns 12:23 of every row) is rendered fully in yellow.
+    - The second `M` (columns 12:23 of every row) is rendered in the brand color.
     - Elsewhere: outline characters (`╔╗╚╝═║╔╝╗`, etc.) are white and the
       filled `█` blocks are black, giving the letters a hollow look.
     """
@@ -75,7 +78,7 @@ def _mmore_logo(text: str) -> Text:
                     out.append(ch)
 
         _emit(left)
-        out.append(mid, style="bold yellow")
+        out.append(mid, style=f"bold {Color.MMORE}")
         _emit(right)
         out.append("\n")
     return out
@@ -105,18 +108,10 @@ def section(title: str, body: str | Text, style: str = ACCENT) -> Panel:
 
 
 def run_step(label: str, fn: Callable[..., Any], **kwargs: Any) -> float:
-    """Print a start line, call fn(**kwargs), print a timed done line.
-
-    Heavy pipeline commands emit their own logs via logging/click which bypass
-    rich.Console — a Live spinner would clash with them. Plain prints keep the
-    output readable while still showing progress.
-    """
+    """Call fn(**kwargs) and return its clock duration."""
     start = time.time()
-    console.print(f"  [{ACCENT}]▸[/] {label}…")
     fn(**kwargs)
-    elapsed = time.time() - start
-    console.print(f"  [{OK}]✓[/] {label} [dim]({elapsed:.1f}s)[/dim]")
-    return elapsed
+    return time.time() - start
 
 
 def step_header(idx: int, total: int, name: str) -> None:

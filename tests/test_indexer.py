@@ -11,7 +11,7 @@ from pymilvus import MilvusClient
 from mmore.index.indexer import Indexer
 from mmore.rag.model import DenseModelConfig, SparseModelConfig
 from mmore.run_index import index
-from mmore.type import MultimodalSample
+from mmore.type import DocumentMetadata, MultimodalSample
 
 
 @pytest.fixture
@@ -98,7 +98,7 @@ def test_indexer_idempotent_collection(mock_sparse, tmp_path):
             document_id="doc-4",
             text="A fourth document.",
             modalities=[],
-            metadata={},
+            metadata=DocumentMetadata(),
         )
     ]
 
@@ -153,7 +153,7 @@ def test_indexer_error_on_missing_collection(mock_sparse, tmp_path):
     )
 
     doc = MultimodalSample(
-        id="x", document_id="x", text="test", modalities=[], metadata={}
+        id="x", document_id="x", text="test", modalities=[], metadata=DocumentMetadata()
     )
     with pytest.raises(Exception):
         # Bypasses index_documents (which creates the collection) and inserts directly

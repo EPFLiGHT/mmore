@@ -19,9 +19,9 @@ CPU-only:
 sudo docker build -f docker/leap/Dockerfile --build-arg DEVICE=cpu -t mmore:leap-cpu .
 ```
 
-Custom extras (overrides the default `--extra all,cu126` or `--extra all,cpu`):
+Custom extras (overrides the default `--extra all --extra cu126` or `--extra all --extra cpu`):
 ```bash
-sudo docker build -f docker/leap/Dockerfile --build-arg UV_OVERRIDE="--extra all,cu126" -t mmore:leap .
+sudo docker build -f docker/leap/Dockerfile --build-arg UV_OVERRIDE="--extra process --extra rag --extra cpu" -t mmore:leap .
 ```
 
 ## Run

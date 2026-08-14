@@ -1,6 +1,6 @@
 # 🚀 Cluster and Production Deployment
 
-This page provides guidelines for deploying MMORE in a shared cluster environment and, if needed, adapting it for production deployment.
+This page provides guidelines for deploying mmore in a shared cluster environment and, if needed, adapting it for production deployment.
 
 The examples below assume a Run:ai-based cluster setup with a shared persistent volume. You may need to adapt paths, scheduler options, and environment variables to match your infrastructure.
 
@@ -20,9 +20,9 @@ id -g  # Your group ID
 
 Choose one of the two options below:  
 
-**Option A — CI build (recommended):** Trigger the [Build Student Image](https://github.com/swiss-ai/mmore/actions/workflows/push-to-registry.yml) workflow manually from the GitHub Actions tab (*Run workflow*) and input your user UID and group GID. This builds a custom student GPU image published to GHCR, tagged as:
+**Option A — CI build (recommended):** Trigger the [Build Student Image](https://github.com/EPFLiGHT/mmore/actions/workflows/push-to-registry.yml) workflow manually from the GitHub Actions tab (*Run workflow*) and input your user UID and group GID. This builds a custom student GPU image published to GHCR, tagged as:
 ```
-ghcr.io/swiss-ai/mmore:student-uid<user-id>-gid<group-id>-gpu
+ghcr.io/EPFLiGHT/mmore:student-uid<user-id>-gid<group-id>-gpu
 ```
 You can then use this image reference directly in the Run:ai commands below. 
 
@@ -46,7 +46,7 @@ docker push docker.io/<username>/mmore:latest
 ### 3. Identify your image reference 
 
 All `runai` commands below use `<image>` as a placeholder. Replace it with:
-- Option A: `ghcr.io/swiss-ai/mmore:student-uid<user-id>-gid<group-id>-gpu`
+- Option A: `ghcr.io/EPFLiGHT/mmore:student-uid<user-id>-gid<group-id>-gpu`
 - Option B: `docker.io/<username>/mmore:latest`
 
 For detailed installation instructions, see [Installation](../getting_started/installation.md).
@@ -89,7 +89,7 @@ For development, debugging, or manual operations, you can start an interactive s
 The example below assumes a Run:ai-based environment. Replace `<group-id>` with your actual group ID. 
 
 ```bash
-runai submit swissaimmore \
+runai submit mmore \
   --image <image> \
   --node-pool h100 \
   --pvc light-scratch:/lightscratch \
@@ -106,7 +106,7 @@ This provides a direct terminal access to the container.
 
 ## ⚙️ Production Pipeline Execution
 
-The following examples show how to submit MMORE pipeline stages as cluster jobs in a Run:ai-based environment.  
+The following examples show how to submit mmore pipeline stages as cluster jobs in a Run:ai-based environment.  
 Adapt resource settings, storage mounts, paths, and scheduler flags to your infrastructure.
 
 ### 1. Document Processing
@@ -116,7 +116,7 @@ Replace `<group-id>` with your actual group ID.
 
 ```bash
 runai submit \
-  --name swissaimmore-process \
+  --name mmore-process \
   --image <image> \
   --backoff-limit 0 \
   --pvc light-scratch:/lightscratch \
@@ -137,7 +137,7 @@ Clean and structure the extracted data.
 
 ```bash
 runai submit \
-  --name swissaimmore-postprocess \
+  --name mmore-postprocess \
   --image <image> \
   --backoff-limit 0 \
   --pvc light-scratch:/lightscratch \
@@ -158,7 +158,7 @@ Create searchable vector indexes.
 
 ```bash
 runai submit \
-  --name swissaimmore-index \
+  --name mmore-index \
   --image <image> \
   --backoff-limit 0 \
   --pvc light-scratch:/lightscratch \
@@ -179,7 +179,7 @@ Deploy the retrieval API service.
 
 ```bash
 runai submit \
-  --name swissaimmore-rag \
+  --name mmore-rag \
   --image <image> \
   --backoff-limit 0 \
   --pvc light-scratch:/lightscratch \
@@ -200,7 +200,7 @@ runai submit \
 To access the service locally, use:
 
 ```bash
-runai port-forward swissaimmore-rag 8080:8080
+runai port-forward mmore-rag 8080:8080
 ```
 
 

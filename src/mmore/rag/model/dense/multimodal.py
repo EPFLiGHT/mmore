@@ -14,8 +14,9 @@ from ....type import MultimodalSample
 class MultimodalEmbeddings(Embeddings):
     def __init__(self, model_name: str):
         super().__init__()
+        float16: torch.dtype = torch.float16
         self.model = AutoModelForImageTextToText.from_pretrained(
-            model_name, torch_dtype=torch.float16, device_map="auto"
+            model_name, torch_dtype=float16, device_map="auto"
         )
         self.processor = AutoProcessor.from_pretrained(model_name)
         self.device = self.model.device

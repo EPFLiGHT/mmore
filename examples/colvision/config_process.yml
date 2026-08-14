@@ -1,0 +1,12 @@
+data_path:
+  - 'examples/sample_data/pdf'
+
+output_path: "./output"
+
+# Supported models: vidore/colqwen2.5-v0.2, vidore/colqwen2-v1.0,
+#   Cognitive-Lab/ColNetraEmbed, vidore/colSmol-256M, vidore/colpali-v1.3
+model_name: "vidore/colqwen2.5-v0.2"
+
+skip_already_processed: true
+num_workers: 5
+batch_size: 8

@@ -23,7 +23,7 @@ In practice, it supports:
 - optional WebRAG and CLI usage in batch mode
 
 You can customize various parts of the pipeline by defining an inference RAG configuration file at
-[`examples/rag/api/rag_api.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/rag/api/rag_api.yaml).
+[`examples/rag/api/rag_api.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/api/rag_api.yaml).
 
 
 ## 💻 Minimal Example:
@@ -32,9 +32,9 @@ Here is a minimal example to create a RAG pipeline hosted through [LangGraph](ht
 
 ### 1. Create a RAG inference config file
 
-Create your RAG Inference config file based on the [batch example `examples/rag/config.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/rag/config.yaml) or the [API example `examples/rag/config_api.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/rag/config_api.yaml).
+Create your RAG Inference config file based on the [batch example `examples/rag/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/config.yaml) or the [API example `examples/rag/config_api.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/config_api.yaml).
 
-You can check the structure of the configuration file with the dataclass [RAGConfig]( https://github.com/swiss-ai/mmore/blob/master/src/mmore/rag/pipeline.py).
+You can check the structure of the configuration file with the dataclass [RAGConfig]( https://github.com/EPFLiGHT/mmore/blob/main/src/mmore/rag/pipeline.py).
 
 ### 2. Start the RAG pipeline
 
@@ -63,7 +63,7 @@ curl --location --request POST http://localhost:8000/rag \
 ```
 In batch mode, the pipeline is run directly with the input data specified in the configuration file, and the result is saved to the specified path.
 
-See [`examples/rag`](https://github.com/swiss-ai/mmore/blob/master/examples/rag/) for other use cases.
+See [`examples/rag`](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/) for other use cases.
 
 ## 🔎 Main modules
 
@@ -77,7 +77,7 @@ Here is an example on how to use the retriever module on its own. Note that it a
 
 #### 1. Create a config
 
-Start from the [example config file `examples/index/config.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/index/config.yaml).
+Start from the [example config file `examples/index/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/index/config.yaml).
 
 #### 2. Retrieve from the vector store
 
@@ -152,7 +152,7 @@ Start it with:
 python3 -m mmore ragcli --config-file /path/to/config.yaml
 ```
 
-You can customize the CLI by defining [a RAG configuration file](https://github.com/swiss-ai/mmore/blob/master/examples/rag/config.yaml) or by setting preferences from within the CLI.
+You can customize the CLI by defining [a RAG configuration file](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/config.yaml) or by setting preferences from within the CLI.
 
 
 
@@ -162,7 +162,7 @@ The LLM wrappers are based on LangChain's [`BaseChatModel`](https://python.langc
 If you want to create a custom retriever you can simply make it inherit from this class and use it as described in our examples. 
 
 ```{warning}
-MMORE supports [Hugging Face Hub](https://huggingface.co/models) models.
+mmore supports [Hugging Face Hub](https://huggingface.co/models) models.
 
 In some cases, a simpler solution is to push a model to the Hub and use it through the existing class rather than implementing a new wrapper.
 ```

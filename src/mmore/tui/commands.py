@@ -67,28 +67,38 @@ def _index(
     index(config_file, documents_path, collection_name)
 
 
-def _retrieve(config_file: str, **_):
-    from mmore.run_retriever import run_api
-
-    run_api(config_file, "0.0.0.0", 8001)
-
-
-def _rag(config_file: str, **_):
+def _rag(config_file: str, privacy_config_file: Optional[str] = None, **_):
     from mmore.run_rag import rag
 
-    rag(config_file)
+    rag(config_file, privacy_config_file=privacy_config_file)
 
 
-def _ragcli(config_file: str, **_):
+def _privacy_not_runnable(**_):
+    raise RuntimeError("privacy is a config for `rag`, not a standalone stage")
+
+
+def _ragcli(config_file: str, privacy_config_file: Optional[str] = None, **_):
     from mmore.run_ragcli import RagCLI
 
-    RagCLI(config_file).launch_cli()
+    RagCLI(config_file, privacy_config_file=privacy_config_file).launch_cli()
 
 
 def _websearch(config_file: str, **_):
     from mmore.run_websearch import run_websearch
 
     run_websearch(config_file)
+
+
+def _colvision_process(config_file: str, **_):
+    from mmore.colvision.run_process import run_process
+
+    run_process(config_file)
+
+
+def _colvision_index(config_file: str, **_):
+    from mmore.colvision.run_index import index
+
+    index(config_file)
 
 
 # Lazy dataclass importers — keeps heavy deps out of TUI startup.
@@ -114,6 +124,24 @@ def _dc_rag():
     from mmore.run_rag import RAGInferenceConfig
 
     return RAGInferenceConfig
+
+
+def _dc_privacy():
+    from mmore.privacy.config import PrivacyConfig
+
+    return PrivacyConfig
+
+
+PRIVACY_SPEC = CommandSpec(
+    name="privacy",
+    description="Detect + sanitize sensitive data before the cloud call",
+    example_config="examples/rag/privacy.yaml",
+    run=_privacy_not_runnable,
+    config_globs=["examples/**/privacy*.yaml", "examples/**/privacy*.yml"],
+    config_dataclass=_dc_privacy,
+    required_extras=["privacy"],
+    canary_imports=["dspy", "langgraph"],
+)
 
 
 REGISTRY: dict[str, CommandSpec] = {
@@ -157,19 +185,6 @@ REGISTRY: dict[str, CommandSpec] = {
         required_extras=["index", "cpu"],
         canary_imports=["pymilvus", "sentence_transformers", "torch"],
     ),
-    "retrieve": CommandSpec(
-        name="retrieve",
-        description="Run retriever API server",
-        example_config="examples/rag/config.yaml",
-        run=_retrieve,
-        config_globs=[
-            "examples/rag/**/*.yaml",
-            "examples/rag/**/*.yml",
-        ],
-        config_dataclass=_dc_rag,
-        required_extras=["rag", "api", "cpu"],
-        canary_imports=["fastapi", "pymilvus", "torch"],
-    ),
     "rag": CommandSpec(
         name="rag",
         description="Run a one-shot RAG pipeline",
@@ -207,5 +222,23 @@ REGISTRY: dict[str, CommandSpec] = {
         ],
         required_extras=["websearch"],
         canary_imports=["ddgs"],
+    ),
+    "colvision-process": CommandSpec(
+        name="colvision-process",
+        description="Embed PDF pages with ColVision",
+        example_config="examples/colvision/config_process.yml",
+        run=_colvision_process,
+        config_globs=["examples/colvision/**/*.yaml", "examples/colvision/**/*.yml"],
+        required_extras=["colvision", "cpu"],
+        canary_imports=["colpali_engine", "torch"],
+    ),
+    "colvision-index": CommandSpec(
+        name="colvision-index",
+        description="Store ColVision embeddings in Milvus",
+        example_config="examples/colvision/config_index.yml",
+        run=_colvision_index,
+        config_globs=["examples/colvision/**/*.yaml", "examples/colvision/**/*.yml"],
+        required_extras=["colvision", "cpu"],
+        canary_imports=["colpali_engine", "pymilvus"],
     ),
 }

@@ -7,7 +7,7 @@ from rich.table import Table
 from rich.text import Text
 
 from mmore.tui.commands import REGISTRY
-from mmore.tui.config_builder import pick_or_build_config
+from mmore.tui.config_builder import pick_or_build_config, pick_privacy_config
 from mmore.tui.inspector import inspect_jsonl
 from mmore.tui.theme import (
     ACCENT,
@@ -117,7 +117,9 @@ def run_pipeline_with_configs(process_cfg: str, pp_cfg: str, index_cfg: str) -> 
 
     if questionary.confirm("Open the RAG chat now?", default=True).ask():
         rag_cfg = pick_or_build_config(REGISTRY["ragcli"])
-        REGISTRY["ragcli"].run(config_file=rag_cfg)
+        REGISTRY["ragcli"].run(
+            config_file=rag_cfg, privacy_config_file=pick_privacy_config()
+        )
 
 
 def run_full_pipeline() -> None:
@@ -171,4 +173,6 @@ def run_full_pipeline() -> None:
 
     if questionary.confirm("Open the RAG chat now?", default=True).ask():
         rag_cfg = pick_or_build_config(REGISTRY["ragcli"])
-        REGISTRY["ragcli"].run(config_file=rag_cfg)
+        REGISTRY["ragcli"].run(
+            config_file=rag_cfg, privacy_config_file=pick_privacy_config()
+        )

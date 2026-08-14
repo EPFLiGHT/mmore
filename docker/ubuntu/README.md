@@ -4,10 +4,10 @@ Based on `ubuntu:22.04` (CPU) or `nvidia/cuda:12.6.3-base-ubuntu22.04` (GPU).
 
 > **Other base OS variants:** Dockerfiles for [Arch Linux](../arch/README.md) and [openSUSE Leap](../leap/README.md) are also available if you need a different base distribution.
 
-> **Pre-built images:** CPU and GPU images are automatically built and published to GHCR on every push to `master` via the CI workflow. Each image is a multi-platform manifest covering `linux/amd64` and `linux/arm64`. Pull them directly with:
+> **Pre-built images:** CPU and GPU images are automatically built and published to GHCR on every push to `main` via the CI workflow. Each image is a multi-platform manifest covering `linux/amd64` and `linux/arm64`. Pull them directly with:
 > ```bash
-> docker pull ghcr.io/swiss-ai/mmore:edge-gpu
-> docker pull ghcr.io/swiss-ai/mmore:edge-cpu
+> docker pull ghcr.io/EPFLiGHT/mmore:edge-gpu
+> docker pull ghcr.io/EPFLiGHT/mmore:edge-cpu
 > ```
 
 ## Build
@@ -26,9 +26,9 @@ CPU-only:
 sudo docker build -f docker/ubuntu/Dockerfile --build-arg DEVICE=cpu -t mmore:cpu .
 ```
 
-Custom extras (overrides the default `--extra all,cu126` or `--extra all,cpu`):
+Custom extras (overrides the default `--extra all --extra cu126` or `--extra all --extra cpu`):
 ```bash
-sudo docker build -f docker/ubuntu/Dockerfile --build-arg UV_OVERRIDE="--extra all,cu126" -t mmore .
+sudo docker build -f docker/ubuntu/Dockerfile --build-arg UV_OVERRIDE="--extra process --extra rag --extra cpu" -t mmore .
 ```
 
 Custom user UID/GID (e.g. for RCP):

@@ -26,7 +26,7 @@ Here is a minimal example to index [processed documents](process.md).
 
 ### 1. Create a config file
 
-Start from the example configuration file: [`examples/index/config.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/index/config.yaml).
+Start from the example configuration file: [`examples/index/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/index/config.yaml).
 
 
 Adjust it to match your setup and indexing needs.

@@ -1,32 +1,29 @@
 import argparse
 import json
-import logging
 import time
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 import uvicorn
 from fastapi import APIRouter, FastAPI
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
-from tqdm import tqdm
 
 from mmore.profiler import enable_profiling_from_env, profile_function
 
 from ..utils import load_config
-from .retriever import ColPaliRetriever, ColPaliRetrieverConfig
-
-RETRIEVER_EMOJI = "🔍"
-logger = logging.getLogger(__name__)
-handler = logging.StreamHandler()
-handler.setFormatter(
-    logging.Formatter(
-        f"[RETRIEVER {RETRIEVER_EMOJI} -- %(asctime)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
+from ..ux import (
+    progress,
+    quiet_noisy_libs,
+    setup_logging,
+    step_intro,
+    step_summary,
 )
-logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+from .retriever import ColVisionRetriever, ColVisionRetrieverConfig
+
+RETRIEVER_NAME = "ColVision Retrieve"
+RETRIEVER_EMOJI = "🔍"
+logger = setup_logging(RETRIEVER_NAME, RETRIEVER_EMOJI)
 
 
 def read_queries(input_file: Path) -> List[str]:
@@ -49,40 +46,55 @@ def save_results(results: List[List[Document]], queries: List[str], output_file:
 
     with open(output_file, "w", encoding="utf-8") as f:
         json.dump(formatted_results, f, indent=2, ensure_ascii=False)
-    logger.info(f"Saved results to {output_file}")
+    logger.debug(f"Saved results to {output_file}")
 
 
 @profile_function()
-def retrieve(config_file: str, input_file: str, output_file: str):
-    """Retrieve documents for specified queries via ColPali-based similarity search."""
+def retrieve(
+    config_file: str,
+    input_file: str,
+    output_file: str,
+    model_name_override: Optional[str] = None,
+):
+    """Retrieve documents for specified queries via ColVision-based similarity search."""
+    quiet_noisy_libs()
     # Load the config file
-    config = load_config(config_file, ColPaliRetrieverConfig)
+    config = load_config(config_file, ColVisionRetrieverConfig)
+    if model_name_override:
+        config.model_name = model_name_override
+        logger.debug(f"Model overridden via CLI: {model_name_override}")
 
-    logger.info("Running ColPali retriever...")
-    retriever = ColPaliRetriever.from_config(config)
-    logger.info("Retriever loaded!")
+    logger.debug("Loading retriever...")
+    retriever = ColVisionRetriever.from_config(config)
 
     queries = read_queries(Path(input_file))
-    logger.info(f"Loaded {len(queries)} queries from {input_file}")
-
-    logger.info("Starting document retrieval...")
+    step_intro(
+        RETRIEVER_NAME,
+        RETRIEVER_EMOJI,
+        "Find the PDF pages that best match each query",
+        [
+            f"{len(queries)} queries",
+            f"top_k: {config.top_k}",
+            f"model: {config.model_name}",
+        ],
+    )
     start_time = time.time()
 
     retrieved_docs_for_all_queries = []
-
-    # Call invoke for each query
-    for query in tqdm(queries, desc="Retrieving documents", unit="query"):
+    bar = progress(queries, desc="Retrieving", unit="query")
+    for query in bar:
+        bar.set_postfix_str(str(query)[:40])
         docs_for_query = retriever.invoke(query, k=config.top_k)
         retrieved_docs_for_all_queries.append(docs_for_query)
 
-    end_time = time.time()
-    time_taken = end_time - start_time
-    logger.info(f"Document retrieval completed in {time_taken:.2f} seconds.")
-    logger.info("Retrieved documents!")
-
-    # Save results to output file
+    time_taken = time.time() - start_time
     save_results(retrieved_docs_for_all_queries, queries, Path(output_file))
-    logger.info(f"Done! Results saved to {output_file}")
+    step_summary(
+        RETRIEVER_NAME,
+        RETRIEVER_EMOJI,
+        time_taken,
+        {"queries": len(queries), "top_k": config.top_k},
+    )
 
 
 class RetrieverQuery(BaseModel):
@@ -92,20 +104,25 @@ class RetrieverQuery(BaseModel):
     )
 
 
-def make_router(config_file: str) -> APIRouter:
+def make_router(
+    config_file: str, model_name_override: Optional[str] = None
+) -> APIRouter:
     """Create API router with retriever endpoint."""
+    quiet_noisy_libs()
     router = APIRouter()
 
     # Load the config file
-    config = load_config(config_file, ColPaliRetrieverConfig)
+    config = load_config(config_file, ColVisionRetrieverConfig)
+    if model_name_override:
+        config.model_name = model_name_override
+        logger.debug(f"Model overridden via CLI: {model_name_override}")
 
-    logger.info("Running ColPali retriever...")
-    retriever_obj = ColPaliRetriever.from_config(config)
-    logger.info("Retriever loaded!")
+    logger.debug("Loading retriever...")
+    retriever_obj = ColVisionRetriever.from_config(config)
 
     @router.post("/v1/retrieve", tags=["Retrieval"])
     def retriever(query: RetrieverQuery):
-        """Query the ColPali retriever."""
+        """Query the ColVision retriever."""
         docs_for_query = retriever_obj.invoke(query.query, k=query.top_k)
 
         docs_info = []
@@ -125,19 +142,36 @@ def make_router(config_file: str) -> APIRouter:
 
 
 @profile_function()
-def run_api(config_file: str, host: str, port: int):
-    """Run the ColPali retriever API server."""
-    router = make_router(config_file)
+def run_api(
+    config_file: str,
+    host: str,
+    port: int,
+    model_name_override: Optional[str] = None,
+):
+    """Run the ColVision retriever API server."""
+    router = make_router(config_file, model_name_override=model_name_override)
+
+    config = load_config(config_file, ColVisionRetrieverConfig)
+    step_intro(
+        RETRIEVER_NAME,
+        RETRIEVER_EMOJI,
+        "Serve PDF-page search over an API",
+        [
+            f"http://{host}:{port}",
+            f"model: {model_name_override or config.model_name}",
+            "endpoint: POST /v1/retrieve",
+        ],
+    )
 
     app = FastAPI(
-        title="ColPali Retriever API",
+        title="ColVision Retriever API",
         description="""This API is based on the OpenAPI 3.1 specification. You can find out more about Swagger at [https://swagger.io](https://swagger.io).
 
     ## Overview
 
-    This API defines the ColPali retriever API of mmore, handling:
+    This API defines the ColVision retriever API of mmore, handling:
 
-    1. **Document Retrieval** - Semantic search using ColPali embeddings stored in Milvus.
+    1. **Document Retrieval** - Semantic search using ColVision embeddings stored in Milvus.
     2. **PDF Page Search** - Retrieve relevant PDF pages based on query similarity.""",
         version="1.0.0",
     )
@@ -149,7 +183,7 @@ def run_api(config_file: str, host: str, port: int):
 if __name__ == "__main__":
     enable_profiling_from_env()
     parser = argparse.ArgumentParser(
-        description="Retrieve documents from local Milvus database using ColPali embeddings."
+        description="Retrieve documents from local Milvus database using ColVision embeddings."
     )
     parser.add_argument(
         "--config-file",

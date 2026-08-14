@@ -11,12 +11,12 @@ import scipy
 from langchain_core.embeddings import Embeddings
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 from pymilvus import CollectionSchema, DataType, FieldSchema, MilvusClient
-from tqdm import tqdm
 
 from ..rag.model import DenseModel, DenseModelConfig, SparseModel, SparseModelConfig
 from ..rag.model.dense.multimodal import MultimodalEmbeddings
 from ..type import MultimodalSample
 from ..utils import load_config
+from ..ux import progress
 
 logger = logging.getLogger(__name__)
 
@@ -54,17 +54,18 @@ class Indexer:
         dense_model_config: DenseModelConfig,
         sparse_model_config: SparseModelConfig,
         client: MilvusClient,
+        device: Optional[str] = None,
     ):
-        # Load the embedding models
+        # Load the embedding models on the given device
         self.dense_model_config = dense_model_config
-        self.dense_model = DenseModel.from_config(dense_model_config)
+        self.dense_model = DenseModel.from_config(dense_model_config, device=device)
         self.sparse_model_config = sparse_model_config
-        self.sparse_model = SparseModel.from_config(sparse_model_config)
+        self.sparse_model = SparseModel.from_config(sparse_model_config, device=device)
 
         self.client = client
 
     @classmethod
-    def from_config(cls, config: str | IndexerConfig):
+    def from_config(cls, config: str | IndexerConfig, device: Optional[str] = None):
         # Load the config if it's a string
         if isinstance(config, str):
             config_obj = load_config(config, IndexerConfig)
@@ -82,6 +83,7 @@ class Indexer:
             dense_model_config=config_obj.dense_model,
             sparse_model_config=config_obj.sparse_model,
             client=milvus_client,
+            device=device,
         )
 
     @classmethod
@@ -92,8 +94,9 @@ class Indexer:
         collection_name: str = "my_docs",
         partition_name: Optional[str] = None,
         batch_size: int = 64,
+        device: Optional[str] = None,
     ):
-        indexer = Indexer.from_config(config)
+        indexer = Indexer.from_config(config, device=device)
         indexer.index_documents(
             documents,
             collection_name=collection_name,
@@ -140,7 +143,7 @@ class Indexer:
         """Create index on the embeddings fields."""
         index_params = self.client.prepare_index_params()
 
-        logger.info(
+        logger.debug(
             f"Creating index for dense embeddings with model {self.dense_model_config.model_name}"
         )
         index_params.add_index(
@@ -152,7 +155,7 @@ class Indexer:
             params={"nlist": 128},
         )
 
-        logger.info(
+        logger.debug(
             f"Creating index for sparse embeddings with model {self.sparse_model_config.model_name}"
         )
         index_params.add_index(
@@ -173,51 +176,50 @@ class Indexer:
     ) -> int:
         # Process new documents in batches
         inserted = 0
-        for i in tqdm(
-            range(0, len(documents), batch_size), desc="Indexing documents..."
-        ):
-            # Get the batch
-            batch = documents[i : i + batch_size]
+        with progress(total=len(documents), desc="Indexing", unit="doc") as bar:
+            for i in range(0, len(documents), batch_size):
+                # Get the batch
+                batch = documents[i : i + batch_size]
 
-            # Compute embeddings
-            dense_embeddings = self.dense_model.embed_documents(
-                Indexer._get_texts(batch, self.dense_model_config.is_multimodal)
-            )
-            sparse_embeddings: scipy.sparse.coo_array = (
-                self.sparse_model.embed_documents(
-                    Indexer._get_texts(batch, self.sparse_model_config.is_multimodal)
+                # Compute embeddings
+                dense_embeddings = self.dense_model.embed_documents(
+                    Indexer._get_texts(batch, self.dense_model_config.is_multimodal)
                 )
-            )
+                sparse_embeddings: scipy.sparse.coo_array = (
+                    self.sparse_model.embed_documents(
+                        Indexer._get_texts(
+                            batch, self.sparse_model_config.is_multimodal
+                        )
+                    )
+                )
 
-            # Insert the batch
-            data = [
-                {
-                    "id": sample.id,
-                    "document_id": sample.document_id,
-                    "text": sample.text,
-                    "dense_embedding": d,
-                    "sparse_embedding": s,
-                    **sample.metadata.to_dict(),
-                }
-                for sample, d, s in zip(batch, dense_embeddings, sparse_embeddings)
-            ]
+                # Insert the batch
+                data = [
+                    {
+                        "id": sample.id,
+                        "document_id": sample.document_id,
+                        "text": sample.text,
+                        "dense_embedding": d,
+                        "sparse_embedding": s,
+                        **sample.metadata.to_dict(),
+                    }
+                    for sample, d, s in zip(batch, dense_embeddings, sparse_embeddings)
+                ]
 
-            batch_inserted = self.client.insert(
-                data=data,
-                collection_name=collection_name,
-                partition_name=partition_name,
-            )
+                batch_inserted = self.client.insert(
+                    data=data,
+                    collection_name=collection_name,
+                    partition_name=partition_name,
+                )
 
-            inserted += batch_inserted["insert_count"]
+                inserted += batch_inserted["insert_count"]
+                bar.update(len(batch))
 
         return inserted
 
     def _log_collection_stats(self, collection_name: str):
-        logger.info("-" * 50)
-        logger.info("Collection stats (before inserting):")
-        for k, v in self.client.get_collection_stats(collection_name).items():
-            logger.info(f"  - {k}: {v}")
-        logger.info("-" * 50)
+        stats = self.client.get_collection_stats(collection_name)
+        logger.debug(f"Collection stats for {collection_name}: {stats}")
 
     def index_documents(
         self,
@@ -228,10 +230,15 @@ class Indexer:
     ) -> int:
         # Create collection
         if not self.client.has_collection(collection_name):
-            logger.info(f"Creating collection {collection_name}")
-            self._create_collection_with_schema(collection_name)
+            logger.debug(f"Creating collection {collection_name}")
+            try:
+                self._create_collection_with_schema(collection_name)
+            except Exception as e:
+                if not self.client.has_collection(collection_name):
+                    raise e
+                logger.info(f"{collection_name} was created concurrently")
         else:
-            logger.info(f"{collection_name} already exists, adding documents to it")
+            logger.debug(f"{collection_name} already exists, adding documents to it")
 
         self._log_collection_stats(collection_name)
 

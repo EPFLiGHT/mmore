@@ -1,4 +1,5 @@
 import logging
+import threading
 from typing import Optional, cast
 
 from dask.distributed import Variable
@@ -21,6 +22,10 @@ class ExecutionState:
     _use_dask: Optional[bool] = None
     _dask_var: Optional[Variable] = None
     _local_state: bool = False
+    # For concurrency: concurrent dispatches share one init, the refcount resets
+    # it only after the last one finishes
+    _lock = threading.Lock()
+    _refcount: int = 0
 
     @staticmethod
     def initialize(distributed_mode=False, client=None):
@@ -29,29 +34,44 @@ class ExecutionState:
         :param distributed_mode: Whether the execution is in distributed mode
         :param client: connection client to the dask cluster
         """
-        if ExecutionState._use_dask is not None:
-            raise Exception("Execution state already initialized")
         assert distributed_mode is not None, (
             "Distributed mode must be set to True or False"
         )
-        ExecutionState._use_dask = distributed_mode
+        with ExecutionState._lock:
+            if ExecutionState._use_dask is not None:
+                if ExecutionState._use_dask != distributed_mode:
+                    raise Exception(
+                        "Execution state already initialized in a different mode"
+                    )
+                ExecutionState._refcount += 1
+                return
 
-        if distributed_mode:
-            assert client is not None, (
-                "You must be in the context of a dask client to use distributed mode"
-            )
-            ExecutionState._dask_var = Variable("should_stop_execution", client=client)
-            ExecutionState._dask_var.set(False)
-            logger.info("Execution state initialized (distributed mode)")
-        else:
-            ExecutionState._local_state = False
-            logger.info("Execution state initialized (local mode)")
+            ExecutionState._use_dask = distributed_mode
+            ExecutionState._refcount = 1
+
+            if distributed_mode:
+                assert client is not None, (
+                    "You must be in the context of a dask client to use distributed mode"
+                )
+                ExecutionState._dask_var = Variable(
+                    "should_stop_execution", client=client
+                )
+                ExecutionState._dask_var.set(False)
+                logger.debug("Execution state initialized (distributed mode)")
+            else:
+                ExecutionState._local_state = False
+                logger.debug("Execution state initialized (local mode)")
 
     @staticmethod
     def shutdown():
-        ExecutionState._use_dask = None
-        ExecutionState._dask_var = None
-        ExecutionState._local_state = False
+        with ExecutionState._lock:
+            if ExecutionState._refcount > 0:
+                ExecutionState._refcount -= 1
+            if ExecutionState._refcount > 0:
+                return
+            ExecutionState._use_dask = None
+            ExecutionState._dask_var = None
+            ExecutionState._local_state = False
 
     @staticmethod
     def get_should_stop_execution() -> bool:

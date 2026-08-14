@@ -3,21 +3,17 @@ import io
 import logging
 import os
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Dict, List, Tuple
 
 import pymupdf
 from PIL import Image
 
-from ...type import DocumentMetadata, FileDescriptor, MultimodalSample
+from ...type import FileDescriptor, MultimodalSample
 from .base import Processor, ProcessorConfig
+from .pdf_processor import PDFMetadata
 
 logger = logging.getLogger(__name__)
-
-# Env var that selects the PDF backend. When set to "nemotron", this processor
-# accepts .pdf files and the default PDFProcessor (Marker) steps aside.
-PDF_BACKEND_ENV = "MMORE_PDF_BACKEND"
-NEMOTRON_BACKEND = "nemotron"
 
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 DEFAULT_MODEL = "nvidia/nemotron-nano-12b-v2-vl"
@@ -34,15 +30,12 @@ IMG_MD_REGEX = r"!\[[^\]]*\]\([^)]+\)"
 
 
 @dataclass
-class NemotronVLMMetadata(DocumentMetadata):
-    paragraph_starts: List[Tuple[int, int, int]] = field(default_factory=list)
+class NemotronVLMMetadata(PDFMetadata):
     backend: str = "nemotron-vlm"
     model: str = DEFAULT_MODEL
 
     def to_dict(self) -> Dict[str, Any]:
         metadata = super().to_dict()
-        if self.paragraph_starts:
-            metadata["paragraph_starts"] = self.paragraph_starts
         metadata["backend"] = self.backend
         metadata["model"] = self.model
         return metadata
@@ -52,7 +45,10 @@ class NemotronVLMProcessor(Processor):
     """PDF processor that rasterizes pages and prompts NVIDIA's Nemotron Nano
     12B V2 VL via the OpenAI-compatible endpoint at integrate.api.nvidia.com.
 
-    Activated by MMORE_PDF_BACKEND=nemotron. Requires NVIDIA_API_KEY.
+    Selected through dispatcher_config.processor_selection by setting the
+    preference in config.yaml.
+
+    Requires `NVIDIA_API_KEY`.
     """
 
     def __init__(self, config=None):
@@ -67,8 +63,6 @@ class NemotronVLMProcessor(Processor):
 
     @classmethod
     def accepts(cls, file: FileDescriptor) -> bool:
-        if os.environ.get(PDF_BACKEND_ENV, "").lower() != NEMOTRON_BACKEND:
-            return False
         return file.file_extension.lower() == ".pdf"
 
     def _get_client(self):
@@ -124,10 +118,11 @@ class NemotronVLMProcessor(Processor):
         return completion.choices[0].message.content or ""
 
     def process(self, file_path: str) -> MultimodalSample:
+        self._get_client()
         page_pngs = self._rasterize(file_path)
         page_texts: List[Tuple[int, str]] = []
         images: List[Image.Image] = []
-        extract_images = self.config.custom_config.get("extract_images", True)
+        extract_images = self.config.extract_images
 
         for page_idx, png in enumerate(page_pngs):
             try:
@@ -140,8 +135,8 @@ class NemotronVLMProcessor(Processor):
 
             if extract_images:
                 images.append(Image.open(io.BytesIO(png)).convert("RGB"))
+                md = re.sub(IMG_MD_REGEX, self.config.attachment_tag, md)
 
-            md = re.sub(IMG_MD_REGEX, "<attachment>", md)
             page_texts.append((page_idx, md))
 
         paragraph_starts, full_text = self._build_pagination(page_texts)

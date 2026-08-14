@@ -2,7 +2,7 @@ name: Deploy Sphinx documentation
 
 on:
   push:
-    branches: ["master"]
+    branches: ["main"]
   workflow_dispatch:
 
 permissions:

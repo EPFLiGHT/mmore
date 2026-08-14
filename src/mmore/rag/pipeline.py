@@ -5,16 +5,22 @@ Integrates Milvus retrieval with HuggingFace text generation.
 """
 
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Callable, Dict, List, Optional, Union
 
 from langchain_core.documents import Document
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.runnables import Runnable, RunnableLambda, RunnablePassthrough
+from langchain_core.runnables import (
+    Runnable,
+    RunnableConfig,
+    RunnableLambda,
+    RunnablePassthrough,
+)
 
 from ..utils import load_config
 from .judge import JUDGE_OUTPUT_KEYS, JudgeConfig, LLMJudge, retrieve_with_judge
+from .judge.llm import judge_llm_from_config
 from .llm import LLM, LLMConfig
 from .retriever import Retriever, RetrieverConfig
 from .types import MMOREInput, MMOREOutput
@@ -25,6 +31,12 @@ Use the following context to answer the questions. If none of the context answer
 Context:
 {context}
 """
+
+PRIVACY_OUTPUT_KEYS = ("privacy_report", "sanitized_context")
+PRIVACY_CHUNKS_KEY = "sanitized_chunks"
+
+# Answers the privacy gate's interrupt payloads
+PrivacyApprover = Callable[[dict], object]
 
 
 @dataclass
@@ -41,39 +53,55 @@ class RAGPipeline:
     """Main RAG pipeline combining retrieval and generation."""
 
     retriever: Retriever
-    llm: BaseChatModel
+    llm: Optional[BaseChatModel]
     prompt_template: Union[str, ChatPromptTemplate]
 
     def __init__(
         self,
         retriever: Retriever,
         prompt_template: Union[str, ChatPromptTemplate],
-        llm: BaseChatModel,
+        llm: Optional[BaseChatModel] = None,
         judge: Optional[LLMJudge] = None,
+        privacy_graph: Optional[Any] = None,
+        privacy_approver: Optional[PrivacyApprover] = None,
     ):
         # Get modules
         self.retriever = retriever
         self.prompt = prompt_template
         self.llm = llm
         self.judge = judge
+        self.privacy_graph = privacy_graph
+        # Answers the gate's interrupts when the privacy config is interactive
+        self.privacy_approver = privacy_approver
 
         # Build the rag chain
         self.rag_chain = RAGPipeline._build_chain(
-            self.retriever, RAGPipeline.format_docs, self.prompt, self.llm, self.judge
+            self.retriever,
+            RAGPipeline.format_docs,
+            self.prompt,
+            self.llm,
+            self.judge,
+            self.privacy_graph,
+            self.privacy_approver,
         )
 
     def __str__(self):
         return str(self.rag_chain)
 
     @classmethod
-    def from_config(cls, config: str | RAGConfig):
+    def from_config(
+        cls,
+        config: str | RAGConfig,
+        privacy_graph: Optional[Any] = None,
+        privacy_approver: Optional[PrivacyApprover] = None,
+    ):
         if isinstance(config, str):
             config = load_config(config, RAGConfig)
 
         retriever = Retriever.from_config(config.retriever)
-        llm = LLM.from_config(config.llm)
+        llm = None if privacy_graph is not None else LLM.from_config(config.llm)
         judge = (
-            LLMJudge(llm=LLM.from_config(config.judge.llm), config=config.judge)
+            LLMJudge(llm=judge_llm_from_config(config.judge.llm), config=config.judge)
             if config.judge
             else None
         )
@@ -81,7 +109,9 @@ class RAGPipeline:
             [("system", config.system_prompt), ("human", "{input}")]
         )
 
-        return cls(retriever, chat_template, llm, judge)
+        return cls(
+            retriever, chat_template, llm, judge, privacy_graph, privacy_approver
+        )
 
     @staticmethod
     def format_docs(docs: List[Document]) -> str:
@@ -91,7 +121,15 @@ class RAGPipeline:
         )
 
     @staticmethod
-    def _build_chain(retriever, format_docs, prompt, llm, judge=None) -> Runnable:
+    def _build_chain(
+        retriever,
+        format_docs,
+        prompt,
+        llm,
+        judge=None,
+        privacy_graph=None,
+        privacy_approver=None,
+    ) -> Runnable:
         validate_input = RunnableLambda(
             lambda x: MMOREInput.model_validate(x).model_dump()
         )
@@ -101,15 +139,18 @@ class RAGPipeline:
             res_dict = MMOREOutput.model_validate(x).model_dump()
             res_dict["answer"] = res_dict["answer"].split("<|im_start|>assistant\n")[-1]
             # Expose formatted context and judge correction logs in the API response (context is not on MMOREOutput).
-            for key in ("context", *JUDGE_OUTPUT_KEYS):
+            for key in (
+                "context",
+                *JUDGE_OUTPUT_KEYS,
+                *PRIVACY_OUTPUT_KEYS,
+                PRIVACY_CHUNKS_KEY,
+            ):
                 if key in x:
                     res_dict[key] = x[key]
 
             return res_dict
 
         validate_output = RunnableLambda(make_output)
-
-        rag_chain_from_docs = prompt | llm | StrOutputParser()
 
         # Only retrieval differs (retriever vs judge); format context and generate answer unchanged.
         if judge is not None:
@@ -122,21 +163,62 @@ class RAGPipeline:
             # retrieve without judge
             retrieval_step = RunnablePassthrough.assign(docs=retriever)
 
-        core_chain = retrieval_step.assign(
-            context=lambda x: format_docs(x["docs"])
-        ).assign(answer=rag_chain_from_docs)
+        with_context = retrieval_step.assign(context=lambda x: format_docs(x["docs"]))
+        if privacy_graph is not None:
+            # Privacy mode swaps only the answer step: the verified answer comes
+            # from the privacy graph driven over the retrieved chunks.
+            answer_step: Runnable = RunnableLambda(
+                RAGPipeline._privacy_answer_step(privacy_graph, privacy_approver)
+            )
+            core_chain = with_context | answer_step
+        else:
+            if llm is None:
+                raise ValueError("RAGPipeline needs an LLM when privacy mode is off.")
+            core_chain = with_context.assign(answer=prompt | llm | StrOutputParser())
 
         return validate_input | core_chain | validate_output
 
+    @staticmethod
+    def _privacy_answer_step(privacy_graph, privacy_approver=None):
+        """Answer step that routes the retrieved chunks through the privacy graph.
+
+        Returns the chain state updated with the verified ``answer`` and the
+        PII-free report fields, mirroring the ``.assign(answer=...)`` it replaces.
+        """
+        from dataclasses import asdict
+
+        from ..privacy.runner import run_privacy_query
+
+        def step(x: Dict[str, Any]) -> Dict[str, Any]:
+            docs: List[Document] = x["docs"]
+            raw_chunks = [doc.page_content for doc in docs]
+            result = run_privacy_query(
+                privacy_graph, x["input"], raw_chunks, approver=privacy_approver
+            )
+            updated = dict(x)
+            updated["answer"] = result.answer
+            updated[PRIVACY_CHUNKS_KEY] = list(result.sanitized_chunks)
+            updated["sanitized_context"] = "\n\n".join(
+                chunk for chunk in result.sanitized_chunks if chunk
+            ).strip()
+            if result.record is not None:
+                updated["privacy_report"] = asdict(result.record)
+            return updated
+
+        return step
+
     def __call__(
-        self, queries: Dict[str, Any] | List[Dict[str, Any]], return_dict: bool = False
-    ) -> List[Dict[str, str | List[str]]]:
-        if isinstance(queries, Dict):
+        self,
+        queries: Dict[str, Any] | List[Dict[str, Any]],
+        return_dict: bool = False,
+        config: Optional[RunnableConfig] = None,
+    ) -> List[Dict[str, Any]]:
+        if isinstance(queries, dict):
             queries_list = [queries]
         else:
             queries_list = queries
 
-        results = self.rag_chain.batch(queries_list)
+        results = self.rag_chain.batch(queries_list, config=config)
 
         if return_dict:
             return results

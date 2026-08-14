@@ -69,6 +69,8 @@ def step_record(
         "llm_invoked": result.llm_invoked,
         "context_relevance_score": result.context_relevance_score,
     }
+    if result.llm_invoked and result.raw_llm_response:
+        record["llm_response"] = result.raw_llm_response
     if result.decision == JudgeDecision.ADD_QUESTIONS:
         record["extra_questions"] = list(result.extra_questions)
     elif result.decision == JudgeDecision.ADD_CONTEXT:

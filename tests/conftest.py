@@ -1,10 +1,15 @@
+import importlib.util
 import json
 from typing import Dict, List
 
 import pytest
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
 
-from mmore.type import MultimodalSample
+from mmore.type import DocumentMetadata, MultimodalSample
+
+# colvision is a conflicting extra installed in its own venv (see tests.yml)
+if importlib.util.find_spec("colpali_engine") is None:
+    collect_ignore = ["test_colvision.py"]
 
 
 class FakeSparseEmbedding(BaseSparseEmbedding):
@@ -23,21 +28,21 @@ SAMPLE_DOCS = [
         document_id="doc-1",
         text="Paris is the capital of France.",
         modalities=[],
-        metadata={},
+        metadata=DocumentMetadata(),
     ),
     MultimodalSample(
         id="doc-2",
         document_id="doc-2",
         text="The Eiffel Tower stands 330 metres tall.",
         modalities=[],
-        metadata={"author": "Alice"},
+        metadata=DocumentMetadata(extra={"author": "Alice"}),
     ),
     MultimodalSample(
         id="doc-3",
         document_id="doc-3",
         text="Milvus is an open-source vector database.",
         modalities=[],
-        metadata={},
+        metadata=DocumentMetadata(),
     ),
 ]
 

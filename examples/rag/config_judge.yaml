@@ -80,8 +80,8 @@ rag:
     allow_re_retrieve: true
     max_web_results: 5
     rerank_after_merge: true  # rerank merged on-prem + web/corrective docs with retriever reranker
-    # force_corrective_action: RE_RETRIEVE  # skip judge LLM; force action when thresholds fail
-    # force_corrective_action: PROCEED      # baseline benchmark: no LLM, no correction when thresholds fail
+    # One corrective action: in rag.judge set allow_* so only one is true (see docs llm_as_a_judge.md).
+    # force_corrective_action: PROCEED  # optional benchmark only. It skips judge LLM when thresholds fail
   system_prompt: "Use the following context to answer the questions.\n\nContext:\n{context}"
 mode: local
 mode_args:

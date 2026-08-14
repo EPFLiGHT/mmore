@@ -1,7 +1,7 @@
 """Corrective retrieval loop: apply actions and retrieve_with_judge."""
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List, Union, cast
 
 from langchain_core.documents import Document
 
@@ -19,6 +19,18 @@ from .types import JudgeConfig, JudgeDecision, JudgeResult
 
 logger = logging.getLogger(__name__)
 
+RetrieverInput = Union[str, Dict[str, Any]]
+
+
+def _invoke_retriever(
+    retriever: Retriever,
+    query_or_state: RetrieverInput,
+    **kwargs: Any,
+) -> List[Document]:
+    """Invoke retriever with str or RAG state dict (LangChain stubs expect str)."""
+    invoke = cast(Callable[..., List[Document]], retriever.invoke)
+    return invoke(query_or_state, **kwargs)
+
 
 def apply_corrective_action(
     retriever: Retriever,
@@ -32,7 +44,7 @@ def apply_corrective_action(
     if result.decision == JudgeDecision.ADD_QUESTIONS:
         for sub_query in result.extra_questions[:3]:
             sub_state = {**state, "input": sub_query}
-            sub_docs = retriever.invoke(sub_state)
+            sub_docs = _invoke_retriever(retriever, sub_state)
             docs = merge_documents(docs, sub_docs)
 
     elif result.decision == JudgeDecision.ADD_CONTEXT:
@@ -47,7 +59,7 @@ def apply_corrective_action(
             result.retrieve_params, query, retriever.k
         )
         new_state = {**state, "input": effective["input"]}
-        new_docs = retriever.invoke(new_state, k=effective["k"])
+        new_docs = _invoke_retriever(retriever, new_state, k=effective["k"])
         docs = merge_documents(docs, new_docs)
 
     if config.rerank_after_merge and docs:
@@ -71,7 +83,7 @@ def retrieve_with_judge(
 
     Returns state enriched with docs, retrieval_metrics, judge_decision, judge_actions.
     """
-    docs = retriever.invoke(state)
+    docs = _invoke_retriever(retriever, state)
     judge_actions: List[str] = []
     retrieval_corrections: List[Dict[str, Any]] = []
     judge_llm_calls = 0

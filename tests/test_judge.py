@@ -8,6 +8,7 @@ from langchain_core.documents import Document
 
 from mmore.rag.judge import (
     JUDGE_OUTPUT_KEYS,
+    JudgeConfig,
     JudgeDecision,
     JudgeResult,
     LLMJudge,
@@ -21,10 +22,13 @@ from mmore.rag.judge import (
     retrieve_with_judge,
 )
 from mmore.rag.judge.corrective import apply_corrective_action
+from mmore.rag.judge.parsing import extract_llm_text
 from mmore.run_rag import RAGInferenceConfig
 from mmore.utils import load_config
 
-_CFG = load_config("examples/rag/config_judge.yaml", RAGInferenceConfig).rag.judge
+_inference_cfg = load_config("examples/rag/config_judge.yaml", RAGInferenceConfig)
+assert _inference_cfg.rag is not None and _inference_cfg.rag.judge is not None
+_CFG: JudgeConfig = _inference_cfg.rag.judge
 _THRESH = _CFG.metric_thresholds
 
 
@@ -162,11 +166,67 @@ def test_coerce_decision_fallback(cfg_kw, raw, expected):
     assert decision == expected and raw_decision == raw
 
 
+def test_parse_json_from_full_llama_response():
+    raw = (
+        "Retrieval metrics: {'num_docs': 5.0}\n"
+        "Allowed actions: ['PROCEED', 'ADD_QUESTIONS']\n"
+        "<|eot_id|>assistant\n\n"
+        '{"decision":"ADD_QUESTIONS","extra_questions":["q1","q2"],"reason":"split"}'
+    )
+    parsed = parse_json_response(raw)
+    assert parsed["decision"] == "ADD_QUESTIONS"
+    assert parsed["extra_questions"] == ["q1", "q2"]
+
+
+def test_extract_llm_text_strips_llama_chat_template():
+    raw = (
+        "<|begin_of_text|>systemYou are a judge.<|eot_id|>"
+        "userQuestion?<|eot_id|>assistant"
+        '{"decision":"ADD_QUESTIONS","extra_questions":["q1"]}'
+        "<|eot_id|>"
+    )
+    assert (
+        extract_llm_text(raw) == '{"decision":"ADD_QUESTIONS","extra_questions":["q1"]}'
+    )
+
+
+def test_step_record_includes_llm_response():
+    from mmore.rag.judge.decisions import step_record
+
+    result = JudgeResult(
+        decision=JudgeDecision.ADD_QUESTIONS,
+        extra_questions=["q1"],
+        llm_invoked=True,
+        raw_llm_response='{"decision":"ADD_QUESTIONS","extra_questions":["q1"]}',
+        exit_reason="llm_corrective",
+    )
+    record = step_record(0, result, "main query", 5)
+    assert record["llm_response"] == result.raw_llm_response
+    assert record["extra_questions"] == ["q1"]
+
+
 def test_parse_json_repairs_trailing_comma_and_python_literals():
     p = parse_json_response('{"decision":"RE_RETRIEVE","context_relevance_score":4,}')
     assert p["decision"] == "RE_RETRIEVE" and p["context_relevance_score"] == 4
     p = parse_json_response('{"decision":"PROCEED","sufficient":True}')
     assert p["sufficient"] is True
+
+
+def test_parse_json_nested_retrieve_params_with_prefix():
+    raw = (
+        'Summary: {"k": 10}\n'
+        '{"decision":"RE_RETRIEVE","retrieve_params":{"k":10},"reason":"weak"}'
+    )
+    parsed = parse_json_response(raw)
+    assert parsed["decision"] == "RE_RETRIEVE"
+    assert parsed["retrieve_params"] == {"k": 10}
+
+
+def test_parse_json_valid_prefix_and_invalid_decision_block():
+    raw = 'Summary: {"k": 10}\n{"decision":"RE_RETRIEVE","context_relevance_score":4,}'
+    parsed = parse_json_response(raw)
+    assert parsed["decision"] == "RE_RETRIEVE"
+    assert parsed["context_relevance_score"] == 4
 
 
 @pytest.mark.parametrize(

@@ -1,6 +1,6 @@
 # 💻 Developer Documentation
 
-Welcome to the MMORE developer documentation!  
+Welcome to the mmore developer documentation!  
 This guide will help you set up your development environment and contribute to the project.
 
 ## Table of Contents
@@ -11,15 +11,17 @@ This guide will help you set up your development environment and contribute to t
     - [System dependencies](#system-dependencies)
       - [Linux (Ubuntu/Debian)](#linux-ubuntudebian)
       - [macOS](#macos)
-    - [Installing MMORE for development](#installing-mmore-for-development)
+    - [Installing mmore for development](#installing-mmore-for-development)
+      - [1. Clone the repository](#1-clone-the-repository)
+      - [2. Create a virtual environment and install dependencies](#2-create-a-virtual-environment-and-install-dependencies)
     - [🧹 Code quality tools](#-code-quality-tools)
       - [Pre-commit hooks](#pre-commit-hooks)
-        - [Setup](#setup)
-          - [1. Install pre-commit](#1-install-pre-commit)
-          - [2. Set up the git hook scripts](#2-set-up-the-git-hook-scripts)
-          - [3. Run the checks manually](#3-run-the-checks-manually)
+      - [Setup](#setup)
+        - [1. Install pre-commit](#1-install-pre-commit)
+        - [2. Set up the git hook scripts](#2-set-up-the-git-hook-scripts)
+        - [3. Run the checks manually](#3-run-the-checks-manually)
       - [Configured Hooks](#configured-hooks)
-      - [Type Checking](#type-checking)
+    - [Type Checking](#type-checking)
   - [🤝 Contributing Guidelines](#-contributing-guidelines)
     - [Reporting Issues](#reporting-issues)
     - [Code Contributions](#code-contributions)
@@ -34,6 +36,7 @@ This guide will help you set up your development environment and contribute to t
   - [🖥️ Interactive TUI](#️-interactive-tui)
   - [💡 Development tips](#-development-tips)
     - [Working with `uv`](#working-with-uv)
+    - [Verbose / debug output (`MMORE_VERBOSE`)](#verbose--debug-output-mmore_verbose)
   - [❓ Questions](#-questions)
 
 ---
@@ -42,7 +45,7 @@ This guide will help you set up your development environment and contribute to t
 
 ### System dependencies
 
-Before installing MMORE for development, ensure you have the required system dependencies installed.
+Before installing mmore for development, ensure you have the required system dependencies installed.
 
 #### Linux (Ubuntu/Debian)
 
@@ -79,12 +82,12 @@ brew install cairo pango gdk-pixbuf libffi
 uv pip install weasyprint
 ```
 
-### Installing MMORE for development
+### Installing mmore for development
 
 #### 1. Clone the repository
 
 ```bash
-git clone https://github.com/swiss-ai/mmore.git
+git clone https://github.com/EPFLiGHT/mmore.git
 cd mmore
 ```
 
@@ -96,29 +99,29 @@ source .venv/bin/activate
 uv pip install -e ".[all,cpu,dev]"
 ```
 
-```{note}
+:::{note}
 For **GPU (CUDA 12.6)**, replace `cpu` with `cu126`, for example:
 
 `uv pip install -e ".[all,cu126,dev]"`
-```
+:::
 
-```{note}
+:::{note}
 For a **partial install**, replace `all` with only the stages you need, for example:
 
 `uv pip install -e ".[rag,cpu,dev]"`
 
 Available stages are: `process`, `index`, `rag`, and `api`.
-```
+:::
 
-```{important}
+:::{important}
 This package requires many large dependencies and a dependency override, so it should be installed with `uv` rather than plain `pip`.
 
 See the [uv guide](../advanced_usage/uv.md) for more information.
-```
+:::
 
 ### 🧹 Code quality tools
 
-MMORE uses several tools to maintain code quality and consistency.
+mmore uses several tools to maintain code quality and consistency.
 
 #### Pre-commit hooks
 
@@ -168,7 +171,7 @@ We welcome contributions! Here's how you can help:
 
 - **Bug reports**: open an issue with a clear description, steps to reproduce, and expected vs. actual behavior
 - **Feature requests**: open an issue describing the feature, its use case, and potential implementation approach
-- Check the [Issues](https://github.com/swiss-ai/mmore/issues) page for ongoing work
+- Check the [Issues](https://github.com/EPFLiGHT/mmore/issues) page for ongoing work
 
 ### Code Contributions
 
@@ -180,7 +183,7 @@ We welcome contributions! Here's how you can help:
 6. **Submit a Pull Request** with a clear description
 
 ## 🗂️ Project Structure
-
+```
 mmore/
 ├── mmore/
 │   ├── process/          # Document processing pipeline
@@ -196,6 +199,7 @@ mmore/
 ├── .pre-commit-config.yaml
 ├── pyproject.toml
 └── README.md
+ ```
 
 ### Key Modules
 - **`mmore.process`**: Handles extraction from various file formats
@@ -259,7 +263,7 @@ def test_something_on_gpu():
 
 ## 🖥️ Interactive TUI
 
-MMORE ships with a Terminal UI that wraps the CLI commands behind guided menus and config wizards. Useful for trying the pipeline without writing YAML by hand.
+mmore ships with a Terminal UI that wraps the CLI commands behind guided menus and config wizards. Useful for trying the pipeline without writing YAML by hand.
 
 Launch it from a project working directory:
 
@@ -284,6 +288,18 @@ Stages whose extras are missing are disabled in the menu with an install hint (e
 - The project uses dependency overrides that are handled automatically by `uv`
 - See the `uv` tutorial for more details
 
+### Verbose / debug output (`MMORE_VERBOSE`)
+
+By default, pipelines show a clean, single progress line per step and hide noisy
+third-party output and debug logs.
+
+Debugging a stuck or failing document? Set `MMORE_VERBOSE=1` to see everything (
+`DEBUG` logs, all third-party output, etc...):
+
+```bash
+MMORE_VERBOSE=1 mmore process --config_file examples/process/config.yaml
+```
+
 ## ❓ Questions
 
 If you have questions about contributing, feel free to:
@@ -292,4 +308,4 @@ If you have questions about contributing, feel free to:
 - Reach out to the maintainers
 - Check existing issues for similar questions
 
-Thank you for contributing to MMORE! 🎉
+Thank you for contributing to mmore! 🎉

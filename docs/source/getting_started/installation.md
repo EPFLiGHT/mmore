@@ -2,7 +2,7 @@
 
 ## Overview
 
-This page explains how to install MMORE.
+This page explains how to install mmore.
 
 Four installation paths are currently documented:
 
@@ -17,36 +17,36 @@ Choose the one that best matches your workflow and environment.
 
 ## API keys and environment variables
 
-Some MMORE features require API keys or access tokens.
+Some mmore features require API keys or access tokens.
 
 ### Hugging Face
 
-If you use Hugging Face hosted services or models, set your token in the `HF_TOKEN` environment variable before running MMORE:
+If you use Hugging Face hosted services or models, set your token in the `HF_TOKEN` environment variable before running mmore:
 
 ```bash
 export HF_TOKEN="your_huggingface_token"
 ```
 
 ### Hosted LLM providers
-If you use a hosted LLM provider, make sure the corresponding API key is available in your environment before running MMORE.
+If you use a hosted LLM provider, make sure the corresponding API key is available in your environment before running mmore.
 
 For example, with OpenAI:
 ```bash
 export OPENAI_API_KEY="your_openai_api_key"
 ```
 ### Notes
-- These environment variables must be set in your shell before launching MMORE commands.
--	If you run MMORE in Docker, make sure the variables are passed to the container as well.
-- If you run MMORE on a cluster or in production, make sure these variables are available in the job environment.
+- These environment variables must be set in your shell before launching mmore commands.
+-	If you run mmore in Docker, make sure the variables are passed to the container as well.
+- If you run mmore on a cluster or in production, make sure these variables are available in the job environment.
 
 
 --- 
 
 ## Standard installation
 
-Use this method if you want to install MMORE directly from PyPI.
+Use this method if you want to install mmore directly from PyPI.
 
-### Install MMORE
+### Install mmore
 
 ```bash
 pip install mmore
@@ -54,12 +54,12 @@ pip install mmore
 
 ## Installation from the source repository
 
-Use this method if you want to work from the GitHub repository, modify the code, or contribute to MMORE.
+Use this method if you want to work from the GitHub repository, modify the code, or contribute to mmore.
 
 ### Step 1: Clone the repository
 
 ```bash
-git clone https://github.com/swiss-ai/mmore
+git clone https://github.com/EPFLiGHT/mmore
 cd mmore
 ```
 
@@ -73,7 +73,7 @@ pip install -e .
 
 ## Installation with `uv`
 
-Use this method if you want to install MMORE from source while managing the environment and dependencies with `uv`.
+Use this method if you want to install mmore from source while managing the environment and dependencies with `uv`.
 
 ### Step 1: Install system dependencies
 
@@ -96,14 +96,20 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 ### Step 3: Clone the repository
 
 ```bash
-git clone https://github.com/swiss-ai/mmore
+git clone https://github.com/EPFLiGHT/mmore
 cd mmore
 ```
 
 ### Step 4: Install the project and dependencies
 
+Pick the pipeline you intend to use. The standard pipeline (`[process]`, with text/document extraction) and the ColVision pipeline (`[colvision]`, with vision-based RAG) are **mutually exclusive** — set up a separate venv if you need both.
+
 ```bash
-uv sync
+# Standard pipeline (document processing + text RAG)
+uv sync --extra process --extra rag
+
+# OR ColVision pipeline (vision-based RAG: ColPali, ColQwen2/2.5, ColGemma3, ColSmol)
+uv sync --extra colvision
 ```
 
 For a CPU-only installation, use:
@@ -124,7 +130,7 @@ source .venv/bin/activate
 
 ## Installation with Docker
 
-Use this method if you want to run MMORE in a containerized environment.
+Use this method if you want to run mmore in a containerized environment.
 
 ### Step 1: Install Docker
 

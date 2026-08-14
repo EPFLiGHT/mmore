@@ -20,7 +20,7 @@ Before starting, make sure you have:
 
 ### 1. Prepare your configuration file
 
-Check your processing configuration file, for example [`examples/process/config.yaml`](https://github.com/swiss-ai/mmore/blob/master/examples/process/config.yaml), and make sure it includes the distributed settings such as:
+Check your processing configuration file, for example [`examples/process/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/process/config.yaml), and make sure it includes the distributed settings such as:
 
 ```yaml
 dispatcher_config:

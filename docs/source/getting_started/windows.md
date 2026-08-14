@@ -1,8 +1,8 @@
-# 🪟 Running MMORE on Windows
+# 🪟 Running mmore on Windows
 
 ## Overview
 
-MMORE was developed and tested mainly on Linux. It runs on Windows too, but a few things behave differently. This page lists those differences and the fix for each one.
+mmore was developed and tested mainly on Linux. It runs on Windows too, but a few things behave differently. This page lists those differences and the fix for each one.
 
 If you work on Linux or macOS, you can skip this page.
 
@@ -19,10 +19,10 @@ winget install astral-sh.uv
 winget install Gyan.FFmpeg
 ```
 
-Then clone the repo and install MMORE into a virtual environment:
+Then clone the repo and install mmore into a virtual environment:
 
 ```powershell
-git clone https://github.com/swiss-ai/mmore.git
+git clone https://github.com/EPFLiGHT/mmore.git
 cd mmore
 uv venv
 .venv\Scripts\activate
@@ -30,7 +30,7 @@ uv pip install -e ".[all,cu126]"
 ```
 
 Use `cu126` for an NVIDIA GPU, or `cpu` otherwise. See the
-[README](https://github.com/swiss-ai/mmore#step-1--install-mmore) for the full
+[README](https://github.com/EPFLiGHT/mmore#step-1--install-mmore) for the full
 list of extras.
 
 ## 2. `milvus-lite` is not available on Windows
@@ -64,7 +64,7 @@ Wait about a minute, then check `docker ps` shows the three containers
 
 ### Create the database
 
-MMORE does not create the database automatically when connecting to a remote Milvus. Run this once:
+mmore does not create the database automatically when connecting to a remote Milvus. Run this once:
 
 ```powershell
 python -c "from pymilvus import connections, db; connections.connect(uri='http://127.0.0.1:19530'); db.create_database('my_db')"

@@ -11,10 +11,10 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from .decisions import allowed_actions, coerce_decision
 from .metrics import evaluate_metrics
 from .parsing import (
-    extract_llm_text,
+    extract_judge_raw_response,
     format_chunks_for_prompt,
     parse_context_relevance_score,
-    parse_json_response,
+    parse_judge_llm_response,
 )
 from .types import JudgeConfig, JudgeDecision, JudgeResult
 
@@ -67,7 +67,11 @@ class LLMJudge:
         return None
 
     def _result_from_parsed(
-        self, parsed: Dict[str, Any], *, llm_invoked: bool = True
+        self,
+        parsed: Dict[str, Any],
+        *,
+        llm_invoked: bool = True,
+        raw_llm_response: Optional[str] = None,
     ) -> JudgeResult:
         decision, coerced, raw = coerce_decision(
             str(parsed.get("decision", JudgeDecision.PROCEED.value)), self.config
@@ -92,6 +96,7 @@ class LLMJudge:
             extra_questions=[str(q) for q in extra_questions],
             web_query=parsed.get("web_query"),
             retrieve_params=parsed.get("retrieve_params"),
+            raw_llm_response=raw_llm_response,
         )
 
     def evaluate(
@@ -130,14 +135,16 @@ class LLMJudge:
         )
 
         try:
-            parsed = parse_json_response(extract_llm_text(response.content))
+            raw_llm_response, parsed = parse_judge_llm_response(response.content)
         except (json.JSONDecodeError, TypeError) as e:
-            raw = extract_llm_text(response.content)
             logger.warning(
-                "Failed to parse judge JSON: %s | raw=%r",
+                "Failed to parse judge JSON: %s | see judge_steps[].llm_response in output",
                 e,
-                raw[:500],
             )
-            return JudgeResult.proceed("parse_error_fallback", llm_invoked=True)
+            return JudgeResult.proceed(
+                "parse_error_fallback",
+                llm_invoked=True,
+                raw_llm_response=extract_judge_raw_response(response.content),
+            )
 
-        return self._result_from_parsed(parsed)
+        return self._result_from_parsed(parsed, raw_llm_response=raw_llm_response)

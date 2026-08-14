@@ -21,6 +21,7 @@ from langchain_mistralai import ChatMistralAI
 from langchain_openai import ChatOpenAI
 
 from ..utils import load_config
+from ..ux import loading_model
 
 _OPENAI_MODELS = [
     # GPT-5 series (2026)
@@ -86,6 +87,8 @@ _COHERE_MODELS = [
     "command-r-plus-08-2024",
 ]
 
+_HF_DEFAULT_MAX_NEW_TOKENS = 1200
+
 loaders = {
     "OPENAI": ChatOpenAI,
     "ANTHROPIC": ChatAnthropic,
@@ -135,7 +138,20 @@ class LLMConfig:
             max_token_key = "max_new_tokens"
         else:
             max_token_key = "max_completion_tokens"
-        return {"temperature": self.temperature, max_token_key: self.max_new_tokens}
+        kwargs = {"temperature": self.temperature}
+        if self.max_new_tokens is not None:
+            kwargs[max_token_key] = self.max_new_tokens
+        elif self.provider == "HF":
+            # For the privacy pipeline as we dont have to define `max_tokens` in the config
+            # we have a fallback to a default value here
+            kwargs[max_token_key] = _HF_DEFAULT_MAX_NEW_TOKENS
+        return kwargs
+
+    @property
+    def bind_kwargs(self):
+        if self.provider == "HF":
+            return {"pipeline_kwargs": self.generation_kwargs}
+        return self.generation_kwargs
 
     @property
     def api_key(self):
@@ -171,7 +187,12 @@ class LLM(BaseChatModel):
             )
 
     @classmethod
-    def from_config(cls, config: str | LLMConfig) -> BaseChatModel:
+    def from_config(
+        cls,
+        config: str | LLMConfig,
+        *,
+        hf_return_full_text: bool | None = None,
+    ) -> BaseChatModel:
         if isinstance(config, str):
             config = load_config(config, LLMConfig)
 
@@ -181,29 +202,33 @@ class LLM(BaseChatModel):
                     "torch is required for HuggingFace models. "
                     "Install it with: uv pip install 'mmore[cpu]' or uv pip install 'mmore[cu126]'"
                 )
-            if torch.backends.mps.is_available():
+            pipeline_kwargs = dict(config.generation_kwargs)
+            if hf_return_full_text is not None:
+                pipeline_kwargs["return_full_text"] = hf_return_full_text
+            with loading_model(f"the answer-generation model ({config.llm_name})"):
+                if torch.backends.mps.is_available():
+                    return ChatHuggingFace(
+                        llm=HuggingFacePipeline.from_model_id(
+                            model_id=config.llm_name,
+                            task="text-generation",
+                            device_map="mps",
+                            pipeline_kwargs=pipeline_kwargs,
+                        )
+                    )
+                if torch.cuda.is_available():
+                    current_device = cls.device_count
+                    cls.device_count = (cls.device_count + 1) % cls._get_nb_devices()
+                else:
+                    current_device = -1
+
                 return ChatHuggingFace(
                     llm=HuggingFacePipeline.from_model_id(
-                        model_id=config.llm_name,
+                        config.llm_name,
                         task="text-generation",
-                        device_map="mps",
-                        pipeline_kwargs=config.generation_kwargs,
+                        device=current_device,
+                        pipeline_kwargs=pipeline_kwargs,
                     )
                 )
-            if torch.cuda.is_available():
-                current_device = cls.device_count
-                cls.device_count = (cls.device_count + 1) % cls._get_nb_devices()
-            else:
-                current_device = -1
-
-            return ChatHuggingFace(
-                llm=HuggingFacePipeline.from_model_id(
-                    config.llm_name,
-                    task="text-generation",
-                    device=current_device,
-                    pipeline_kwargs=config.generation_kwargs,
-                )
-            )
         else:
             loader = loaders.get(cast(str, config.provider), ChatOpenAI)
             return loader(

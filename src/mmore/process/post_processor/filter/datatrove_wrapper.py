@@ -17,9 +17,9 @@ from datatrove.pipeline.filters import (
 )
 from datatrove.pipeline.filters.base_filter import BaseFilter as DatatroveBaseFilter
 from datatrove.pipeline.writers.jsonl import JsonlWriter
-from tqdm import tqdm
 
 from ....type import MultimodalSample
+from ....ux import progress
 from .base import BaseFilter, BaseFilterConfig
 
 nltk.download("punkt_tab", quiet=True)
@@ -109,8 +109,9 @@ class DatatroveFilter(BaseFilter):
         Returns:
             List[bool]: Whether each document should be kept.
         """
-        batch = tqdm(
+        batch = progress(
             [DatatroveFilter.sample_to_doc(sample) for sample in batch],
-            desc=f"{self.name}",
+            desc=self.name,
+            unit="sample",
         )
         return self.datatrove_filter.filter_batch(cast(List[Document], batch))

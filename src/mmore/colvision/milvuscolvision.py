@@ -6,24 +6,15 @@ from typing import Any, Union, cast
 import numpy as np
 import pandas as pd
 from pymilvus import DataType, MilvusClient
-from tqdm import tqdm
+
+from ..ux import progress
 
 logger = logging.getLogger(__name__)
-# Module-specific logger configuration to avoid global side effects
-if not logger.hasHandlers():
-    handler = logging.StreamHandler()
-    formatter = logging.Formatter(
-        "[MilvusColpaliManager 🧠 -- %(asctime)s] %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    handler.setFormatter(formatter)
-    logger.addHandler(handler)
-logger.setLevel(logging.INFO)
 
 
-class MilvusColpaliManager:
+class MilvusColvisionManager:
     """
-    Handles all Milvus operations for ColPali embeddings (both indexing and retrieval).
+    Handles all Milvus operations for ColVision embeddings (both indexing and retrieval).
     Uses a local Milvus storage by default.
     """
 
@@ -43,15 +34,15 @@ class MilvusColpaliManager:
         self.dim = dim
         self.metric_type = metric_type
 
-        logger.info(f"Connecting to Milvus local instance at {self.uri}")
+        logger.debug(f"Connecting to Milvus local instance at {self.uri}")
         self.client = MilvusClient(uri=self.uri)
 
         if create_collection:
             self.create_collection(overwrite=True)
-            logger.info(f"Created new collection '{self.collection_name}'")
+            logger.debug(f"Created new collection '{self.collection_name}'")
         elif self.client.has_collection(self.collection_name):
             self.client.load_collection(self.collection_name)
-            logger.info(f"Loaded existing collection '{self.collection_name}'")
+            logger.debug(f"Loaded existing collection '{self.collection_name}'")
         else:
             raise ValueError(
                 f"Collection '{self.collection_name}' does not exist. "
@@ -60,11 +51,11 @@ class MilvusColpaliManager:
 
     def create_collection(self, overwrite: bool = False):
         """
-        Create a new Milvus collection with ColPali embedding schema.
+        Create a new Milvus collection with ColVision embedding schema.
         """
         if overwrite and self.client.has_collection(self.collection_name):
             self.client.drop_collection(self.collection_name)
-            logger.info(f"Dropped existing collection '{self.collection_name}'")
+            logger.debug(f"Dropped existing collection '{self.collection_name}'")
 
         schema = self.client.create_schema(auto_id=True)
         schema.add_field("pk", DataType.INT64, is_primary=True)
@@ -75,7 +66,7 @@ class MilvusColpaliManager:
         self.client.create_collection(
             collection_name=self.collection_name, schema=schema
         )
-        logger.info(f"Created collection schema for '{self.collection_name}'")
+        logger.debug(f"Created collection schema for '{self.collection_name}'")
 
     def create_index(self):
         """
@@ -86,12 +77,12 @@ class MilvusColpaliManager:
         try:
             index_info = self.client.list_indexes(self.collection_name)
             if index_info:
-                logger.info(f"Index already exists: {index_info}")
+                logger.debug(f"Index already exists: {index_info}")
                 return True
         except Exception as e:
             logger.warning(f"Could not check existing indexes: {e}")
 
-        logger.info("Creating vector index on 'embedding' field...")
+        logger.debug("Creating vector index on 'embedding' field...")
 
         # Create index parameters
         index_params = self.client.prepare_index_params()
@@ -108,7 +99,7 @@ class MilvusColpaliManager:
                 collection_name=self.collection_name,
                 index_params=index_params,
             )
-            logger.info("Created vector index on 'embedding' field")
+            logger.debug("Created vector index on 'embedding' field")
             return True
         except Exception as e:
             logger.error(f"Failed to create index: {e}")
@@ -124,14 +115,14 @@ class MilvusColpaliManager:
                 f"DataFrame missing required columns: {required_cols - set(df.columns)}"
             )
 
-        logger.info(f"Preparing {len(df)} pages...")
+        logger.debug(f"Preparing {len(df)} pages...")
 
         data = []
-        for row in tqdm(
+        for row in progress(
             df.itertuples(index=False),
             total=len(df),
             desc="Preparing vectors",
-            ncols=100,
+            unit="page",
         ):
             emb = getattr(row, "embedding")
 
@@ -165,10 +156,10 @@ class MilvusColpaliManager:
             )
 
         total_vecs = len(data)
-        logger.info(f"Inserting {total_vecs} vectors in batches of {batch_size}...")
+        logger.debug(f"Inserting {total_vecs} vectors in batches of {batch_size}...")
 
-        for i in tqdm(
-            range(0, total_vecs, batch_size), desc="Inserting into Milvus", ncols=100
+        for i in progress(
+            range(0, total_vecs, batch_size), desc="Inserting", unit="batch"
         ):
             batch = data[i : i + batch_size]
             try:
@@ -177,7 +168,7 @@ class MilvusColpaliManager:
                 logger.error(f"Failed to insert batch {i // batch_size}: {e}")
                 raise
 
-        logger.info(f"✅ Insert complete — {total_vecs} vectors inserted.")
+        logger.debug(f"Insert complete: {total_vecs} vectors inserted.")
 
     def search_embeddings(self, query_embeddings, top_k=3, max_workers=4):
         """
@@ -210,22 +201,24 @@ class MilvusColpaliManager:
                 key = (entity_dict.get("pdf_path"), entity_dict.get("page_number"))
                 candidates.add(key)
 
-        logger.info(f"Found {len(candidates)} candidate pages for reranking.")
+        logger.debug(f"Found {len(candidates)} candidate pages for reranking.")
 
         def rerank_page(pdf_path, page_number, query_vecs):
             # Get all subvectors for this page
             docs = self.client.query(
                 collection_name=self.collection_name,
-                filter="pdf_path == $pdf_path and page_number == $page_number",
+                filter=f'pdf_path == "{pdf_path}" and page_number == {int(page_number)}',
                 output_fields=["embedding", "pdf_path"],
                 limit=10000,
-                params={"pdf_path": pdf_path, "page_number": page_number},
             )
             if not docs:
                 return (None, pdf_path, page_number)
 
             doc_vecs = np.vstack([d["embedding"] for d in docs]).astype(np.float32)
-            score = np.dot(query_vecs, doc_vecs.T).max(1).sum()
+            # Cast to a Python float: the score flows into Document.metadata and is
+            # later JSON-serialized by run_retriever.save_results(); np.float32 is not
+            # JSON-serializable and would crash the whole retrieve subprocess.
+            score = float(np.dot(query_vecs, doc_vecs.T).max(1).sum())
             return (score, pdf_path, page_number)
 
         reranked = []
@@ -234,10 +227,10 @@ class MilvusColpaliManager:
                 executor.submit(rerank_page, pdf_path, page_number, arr)
                 for (pdf_path, page_number) in candidates
             ]
-            for f in tqdm(
+            for f in progress(
                 concurrent.futures.as_completed(futures),
                 total=len(futures),
-                desc="🔁 Reranking",
+                desc="Reranking",
             ):
                 try:
                     score, pdf_path, page_number = f.result()
@@ -261,7 +254,7 @@ class MilvusColpaliManager:
     def drop_collection(self):
         if self.client.has_collection(self.collection_name):
             self.client.drop_collection(self.collection_name)
-            logger.info(f"Dropped collection '{self.collection_name}'")
+            logger.debug(f"Dropped collection '{self.collection_name}'")
         else:
             logger.warning(f"Collection '{self.collection_name}' not found.")
 
@@ -275,4 +268,4 @@ class MilvusColpaliManager:
     def close(self):
         if hasattr(self, "client"):
             self.client.close()
-            logger.info("Closed Milvus client connection")
+            logger.debug("Closed Milvus client connection")

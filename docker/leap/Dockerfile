@@ -3,23 +3,20 @@ ARG UV_OVERRIDE
 
 # --- Base images ---
 FROM opensuse/leap:15.6 AS gpu
-ENV UV_ARGUMENTS="--extra all,cu126"
-RUN echo "Using GPU image"
+ENV SYNC_ARGS="--extra all --extra cu126"
 
 FROM opensuse/leap:15.6 AS cpu
-ENV UV_ARGUMENTS="--extra all,cpu"
-RUN echo "Using CPU-only image"
+ENV SYNC_ARGS="--extra all --extra cpu"
 
 # --- Build ---
 FROM ${DEVICE:-gpu} AS build
 ARG UV_OVERRIDE
-ENV UV_ARGUMENTS=${UV_OVERRIDE:-$UV_ARGUMENTS}
+ENV SYNC_ARGS=${UV_OVERRIDE:-$SYNC_ARGS}
 
 # Install system dependencies
 RUN zypper --non-interactive refresh && \
     zypper --non-interactive install -y \
-      python311 python311-pip \
-      nano curl ffmpeg \
+      nano curl git ffmpeg \
       libSM6 libXext6 mozilla-nss \
       libXi6 libXrandr2 libXcomposite1 libXcursor1 libXdamage1 libXfixes3 libXrender1 \
       libasound2 libatk-1_0-0 gtk3 libreoffice libjpeg8-devel libpango-1_0-0 && \
@@ -27,19 +24,27 @@ RUN zypper --non-interactive refresh && \
     echo "Europe/Zurich" > /etc/timezone && \
     zypper clean --all
 
-WORKDIR /app
+# Install uv
+COPY --from=ghcr.io/astral-sh/uv:0.7.13 /uv /uvx /bin/
 
-# Set up Python virtual environment
-RUN python3.11 -m venv .venv \
- && .venv/bin/pip install --no-cache-dir uv weasyprint
+ENV UV_PYTHON=3.11 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv \
+    UV_LINK_MODE=copy
+
+WORKDIR /app
 
 # Install dependencies (cached unless uv.lock changes)
 COPY pyproject.toml uv.lock /app/
-RUN .venv/bin/uv sync --frozen --no-install-project ${UV_ARGUMENTS}
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-install-project ${SYNC_ARGS}
+
+# weasyprint needs to be installed using pip
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv pip install weasyprint
 
 # Install mmore from local source code
 COPY . /app
-RUN .venv/bin/uv pip install --no-cache --no-deps -e .
+RUN uv pip install --no-cache --no-deps -e .
 
 # --- Runtime ---
 ENV PATH="/app/.venv/bin:$PATH"

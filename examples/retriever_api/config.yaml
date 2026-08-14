@@ -1,5 +1,5 @@
 db:
-  uri: ./proc_demo.db
+  uri: ./proc_demo.db  # http://localhost:19530 if Milvus Standalone server
   name: my_db
 hybrid_search_weight: 0.5
 k: 5

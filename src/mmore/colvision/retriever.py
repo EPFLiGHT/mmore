@@ -1,5 +1,5 @@
 """
-ColPali retriever that can be used with the general RAG pipeline.
+ColVision retriever that can be used with the general RAG pipeline.
 """
 
 import logging
@@ -10,75 +10,39 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import pandas as pd
 import torch
-from colpali_engine.models import ColPali, ColPaliProcessor
 from colpali_engine.utils.torch_utils import ListDataset
 from langchain_core.callbacks import CallbackManagerForRetrieverRun
 from langchain_core.documents import Document
 from langchain_core.retrievers import BaseRetriever
 from torch.utils.data import DataLoader
 
-from .milvuscolpali import MilvusColpaliManager
+from .milvuscolvision import MilvusColvisionManager
+from .model_utils import get_device, load_model_and_processor
 
 logger = logging.getLogger(__name__)
 
 
 @dataclass
-class ColPaliRetrieverConfig:
-    """Configuration for ColPali retriever."""
+class ColVisionRetrieverConfig:
+    """Configuration for ColVision retriever."""
 
     db_path: str = "./milvus_data"
     collection_name: str = "pdf_pages"
-    model_name: str = "vidore/colpali-v1.3"
+    model_name: str = "vidore/colqwen2.5-v0.2"
     top_k: int = 3
-    dim: int = 128
     max_workers: int = 4
     metric_type: str = "IP"
     text_parquet_path: Optional[str] = None
 
 
-def get_device() -> str:
-    """
-    Select the available device for model inference.
-
-    Returns:
-        Device string (e.g., "cuda:0", "mps", "cpu")
-    """
-    if torch.cuda.is_available():
-        return "cuda:0"
-    if torch.backends.mps.is_available():
-        return "mps"
-    return "cpu"
-
-
-def load_model(model_name: str, device: str):
-    """
-    Load ColPali model and processor for embedding generation.
-
-    Args:
-        model_name: HuggingFace model identifier (e.g., "vidore/colpali-v1.3")
-        device: Target device for model ("cuda:0", "mps", or "cpu")
-
-    Returns:
-        Tuple of (model, processor) ready for inference
-    """
-    logger.info(f"Loading ColPali model: {model_name}")
-    model = ColPali.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        device_map=device,
-    ).eval()
-    processor = ColPaliProcessor.from_pretrained(model_name)
-    return model, processor
-
-
 def embed_queries(texts: List[str], model, processor) -> List[np.ndarray]:
     """
-    Generate ColPali embeddings for text queries.
+    Generate ColVision embeddings for text queries.
 
     Args:
         texts: List of query strings to embed
-        model: ColPali model instance
-        processor: ColPali processor instance
+        model: ColVision model instance
+        processor: ColVision processor instance
 
     Returns:
         List of numpy arrays containing query embeddings
@@ -95,7 +59,7 @@ def embed_queries(texts: List[str], model, processor) -> List[np.ndarray]:
         with torch.no_grad():
             batch_query = {k: v.to(model.device) for k, v in batch_query.items()}
             emb = model(**batch_query)
-            vectors.extend(list(torch.unbind(emb.to("cpu"))))
+            vectors.extend(list(emb.to("cpu").unbind()))
     return [v.float().numpy() for v in vectors]
 
 
@@ -125,27 +89,27 @@ def load_text_mapping(text_parquet_path: Optional[str]) -> Optional[Dict[tuple, 
         raise
 
 
-class ColPaliRetriever(BaseRetriever):
+class ColVisionRetriever(BaseRetriever):
     """
-    ColPali-based retriever that can be used with the RAG pipeline.
+    ColVision-based retriever that can be used with the RAG pipeline.
     Returns Document objects with text content from PDF pages.
     """
 
     model: Any
     processor: Any
-    manager: MilvusColpaliManager
-    config: ColPaliRetrieverConfig
+    manager: MilvusColvisionManager
+    config: ColVisionRetrieverConfig
     text_map: Optional[Dict[tuple, str]]
 
     def __init__(
         self,
         model: Any,
         processor: Any,
-        manager: MilvusColpaliManager,
-        config: ColPaliRetrieverConfig,
+        manager: MilvusColvisionManager,
+        config: ColVisionRetrieverConfig,
         text_map: Optional[Dict[tuple, str]],
     ):
-        """Initialize ColPaliRetriever. Use from_config() to create instances."""
+        """Initialize ColVisionRetriever. Use from_config() to create instances."""
         super().__init__(
             **{
                 "model": model,
@@ -217,25 +181,25 @@ class ColPaliRetriever(BaseRetriever):
         return documents
 
     @classmethod
-    def from_config(cls, config: ColPaliRetrieverConfig):
+    def from_config(cls, config: ColVisionRetrieverConfig):
         """
-        Create a ColPaliRetriever from a configuration.
+        Create a ColVisionRetriever from a configuration.
 
         Args:
-            config: ColPali retriever configuration
+            config: ColVision retriever configuration
 
         Returns:
-            ColPaliRetriever instance
+            ColVisionRetriever instance
         """
         # Load model and processor
         device = get_device()
-        model, processor = load_model(config.model_name, device)
+        model, processor = load_model_and_processor(config.model_name, device)
 
-        # Initialize manager
-        manager = MilvusColpaliManager(
+        # Initialize manager — dim is taken from the loaded model itself
+        manager = MilvusColvisionManager(
             db_path=config.db_path,
             collection_name=config.collection_name,
-            dim=config.dim,
+            dim=model.dim,
             metric_type=config.metric_type,
             create_collection=False,
         )

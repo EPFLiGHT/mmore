@@ -1,0 +1,22 @@
+{
+  "include": ["src/mmore", "tests"],
+  "exclude": [
+    "build",
+    "dist",
+    "**/__pycache__",
+    "*.egg-info",
+    "src/mmore/colvision"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "src/mmore",
+      "extraPaths": ["src"]
+    },
+    {
+      "root": "tests",
+      "extraPaths": ["src"]
+    }
+  ],
+    "pythonVersion": "3.11",
+    "typeCheckingMode": "standard"
+}

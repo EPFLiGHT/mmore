@@ -4,8 +4,9 @@ Works in conjunction with the Indexer class for document retrieval.
 """
 
 import logging
+import time
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Literal, Optional, Tuple, cast, get_args
+from typing import Any, Callable, Dict, List, Literal, Optional, Tuple, cast, get_args
 
 import torch
 from langchain_community.utilities import DuckDuckGoSearchAPIWrapper
@@ -21,6 +22,7 @@ from transformers.tokenization_utils_base import PreTrainedTokenizerBase
 
 from ..index.indexer import DBConfig, get_model_from_index
 from ..utils import load_config
+from ..ux import loading_model
 from .model.dense.base import DenseModel, DenseModelConfig
 from .model.sparse.base import SparseModel, SparseModelConfig
 
@@ -35,6 +37,9 @@ class RetrieverConfig:
     collection_name: str = "my_docs"
     use_web: bool = False
     reranker_model_name: Optional[str] = "BAAI/bge-reranker-base"
+    jobs_per_gpu: int = 1
+    # None below gives by default a queue size of num_gpu * jobs_per_gpu * 10
+    max_queue_size: Optional[int] = None
 
 
 class Retriever(BaseRetriever):
@@ -52,6 +57,26 @@ class Retriever(BaseRetriever):
     _search_types = Literal["dense", "sparse", "hybrid"]
 
     _search_weights = {"dense": 0, "sparse": 1}
+
+    _retrieve_seconds: float = 0.0
+    _rerank_seconds: float = 0.0
+
+    # To retrieve the current step within the Retriever (retrieve, rerank or generation)
+    _stage_callback: Optional[Callable[[str], None]] = None
+
+    def set_stage_callback(self, callback: Optional[Callable[[str], None]]) -> None:
+        self._stage_callback = callback
+
+    def _emit_stage(self, stage: str) -> None:
+        if self._stage_callback is not None:
+            self._stage_callback(stage)
+
+    def pop_timings(self) -> Tuple[float, float]:
+        """Return (retrieve_seconds, rerank_seconds) accumulated so far and reset."""
+        retrieve, rerank = self._retrieve_seconds, self._rerank_seconds
+        self._retrieve_seconds = 0.0
+        self._rerank_seconds = 0.0
+        return retrieve, rerank
 
     @classmethod
     def from_config(cls, config: str | RetrieverConfig):
@@ -73,14 +98,14 @@ class Retriever(BaseRetriever):
             get_model_from_index(client, "dense_embedding", config.collection_name),
         )
         dense_model = DenseModel.from_config(dense_model_config)
-        logger.info(f"Loaded dense model: {dense_model_config}")
+        logger.debug(f"Loaded dense model: {dense_model_config}")
 
         sparse_model_config = cast(
             SparseModelConfig,
             get_model_from_index(client, "sparse_embedding", config.collection_name),
         )
         sparse_model = SparseModel.from_config(sparse_model_config)
-        logger.info(f"Loaded sparse model: {sparse_model_config}")
+        logger.debug(f"Loaded sparse model: {sparse_model_config}")
 
         # Load reranker from Hugging Face
         if config.reranker_model_name:
@@ -91,14 +116,15 @@ class Retriever(BaseRetriever):
                 if torch.backends.mps.is_available()
                 else "cpu"
             )
-            reranker_tokenizer = AutoTokenizer.from_pretrained(
-                config.reranker_model_name
-            )
-            reranker_model = AutoModelForSequenceClassification.from_pretrained(
-                config.reranker_model_name
-            ).to(device)
+            with loading_model(f"the reranker model ({config.reranker_model_name})"):
+                reranker_tokenizer = AutoTokenizer.from_pretrained(
+                    config.reranker_model_name
+                )
+                reranker_model = AutoModelForSequenceClassification.from_pretrained(
+                    config.reranker_model_name
+                ).to(device)
 
-            logger.info(f"Loaded reranker model: {config.reranker_model_name}")
+            logger.debug(f"Loaded reranker model: {config.reranker_model_name}")
         else:
             reranker_model = reranker_tokenizer = None
 
@@ -129,7 +155,11 @@ class Retriever(BaseRetriever):
         partition_names: Optional[List[str]] = None,
         min_score: float = -1.0,  # -1.0 is the minimum possible score anyway
         k: int = 1,
-        output_fields: List[str] = ["text", "paragraph_positions"],
+        output_fields: List[str] = [
+            "text",
+            "paragraph_positions",
+            "file_path",
+        ],
         search_type: str = "hybrid",  # Options: "dense", "sparse", "hybrid"
         document_ids: List[str] = [],  # Optional: candidate doc IDs to restrict search
     ) -> List[Dict[str, Any]]:
@@ -235,7 +265,11 @@ class Retriever(BaseRetriever):
         partition_names: List[str] = [],
         min_score: float = -1.0,  # -1.0 is the minimum possible score anyway
         k: int = 1,
-        output_fields: List[str] = ["text", "paragraph_positions"],
+        output_fields: List[str] = [
+            "text",
+            "paragraph_positions",
+            "file_path",
+        ],
         search_type: str = "hybrid",
     ) -> List[List[Dict[str, Any]]]:
         """
@@ -338,6 +372,8 @@ class Retriever(BaseRetriever):
         if k == 0:
             return []
 
+        self._emit_stage("retrieve")
+        time_start = time.perf_counter()
         results = self.retrieve(
             query=query_input,
             collection_name=collection_name,
@@ -346,6 +382,7 @@ class Retriever(BaseRetriever):
             k=k,
             document_ids=document_ids,
         )
+        retrieve_elapsed = time.perf_counter() - time_start
 
         def parse_result(result: Dict[str, Any], i: int, offset: int = 0) -> Document:
             return Document(
@@ -357,6 +394,7 @@ class Retriever(BaseRetriever):
                     "paragraph_positions": result["entity"].get(
                         "paragraph_positions", []
                     ),
+                    "file_path": result["entity"].get("file_path", ""),
                 },
             )
 
@@ -373,14 +411,21 @@ class Retriever(BaseRetriever):
             docs = parse_results(results)
 
         # Apply reranker
+        rerank_elapsed = 0.0
         if self.reranker_model:
+            self._emit_stage("rerank")
+            time_start = time.perf_counter()
             docs = self.rerank(query_input, docs)
+            rerank_elapsed = time.perf_counter() - time_start
+
+        self._retrieve_seconds += retrieve_elapsed
+        self._rerank_seconds += rerank_elapsed
 
         return docs
 
     def _get_web_documents(self, query: str, max_results: int = 5) -> List[Document]:
         """Fetch additional context from the web via DuckDuckGo."""
-        logger.info("Performing web search...")
+        logger.debug("Performing web search...")
         try:
             wrapper = DuckDuckGoSearchAPIWrapper()
             results = wrapper.results(query, max_results=max_results)

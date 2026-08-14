@@ -12,8 +12,8 @@ from rich.table import Table
 from rich.text import Text
 
 from mmore.tui.commands import REGISTRY, check_stage_available
-from mmore.tui.config_builder import _ask, _confirm, _prompt
-from mmore.tui.theme import ACCENT, ACCENT2, MUTED, OK, QMARK, QSTYLE, console
+from mmore.tui.prompts import ask, confirm, prompt, select
+from mmore.tui.theme import ACCENT, ACCENT2, ERR, MUTED, OK, QMARK, QSTYLE, console
 
 # ---------------------------------------------------------------------------
 # Stage → extras mapping
@@ -25,8 +25,9 @@ _STAGE_EXTRAS: dict[str, list[str]] = {
     "index": ["index"],
     "rag": ["rag"],
     "ragcli": ["rag"],
-    "retrieve": ["rag", "api"],
     "websearch": ["websearch"],
+    "colvision-process": ["colvision"],
+    "colvision-index": ["colvision"],
 }
 
 _COMPUTE_EXTRAS = [
@@ -56,9 +57,8 @@ _STAGE_ENV_VARS: dict[str, list[tuple[str, str, str]]] = {
     ],
 }
 
-# Aliases: ragcli and retrieve share rag's env vars
+# Aliases: ragcli shares rag's env vars
 _STAGE_ENV_VARS["ragcli"] = _STAGE_ENV_VARS["rag"]
-_STAGE_ENV_VARS["retrieve"] = _STAGE_ENV_VARS["rag"]
 
 # Profiling env vars (always available)
 _PROFILING_VARS: list[tuple[str, str, str]] = [
@@ -86,7 +86,7 @@ def _pick_stages() -> list[str]:
             questionary.Choice(label, value=name, checked=not installed[name])
         )
 
-    selected = _ask(
+    selected = ask(
         questionary.checkbox(
             "Which stages do you want to set up?",
             choices=choices,
@@ -103,13 +103,10 @@ def _pick_compute() -> str:
         questionary.Choice(f"{name:<6} — {desc}", value=name)
         for name, desc in _COMPUTE_EXTRAS
     ]
-    return _ask(
-        questionary.select(
-            "Compute backend",
-            choices=choices,
-            style=QSTYLE,
-            qmark=QMARK,
-        )
+    return select(
+        "Compute backend",
+        choices=choices,
+        answer_labels={name: name for name, _ in _COMPUTE_EXTRAS},
     )
 
 
@@ -136,7 +133,7 @@ def _install_deps(stages: list[str], compute: str) -> bool:
     if result.returncode == 0:
         console.print(f"  [{OK}]✓[/] Dependencies installed successfully")
         return True
-    console.print("  [bold red]✗[/] Installation failed — check output above")
+    console.print(f"  [{ERR}]✗[/] Installation failed — check output above")
     return False
 
 
@@ -170,14 +167,14 @@ def _collect_env_vars(stages: list[str]) -> dict[str, str]:
         # Check if already set in environment
         current = os.environ.get(var_name, "")
         hint = f" [dim](current: {current[:20]}…)[/dim]" if current else ""
-        value = _prompt(f"{var_name} — {description}{hint}", default=current or default)
+        value = prompt(f"{var_name} — {description}{hint}", default=current or default)
         if value:
             env_vars[var_name] = value
 
     # Optionally add profiling vars
-    if _confirm("Configure profiling settings?", default=False):
+    if confirm("Configure profiling settings?", default=False):
         for var_name, description, default in _PROFILING_VARS:
-            value = _prompt(f"{var_name} — {description}", default=default)
+            value = prompt(f"{var_name} — {description}", default=default)
             if value:
                 env_vars[var_name] = value
 
@@ -188,7 +185,7 @@ def _print_export_commands(env_vars: dict[str, str]) -> None:
     """Print export commands for the collected env vars.
 
     Displays a table with masked values, then prints the shell commands
-    the user can copy-paste into their shell or profile file.
+    the user can copy-paste into their virtual environment file.
     """
     if not env_vars:
         console.print("  [dim]No environment variables needed.[/dim]")
@@ -219,7 +216,7 @@ def _print_export_commands(env_vars: dict[str, str]) -> None:
                 f'export {k}="{v}"' if " " in v else f"export {k}={v}"
                 for k, v in env_vars.items()
             ),
-            title="[bold]Add to your shell profile (e.g. ~/.bashrc or ~/.zshrc)[/bold]",
+            title="[bold]Add to your virtual env (i.e. .venv/bin/activate)[/bold]",
             border_style=ACCENT,
             padding=(1, 2),
         )
@@ -261,9 +258,9 @@ def run_setup_wizard() -> None:
             padding=(0, 2),
         )
     )
-    if _confirm("Install dependencies now?", default=True):
+    if confirm("Install dependencies now?", default=True):
         if not _install_deps(stages, compute):
-            if not _confirm(
+            if not confirm(
                 "Continue to env var setup despite install failure?", default=False
             ):
                 return

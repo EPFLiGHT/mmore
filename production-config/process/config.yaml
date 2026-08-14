@@ -5,10 +5,8 @@ dispatcher_config:
   distributed: false
   extract_images: true
   scheduler_file: $ROOT_OUT_DIR/scheduler-file.json #put absolute path!
-  # PDF backend: "marker" (default, local GPU via Marker/Surya) or "nemotron"
-  # (NVIDIA Nemotron Nano 12B V2 VL via integrate.api.nvidia.com, requires
-  # NVIDIA_API_KEY env var).
-  pdf_backend: marker
+  processor_selection:
+    ".pdf": PDFProcessor #PDFProcessor set as default
   process_batch_sizes:
     - URLProcessor: 40
     - DOCXProcessor: 100

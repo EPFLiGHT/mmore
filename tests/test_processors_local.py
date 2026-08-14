@@ -46,11 +46,11 @@ def test_docx_no_image_extraction():
 
     # Disable image extraction by setting "extract_images" to False.
     config = ProcessorConfig(
+        extract_images=False,
         custom_config={
             "output_path": "tmp",
-            "extract_images": False,
             "attachment_tag": "<attachment>",
-        }
+        },
     )
     processor = DOCXProcessor(config=config)
 
@@ -131,9 +131,7 @@ def test_md_image_extraction():
     assert os.path.exists(sample_file), f"Sample file not found: {sample_file}"
     custom_attachment_tag = "<attachment>"
     # Set extract images to True explicitly
-    config = ProcessorConfig(
-        custom_config={"output_path": "tmp", "extract_images": True}
-    )
+    config = ProcessorConfig(extract_images=True, custom_config={"output_path": "tmp"})
     processor = MarkdownProcessor(config=config)
     # Process file
     result = processor.process(sample_file)
@@ -256,9 +254,7 @@ def test_spreadsheet_multi_sheet_content():
     sample_file = os.path.join(SAMPLES_DIR, "spreadsheet", "survey.xlsx")
     assert os.path.exists(sample_file), f"Sample file not found: {sample_file}"
 
-    config = ProcessorConfig(
-        custom_config={"extract_images": True, "output_path": "tmp"}
-    )
+    config = ProcessorConfig(extract_images=True, custom_config={"output_path": "tmp"})
     processor = SpreadsheetProcessor(config=config)
 
     result = processor.process(sample_file)
@@ -300,11 +296,11 @@ def test_pdf_process_standard():
     # Assert that the file exists beforre attempting to process it
     assert os.path.exists(sample_file), f"Sample file not found {sample_file}"
     config = ProcessorConfig(
+        extract_images=True,
         custom_config={
-            "extract_images": True,
             "attachment_tag": "<attachment>",
             "output_path": "tmp",
-        }
+        },
     )
     processor = PDFProcessor(config=config)
     processor.converter = (  # pyright: ignore[reportAttributeAccessIssue]
@@ -325,11 +321,11 @@ def test_pdf_process_fast():
     # Assert that the file exists beforre attempting to process it
     assert os.path.exists(sample_file), f"Sample file not found {sample_file}"
     config = ProcessorConfig(
+        extract_images=True,
         custom_config={
-            "extract_images": True,
             "attachment_tag": "<attachment>",
             "output_path": "tmp",
-        }
+        },
     )
     processor = PDFProcessor(config=config)
     processor.converter = (  # pyright: ignore[reportAttributeAccessIssue]
@@ -361,11 +357,11 @@ def test_text_process_standard():
 def test_url_process_standard():
     sample_url = "http://example.com"
     config = ProcessorConfig(
+        extract_images=False,
         custom_config={
-            "extract_images": False,
             "output_path": "tmp",
             "attachment_tag": "<attachment>",
-        }
+        },
     )
     processor = URLProcessor(config=config)
     result = processor.process(sample_url)
@@ -382,11 +378,11 @@ def test_url_process_standard():
 def test_url_process_invalid():
     sample_url = "http://thisurldoesnotexist.tld"
     config = ProcessorConfig(
+        extract_images=False,
         custom_config={
-            "extract_images": False,
             "output_path": "tmp",
             "attachment_tag": "<attachment>",
-        }
+        },
     )
     processor = URLProcessor(config=config)
     result = processor.process(sample_url)

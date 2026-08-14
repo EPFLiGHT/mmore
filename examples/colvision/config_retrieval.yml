@@ -1,0 +1,11 @@
+db_path: ./output/milvus_data.db
+collection_name: "pdf_pages"
+
+# Supported models: vidore/colqwen2.5-v0.2, vidore/colqwen2-v1.0,
+#   Cognitive-Lab/ColNetraEmbed, vidore/colSmol-256M, vidore/colpali-v1.3
+model_name: "vidore/colqwen2.5-v0.2"
+top_k: 3
+metric_type: "IP"
+max_workers: 16
+text_parquet_path: "./output/pdf_page_text.parquet"
+

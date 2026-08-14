@@ -12,17 +12,20 @@ from mmore.tui.commands import REGISTRY, check_stage_available
 from mmore.tui.config_builder import (
     build_full_pipeline_wizard,
     pick_or_build_config,
+    pick_privacy_config,
 )
 from mmore.tui.exceptions import UserCancelledError
 from mmore.tui.paths import cwd_default
 from mmore.tui.pipeline import run_full_pipeline, run_pipeline_with_configs
+from mmore.tui.prompts import select
 from mmore.tui.theme import (
     ACCENT,
     ACCENT2,
+    ERR,
     MUTED,
-    OK,
     QMARK,
     QSTYLE,
+    WARN,
     console,
     run_step,
     section,
@@ -59,19 +62,20 @@ def _show_missing_extras(spec_name: str, hint: str) -> None:
         Panel(
             Text.assemble(
                 (f"Stage `{spec_name}` can't run.\n\n", "bold"),
-                (hint, "yellow"),
+                (hint, WARN),
             ),
-            title="[bold yellow]missing dependencies[/]",
-            border_style="yellow",
+            title=f"[bold {WARN}]missing dependencies[/]",
+            border_style=WARN,
             padding=(1, 2),
         )
     )
 
 
-def _missing_extras_notice() -> Panel | None:
+def _missing_extras_notice(specs) -> Panel | None:
     """One-line-per-install-command notice — kept compact so the banner stays visible."""
     install_to_stages: dict[str, list[str]] = {}
-    for name, spec in REGISTRY.items():
+    for spec in specs:
+        name = spec.name
         hint = check_stage_available(spec)
         if hint and "Install with: " in hint:
             cmd = hint.split("Install with: ", 1)[1].strip()
@@ -85,13 +89,13 @@ def _missing_extras_notice() -> Panel | None:
         if i > 0:
             body.append("\n")
         body.append(", ".join(stages), style="bold white")
-        body.append("  →  ", style="yellow")
-        body.append(cmd, style="cyan")
+        body.append("  →  ", style=WARN)
+        body.append(cmd, style=ACCENT)
 
     return Panel(
         body,
-        title="[bold yellow]⚠  missing extras[/]",
-        border_style="yellow",
+        title=f"[bold {WARN}]⚠  missing extras[/]",
+        border_style=WARN,
         padding=(0, 1),
     )
 
@@ -101,12 +105,20 @@ def _disabled_label(label: str) -> str:
     return f"⚠  {label}"
 
 
-def _run_single_command() -> None:
+def _is_colvision(spec) -> bool:
+    return spec.name.startswith("colvision-")
+
+
+def _select_and_run(specs, display_name, prompt: str) -> None:
+    """Show a command picker for `specs` and run the chosen one. `display_name`
+    maps a spec to its menu label text."""
     choices = []
     enabled_count = 0
-    for spec in REGISTRY.values():
+    displays = {spec.name: display_name(spec) for spec in specs}
+    width = max(len(d) for d in displays.values())
+    for spec in specs:
         hint = check_stage_available(spec)
-        label = f"{spec.name:<12} — {spec.description}"
+        label = f"{displays[spec.name]:<{width}} — {spec.description}"
         if hint:
             choices.append(
                 questionary.Choice(
@@ -121,19 +133,15 @@ def _run_single_command() -> None:
     # every choice is disabled because it can't pick an initial pointer. Bail
     # out with a clear notice instead.
     if enabled_count == 0:
-        notice = _missing_extras_notice()
+        notice = _missing_extras_notice(specs)
         if notice is not None:
             console.print(notice)
         return
 
-    name = questionary.select(
-        "Pick a command",
-        choices=choices,
-        style=QSTYLE,
-        qmark=QMARK,
-    ).ask()
-    if name is None:
-        return
+    _run_spec(select(prompt, choices, answer_labels=displays))
+
+
+def _run_spec(name: str) -> None:
     spec = REGISTRY[name]
     # Defensive re-check in case the user typed past the disabled state.
     hint = check_stage_available(spec)
@@ -141,11 +149,13 @@ def _run_single_command() -> None:
         _show_missing_extras(spec.name, hint)
         return
     config_file = pick_or_build_config(spec)
-    kwargs = {"config_file": config_file}
+    kwargs: dict[str, str | None] = {"config_file": config_file}
+    if spec.name in ("rag", "ragcli"):
+        kwargs["privacy_config_file"] = pick_privacy_config()
     if spec.needs_input_data:
         input_data = questionary.text(
             "Input JSONL path",
-            default=cwd_default("outputs/process/merged/merged_results.jsonl"),
+            default=cwd_default("examples/process/outputs/merged/merged_results.jsonl"),
             style=QSTYLE,
             qmark=QMARK,
         ).ask()
@@ -153,27 +163,34 @@ def _run_single_command() -> None:
             return
         kwargs["input_data"] = input_data
 
-    console.print()
-    console.print(
-        section(
-            f"Running {name}",
-            Text(f"config: {config_file}", style=MUTED),
-            style=ACCENT2,
-        )
-    )
-    interactive = name in {"ragcli", "retrieve", "rag"}
+    interactive = name in {"ragcli", "rag"}
     if interactive:
         spec.run(**kwargs)
     else:
         run_step(spec.description, spec.run, **kwargs)
-    console.print(f"[{OK}]✓ {name} finished[/]")
+    console.print()
+
+
+def _run_single_command() -> None:
+    # ColVision is a separate sub menu
+    specs = [s for s in REGISTRY.values() if not _is_colvision(s)]
+    _select_and_run(specs, lambda s: s.name, "Pick a command")
+
+
+def _run_colvision_menu() -> None:
+    specs = [s for s in REGISTRY.values() if _is_colvision(s)]
+    _select_and_run(
+        specs,
+        lambda s: s.name.removeprefix("colvision-"),
+        "Pick a ColVision command",
+    )
 
 
 def _chat_only() -> None:
     config_file = pick_or_build_config(REGISTRY["ragcli"])
-    console.print()
-    console.print(section("RAG chat", Text(f"config: {config_file}", style=MUTED)))
-    REGISTRY["ragcli"].run(config_file=config_file)
+    REGISTRY["ragcli"].run(
+        config_file=config_file, privacy_config_file=pick_privacy_config()
+    )
 
 
 def _run_full_wizard() -> None:
@@ -212,21 +229,32 @@ def _pipeline_hint() -> str | None:
     return " | ".join(hints) if hints else None
 
 
+def _colvision_hint() -> str | None:
+    hints = [check_stage_available(s) for s in REGISTRY.values() if _is_colvision(s)]
+    if hints and all(h is not None for h in hints):
+        return next(h for h in hints if h)
+    return None
+
+
 def _main_menu() -> str | None:
-    notice = _missing_extras_notice()
+    notice = _missing_extras_notice(
+        [s for s in REGISTRY.values() if not _is_colvision(s)]
+    )
     if notice is not None:
         console.print(notice)
 
     pipeline_hint = _pipeline_hint()
     chat_hint = check_stage_available(REGISTRY["ragcli"])
+    colvision_hint = _colvision_hint()
     # The wizard validates each generated YAML against the stage's dataclass,
     # which transitively imports torch / transformers / etc. — so it needs the
     # same extras as the full pipeline. Reuse `_pipeline_hint()` to stay aligned.
     wizard_hint = _pipeline_hint()
 
     pipeline_label = "🚀 Run full pipeline  (process → postprocess → index)"
-    wizard_label = "🧙  Build a full pipeline config (guided wizard)"
+    wizard_label = "🧙 Build a full pipeline config (guided wizard)"
     chat_label = "💬 Chat with indexed documents"
+    colvision_label = "🖼  ColVision"
 
     pipeline_choice = questionary.Choice(
         _disabled_label(pipeline_label) if pipeline_hint else pipeline_label,
@@ -243,21 +271,28 @@ def _main_menu() -> str | None:
         value="chat",
         disabled="missing extras" if chat_hint else None,
     )
+    colvision_choice = questionary.Choice(
+        _disabled_label(colvision_label) if colvision_hint else colvision_label,
+        value="colvision",
+        disabled="missing extras" if colvision_hint else None,
+    )
 
-    return questionary.select(
+    return select(
         "What do you want to do?",
         choices=[
-            questionary.Choice("⚙  Run a single command", value="single"),
+            questionary.Separator("Default pipeline ──"),
+            questionary.Choice("🟢 Run a single command", value="single"),
             pipeline_choice,
             wizard_choice,
             chat_choice,
+            questionary.Separator(" "),
+            questionary.Separator("Alternative pipeline (vision-based) ──"),
+            colvision_choice,
             questionary.Separator(),
             questionary.Choice("🔧 Setup (install dependencies)", value="setup"),
             questionary.Choice("✕  Quit", value="quit"),
         ],
-        style=QSTYLE,
-        qmark=QMARK,
-    ).ask()
+    )
 
 
 def run() -> None:
@@ -268,10 +303,10 @@ def run() -> None:
         # cancels and returns here.
         try:
             mode = _main_menu()
-        except KeyboardInterrupt:
+        except (KeyboardInterrupt, UserCancelledError):
             console.print(f"\n[{ACCENT}]bye![/]")
             return
-        if mode in (None, "quit"):
+        if mode == "quit":
             console.print(f"[{ACCENT}]bye![/]")
             return
 
@@ -285,15 +320,17 @@ def run() -> None:
                 _run_full_wizard()
             elif mode == "chat":
                 _chat_only()
+            elif mode == "colvision":
+                _run_colvision_menu()
             elif mode == "setup":
                 from mmore.tui.setup import run_setup_wizard
 
                 run_setup_wizard()
         except (UserCancelledError, KeyboardInterrupt):
-            console.print(f"[{ACCENT2}]cancelled — back to menu.[/]")
+            console.print("[white]cancelled — back to menu.[/]")
             continue
         except Exception as e:  # noqa: BLE001
-            console.print(f"[bold red]error:[/] {e}")
+            console.print(f"[{ERR}]error:[/] {e}")
             try:
                 cont = questionary.confirm(
                     "Continue?", default=True, style=QSTYLE

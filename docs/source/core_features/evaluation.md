@@ -11,7 +11,7 @@ The evaluation workflow consists of four main steps:
 3. configure the evaluator, indexer, and RAG pipeline
 4. run the evaluation for the selected retriever and LLM setup
 
-MMORE relies on [RAGAS](https://docs.ragas.io/) for evaluation. RAGAS is a library designed for evaluating LLM applications.
+mmore relies on [RAGAS](https://docs.ragas.io/) for evaluation. RAGAS is a library designed for evaluating LLM applications.
 
 ## 💡 TL;DR
 
@@ -97,7 +97,7 @@ result = evaluator(
 )
 ```
 
-- See [`examples/rag/evaluation`](https://github.com/swiss-ai/mmore/blob/master/examples/rag/evaluation) for a simple example.
+- See [`examples/rag/evaluation`](https://github.com/EPFLiGHT/mmore/blob/main/examples/rag/evaluation) for a simple example.
 ```{warning}
 Create a separate database file for each evaluation dataset.
 

@@ -2,7 +2,7 @@ name: 🧹 Ruff linter checks
 on:
   push:
     branches:
-      - master
+      - main
   pull_request:
 jobs:
   lint:
