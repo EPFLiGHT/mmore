@@ -4,9 +4,17 @@ dispatcher_config:
   distributed: false
   extract_images: true
   scheduler_file: scheduler-file.json
+  processor_selection:
+    ".pdf": PDFProcessor
   process_batch_sizes:
     - PDFProcessor: 4000
   processor_config:
+    NemotronVLMProcessor:
+      - nemotron_model: "nvidia/nemotron-nano-12b-v2-vl"
+      - nemotron_dpi: 200
+      - nemotron_max_tokens: 4096
+      - nemotron_temperature: 0.0
+
     PDFProcessor:
       - PDFTEXT_CPU_WORKERS: 0
       - DETECTOR_BATCH_SIZE: 1
