@@ -167,3 +167,31 @@ def test_dispatcher_buckets_multiple_files_and_ignores_unsupported(
     assert all(
         unsupported_file not in files for files in dispatcher.intermediate_map.values()
     )
+
+
+# ---------------------------------------------------------------------------
+# The two real PDF backends: PDFProcessor stays the default, the pymupdf4llm one
+# is reachable only when named in `processor_selection`
+# ---------------------------------------------------------------------------
+
+
+def test_pdf_default_processor_is_unchanged():
+    from mmore.process.processors.pdf_processor import PDFProcessor
+
+    pdf_file = make_file_descriptor("test.pdf", ".pdf")
+
+    assert AutoProcessor.from_file(pdf_file) is PDFProcessor
+
+
+def test_pymupdf4llm_processor_is_opt_in():
+    from mmore.process.processors.pdf_pymupdf4llm_processor import (
+        PDFPyMuPDF4LLMProcessor,
+    )
+
+    pdf_file = make_file_descriptor("test.pdf", ".pdf")
+
+    selected = AutoProcessor.from_file(
+        pdf_file, preferred_processor="PDFPyMuPDF4LLMProcessor"
+    )
+
+    assert selected is PDFPyMuPDF4LLMProcessor
