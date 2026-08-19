@@ -38,4 +38,6 @@ dispatcher_config:
       - TABLE_REC_BATCH_SIZE: 1
 
   processor_selection:
+    # PDFProcessor: default pdf processor.
+    # PDFPyMuPDF4LLMProcessor: extracts Markdown via pymupdf4llm in fast mode.
     ".pdf": PDFProcessor
