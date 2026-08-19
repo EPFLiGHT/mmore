@@ -72,6 +72,7 @@ class DispatcherConfig:
     distributed: bool = False
     scheduler_file: Optional[str] = None
     processor_config: Optional[Dict] = None
+    processor_selection: Optional[Dict[str, str]] = None
     process_batch_sizes: Optional[List[Dict[str, float]]] = None
     batch_multiplier: int = 1
     extract_images: bool = False
@@ -91,6 +92,7 @@ class DispatcherConfig:
             distributed=config.get("distributed", False),
             scheduler_file=config.get("scheduler_file"),
             processor_config=config.get("processor_config"),
+            processor_selection=config.get("processor_selection"),
             process_batch_sizes=config.get("process_batch_sizes"),
             batch_multiplier=config.get("batch_multiplier", 1),
             extract_images=config.get("extract_images", False),
@@ -116,6 +118,7 @@ class DispatcherConfig:
             "scheduler_file": self.scheduler_file,
             "output_path": self.output_path,
             "processor_config": self.processor_config,
+            "processor_selection": self.processor_selection,
             "process_batch_sizes": self.process_batch_sizes,
             "batch_multiplier": self.batch_multiplier,
             "extract_images": self.extract_images,
@@ -194,9 +197,18 @@ class Dispatcher:
             processor: [] for processor in ProcessorRegistry.get_processors()
         }
 
+        all_processor_preferences = self.config.processor_selection or {}
+
         for file_path_list in self.result.file_paths.values():
             for file in file_path_list:
-                processor = AutoProcessor.from_file(file)
+                preferred_processor_for_file = all_processor_preferences.get(
+                    file.file_extension
+                )
+                processor = AutoProcessor.from_file(file, preferred_processor_for_file)
+
+                if processor is None:
+                    continue
+
                 logger.debug(
                     f"Assigned file {file.file_path} to processor: {processor}"
                 )

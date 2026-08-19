@@ -36,3 +36,6 @@ dispatcher_config:
       - LAYOUT_BATCH_SIZE: 1
       - ORDER_BATCH_SIZE: 1
       - TABLE_REC_BATCH_SIZE: 1
+
+  processor_selection:
+    ".pdf": PDFProcessor

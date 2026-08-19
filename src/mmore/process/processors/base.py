@@ -68,19 +68,26 @@ class ProcessorRegistry:
 
 class AutoProcessor:
     @classmethod
-    def from_file(cls, file: FileDescriptor):
+    def from_file(
+        cls,
+        file: FileDescriptor,
+        preferred_processor: Optional[str] = None,
+    ):
         """
         Determine and return the appropriate processor for the given file.
 
         Args:
             file (FileDescriptor): The file descriptor to process.
+            preferred_processor (Optional[str]): the preferred processor to process the file.
 
         Returns:
             Processor: The appropriate processor for the file, or None if no processor is found.
         """
 
         for processor in ProcessorRegistry.get_processors():
-            if processor.accepts(file):
+            if processor.accepts(file) and (
+                preferred_processor is None or processor.__name__ == preferred_processor
+            ):
                 return processor
 
         logger.warning(f"No registered processor found for file {file}")
