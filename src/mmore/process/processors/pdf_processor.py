@@ -112,6 +112,7 @@ class PDFProcessor(Processor):
                     results.append(self.process(file_path))
                 except Exception as e:
                     logging.error(f"Failed to process {file_path}: {str(e)}")
+                    raise
             return results
 
         if fast_mode:  # No GPU available - fallback to default
@@ -140,6 +141,7 @@ class PDFProcessor(Processor):
                         results.append(res)
                     except Exception as e:
                         logging.error(f"Failed to process {file_path}: {str(e)}")
+                        raise
 
                 return results
             else:  # Multiple GPUs available
@@ -378,7 +380,7 @@ class PDFProcessor(Processor):
                     batch_results.append(result)
                 except Exception as e:
                     logging.error(f"Failed to process {file}: {str(e)}")
-                    batch_results.append(None)  # handle partial failures
+                    raise
 
             output_queue.put(batch_results)
 
