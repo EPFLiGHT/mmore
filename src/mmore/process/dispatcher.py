@@ -79,6 +79,8 @@ class DispatcherConfig:
     # When set, processing is pinned to this single device (used by the indexer
     # API to run one job per GPU). None keeps the default behavior.
     device: Optional[str] = None
+    # When True, a file that fails to process raises an exception, (used by the indexer API).
+    fail_on_error: bool = False
 
     def __post_init__(self):
         os.makedirs(self.output_path, exist_ok=True)
@@ -251,6 +253,8 @@ class Dispatcher:
                     processor_config["output_path"] = self.config.output_path
                     if self.config.device is not None:
                         processor_config["device"] = self.config.device
+                    if self.config.fail_on_error:
+                        processor_config["fail_on_error"] = True
 
                     full_config = ProcessorConfig(
                         extract_images=self.config.extract_images,

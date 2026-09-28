@@ -3,6 +3,7 @@ import logging
 import os
 import tempfile
 from abc import ABC, abstractmethod
+from functools import partial
 from multiprocessing.pool import Pool
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -15,6 +16,15 @@ from ...type import DocumentMetadata, MultimodalRawInput, MultimodalSample
 from ...ux import init_worker, progress
 
 logger = logging.getLogger(__name__)
+
+
+def _capture_error(
+    process_func: Callable[[str], MultimodalSample], file_path: str
+) -> tuple[Optional[MultimodalSample], Optional[Exception]]:
+    try:
+        return process_func(file_path), None
+    except Exception as e:
+        return None, e
 
 
 class ProcessorConfig:
@@ -181,6 +191,13 @@ class Processor(ABC):
         self._pool = pool
         self._owns_pool = False
 
+    def _handle_failure(self, file_path: str, error: Exception) -> None:
+        """Re-raise when fail_on_error is set (indexer API)"""
+        if self._fail_on_error:
+            logger.error(f"Failed to process {file_path}: {error}")
+            raise error
+        logger.warning(f"Failed to process {file_path}, skipping it: {error}")
+
     def process_batch(
         self, files_paths: List[str], fast_mode: bool = False, num_workers: int = 1
     ) -> List[MultimodalSample]:
@@ -203,7 +220,7 @@ class Processor(ABC):
         if self._pool is not None:
             try:
                 return self._run_with_progress(
-                    self._pool, process_func, files_paths, step
+                    self._pool, process_func, files_paths, step, self._fail_on_error
                 )
             except Exception as e:
                 logger.error(f"Error during pool execution: {e}")
@@ -214,7 +231,7 @@ class Processor(ABC):
             )
             with mp.Pool(processes=num_workers, initializer=init_worker) as temp_pool:
                 return self._run_with_progress(
-                    temp_pool, process_func, files_paths, step
+                    temp_pool, process_func, files_paths, step, self._fail_on_error
                 )
 
     @staticmethod
@@ -223,6 +240,7 @@ class Processor(ABC):
         process_func: Callable[[str], MultimodalSample],
         files_paths: List[str],
         step: str,
+        fail_on_error: bool = False,
     ) -> List[MultimodalSample]:
         """Run process_func over files on the pool, updating one progress line
         with the current file."""
@@ -230,13 +248,25 @@ class Processor(ABC):
         with progress(total=len(files_paths), desc=step, unit="file") as bar:
             if files_paths:
                 bar.set_postfix_str(os.path.basename(files_paths[0]))
-            for i, res in enumerate(pool.imap(process_func, files_paths)):
-                results.append(res)
+            outcomes = pool.imap(partial(_capture_error, process_func), files_paths)
+            for i, (res, error) in enumerate(outcomes):
+                if error is None:
+                    results.append(res)
+                elif fail_on_error:
+                    raise error
+                else:
+                    logger.warning(
+                        f"Failed to process {files_paths[i]}, skipping it: {error}"
+                    )
                 bar.update(1)
                 # Once all files processed we don't show names next to the progress bars
                 if i + 1 < len(files_paths):
                     bar.set_postfix_str(os.path.basename(files_paths[i + 1]))
         return results
+
+    @property
+    def _fail_on_error(self) -> bool:
+        return bool(self.config.custom_config.get("fail_on_error", False))
 
     def __del__(self):
         if hasattr(self, "_owns_pool") and self._owns_pool and self._pool:
