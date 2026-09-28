@@ -47,6 +47,44 @@ SAMPLE_DOCS = [
 ]
 
 
+CHUNKED_CORPUS: Dict[str, List[str]] = {
+    "doc-paris": [
+        "Paris is the capital of France.",
+        "Paris is home to the Louvre museum.",
+        "The Seine river flows through Paris.",
+    ],
+    "doc-eiffel": [
+        "The Eiffel Tower stands 330 metres tall.",
+    ],
+    "doc-milvus": [
+        "Milvus is an open-source vector database.",
+        "Milvus supports hybrid dense and sparse search.",
+    ],
+}
+
+
+def _build_chunked_docs() -> List[MultimodalSample]:
+    samples = []
+    for document_id, chunks in CHUNKED_CORPUS.items():
+        for i, text in enumerate(chunks):
+            samples.append(
+                MultimodalSample(
+                    id=f"{document_id}+{i}",
+                    document_id=document_id,
+                    text=text,
+                    modalities=[],
+                    metadata=DocumentMetadata(
+                        file_path=f"/data/{document_id}.txt",
+                        extra={"filename": f"{document_id}.txt"},
+                    ),
+                )
+            )
+    return samples
+
+
+CHUNKED_SAMPLE_DOCS = _build_chunked_docs()
+
+
 @pytest.fixture
 def make_sample():
     def _make(file_path: str, text: str = "x", **metadata) -> MultimodalSample:
