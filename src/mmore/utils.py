@@ -245,6 +245,7 @@ def process_files_default(
         use_fast_processors=False,
         extract_images=True,
         device=device,
+        fail_on_error=True,
     )
 
     dispatcher = Dispatcher(result=crawl_result, config=dispatcher_config)
