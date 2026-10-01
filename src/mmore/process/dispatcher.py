@@ -79,7 +79,7 @@ class DispatcherConfig:
     # When set, processing is pinned to this single device (used by the indexer
     # API to run one job per GPU). None keeps the default behavior.
     device: Optional[str] = None
-    # When True, a file that fails to process raises an exception, (used by the indexer API).
+    # When True, a file that fails to process raises an exception.
     fail_on_error: bool = False
 
     def __post_init__(self):
