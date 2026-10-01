@@ -29,6 +29,7 @@ from mmore.run_retriever import make_router, save_results
 from mmore.type import DocumentMetadata, MultimodalSample
 
 _COLLECTION = "my_docs"
+_OTHER_COLLECTION = "other_col"
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +376,14 @@ def indexer_client(tmp_path_factory):
         [_fake_doc(str(pre_file), document_id=pre_id)],
         collection_name=_COLLECTION,
     )
+    # Second collection
+    for other_id in ("other-download-doc", "other-delete-doc"):
+        other_file = Path(upload_dir) / other_id
+        other_file.write_bytes(b"Other collection content.")
+        the_indexer.index_documents(
+            [_fake_doc(str(other_file), document_id=other_id)],
+            collection_name=_OTHER_COLLECTION,
+        )
 
     stack = ExitStack()
     stack.enter_context(patch("mmore.run_index_api.UPLOAD_DIR", upload_dir))
@@ -461,6 +470,8 @@ def test_uploaded_file_has_filename_in_list_files(tmp_path):
             ),
             client=milvus_client,
         )
+        # The patched get_indexer does not create the configured collection
+        the_indexer.index_documents([], collection_name=_COLLECTION)
         stack.enter_context(patch("mmore.run_index_api.UPLOAD_DIR", str(upload_dir)))
         stack.enter_context(patch("mmore.run_index_api.register_all_processors"))
         stack.enter_context(
@@ -777,3 +788,142 @@ def test_job_events_stream_reaches_done(indexer_client):
     # The stream stays open until the job is terminal, so "done" is always sent
     assert "data:" in body
     assert "done" in body
+
+
+# ---------------------------------------------------------------------------
+# Per-request collection (collectionName)
+# ---------------------------------------------------------------------------
+
+
+def test_upload_file_into_other_collection(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    file_id = "other-upload-doc"
+    fake_path = str(Path(upload_dir) / "other.txt")
+
+    with patch(
+        "mmore.run_index_api._process_files",
+        return_value=[_fake_doc(fake_path, document_id=file_id)],
+    ) as process:
+        response = tc.post(
+            "/v1/files",
+            data={"fileId": file_id, "collectionName": _OTHER_COLLECTION},
+            files={"file": ("other.txt", b"other collection", "text/plain")},
+        )
+        assert response.status_code == 202
+        assert _wait_job(tc, response.json()["jobId"])["status"] == "done"
+
+    assert process.call_args.args[2] == _OTHER_COLLECTION
+    # Indexed in the requested collection
+    response = tc.get(
+        f"/v1/files/{file_id}", params={"collectionName": _OTHER_COLLECTION}
+    )
+    assert response.status_code == 200
+
+
+def test_upload_bulk_into_other_collection(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    file_id = "other-bulk-doc"
+    fake_path = str(Path(upload_dir) / "bulk.txt")
+
+    with patch(
+        "mmore.run_index_api._process_files",
+        return_value=[_fake_doc(fake_path, document_id=file_id)],
+    ) as process:
+        response = tc.post(
+            "/v1/files/bulk",
+            data={"listIds": file_id, "collectionName": _OTHER_COLLECTION},
+            files=[("files", ("bulk.txt", b"bulk", "text/plain"))],
+        )
+        assert response.status_code == 202
+        [job] = response.json()["jobs"]
+        assert _wait_job(tc, job["jobId"])["status"] == "done"
+
+    assert process.call_args.args[2] == _OTHER_COLLECTION
+    # Indexed in the requested collection
+    response = tc.get(
+        f"/v1/files/{file_id}", params={"collectionName": _OTHER_COLLECTION}
+    )
+    assert response.status_code == 200
+
+
+def test_download_file_from_other_collection(indexer_client):
+    tc, *_ = indexer_client
+    response = tc.get(
+        "/v1/files/other-download-doc", params={"collectionName": _OTHER_COLLECTION}
+    )
+    assert response.status_code == 200
+    assert response.content == b"Other collection content."
+
+
+def test_delete_file_from_other_collection(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    response = tc.delete(
+        "/v1/files/other-delete-doc", params={"collectionName": _OTHER_COLLECTION}
+    )
+    assert response.status_code == 200
+    assert not Path(upload_dir, "other-delete-doc").exists()
+
+
+def test_upload_file_into_missing_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    with patch("mmore.run_index_api._process_files") as process:
+        response = tc.post(
+            "/v1/files",
+            data={"fileId": "missing-upload-doc", "collectionName": "missing"},
+            files={"file": ("m.txt", b"x", "text/plain")},
+        )
+
+    assert response.status_code == 404
+    process.assert_not_called()
+    assert not Path(upload_dir, "missing-upload-doc").exists()
+
+
+def test_upload_bulk_into_missing_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    with patch("mmore.run_index_api._process_files") as process:
+        response = tc.post(
+            "/v1/files/bulk",
+            data={"listIds": "missing-bulk-doc", "collectionName": "missing"},
+            files=[("files", ("m.txt", b"x", "text/plain"))],
+        )
+
+    assert response.status_code == 404
+    process.assert_not_called()
+    assert not Path(upload_dir, "missing-bulk-doc").exists()
+
+
+def test_download_file_from_missing_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    Path(upload_dir, "missing-download-doc").write_bytes(b"x")
+
+    response = tc.get(
+        "/v1/files/missing-download-doc", params={"collectionName": "missing"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_file_from_missing_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    Path(upload_dir, "missing-delete-doc").write_bytes(b"keep me")
+
+    response = tc.delete(
+        "/v1/files/missing-delete-doc", params={"collectionName": "missing"}
+    )
+
+    assert response.status_code == 404
+    # Nothing is deleted when the collection does not exist
+    assert Path(upload_dir, "missing-delete-doc").exists()
+
+
+def test_update_file_in_missing_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    Path(upload_dir, "missing-update-doc").write_bytes(b"x")
+
+    response = tc.put(
+        "/v1/files/missing-update-doc",
+        data={"collectionName": "missing"},
+        files={"file": ("m.txt", b"new", "text/plain")},
+    )
+
+    assert response.status_code == 404
