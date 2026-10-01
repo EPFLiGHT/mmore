@@ -18,7 +18,7 @@ from PIL import Image, UnidentifiedImageError
 from ...type import DocumentMetadata, FileDescriptor, MultimodalSample
 from ...ux import is_verbose, loading_model, progress
 from ..utils import clean_image, clean_text
-from .base import Processor, ProcessorConfig
+from .base import Processor, ProcessorConfig, handle_failure
 
 IMG_REGEX = r"!\[\]\(_page_\d+_[A-Za-z0-9_]+\.(jpeg|jpg|png|gif)\)"
 
@@ -111,7 +111,7 @@ class PDFProcessor(Processor):
                 try:
                     results.append(self.process(file_path))
                 except Exception as e:
-                    self._handle_failure(file_path, e)
+                    handle_failure(file_path, e, self._fail_on_error)
             return results
 
         if fast_mode:  # No GPU available - fallback to default
@@ -139,7 +139,7 @@ class PDFProcessor(Processor):
                         res = self.process(file_path)
                         results.append(res)
                     except Exception as e:
-                        self._handle_failure(file_path, e)
+                        handle_failure(file_path, e, self._fail_on_error)
 
                 return results
             else:  # Multiple GPUs available
@@ -377,7 +377,8 @@ class PDFProcessor(Processor):
                     result = self.process(file)
                     batch_results.append(result)
                 except Exception as e:
-                    self._handle_failure(file, e)
+                    handle_failure(file, e, self._fail_on_error)
+                    batch_results.append(None)  # handle partial failures
 
             output_queue.put(batch_results)
 

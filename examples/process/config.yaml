@@ -6,6 +6,7 @@ dispatcher_config:
   use_fast_processors: false
   distributed: false
   extract_images: true
+  fail_on_error: false # raise instead of skipping files that fail to process
   scheduler_file: null # for instance /path/to/mmore/scheduler-file.json
   process_batch_sizes:
     - URLProcessor: 40
