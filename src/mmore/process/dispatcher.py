@@ -98,6 +98,7 @@ class DispatcherConfig:
             process_batch_sizes=config.get("process_batch_sizes"),
             batch_multiplier=config.get("batch_multiplier", 1),
             extract_images=config.get("extract_images", False),
+            fail_on_error=config.get("fail_on_error", False),
         )
 
     @staticmethod

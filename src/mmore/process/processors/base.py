@@ -27,6 +27,14 @@ def _capture_error(
         return None, e
 
 
+def handle_failure(file_path: str, error: Exception, fail_on_error: bool) -> None:
+    """Re-raise when fail_on_error is set, otherwise log and skip the file"""
+    if fail_on_error:
+        logger.error(f"Failed to process {file_path}: {error}")
+        raise error
+    logger.warning(f"Failed to process {file_path}, skipping it: {error}")
+
+
 class ProcessorConfig:
     """
     A dataclass that represents the configuration of a processor.
@@ -191,13 +199,6 @@ class Processor(ABC):
         self._pool = pool
         self._owns_pool = False
 
-    def _handle_failure(self, file_path: str, error: Exception) -> None:
-        """Re-raise when fail_on_error is set (indexer API)"""
-        if self._fail_on_error:
-            logger.error(f"Failed to process {file_path}: {error}")
-            raise error
-        logger.warning(f"Failed to process {file_path}, skipping it: {error}")
-
     def process_batch(
         self, files_paths: List[str], fast_mode: bool = False, num_workers: int = 1
     ) -> List[MultimodalSample]:
@@ -252,12 +253,8 @@ class Processor(ABC):
             for i, (res, error) in enumerate(outcomes):
                 if error is None:
                     results.append(res)
-                elif fail_on_error:
-                    raise error
                 else:
-                    logger.warning(
-                        f"Failed to process {files_paths[i]}, skipping it: {error}"
-                    )
+                    handle_failure(files_paths[i], error, fail_on_error)
                 bar.update(1)
                 # Once all files processed we don't show names next to the progress bars
                 if i + 1 < len(files_paths):
@@ -266,6 +263,9 @@ class Processor(ABC):
 
     @property
     def _fail_on_error(self) -> bool:
+        """Whether a file that fails to process raises instead of being logged and skipped.
+        always enabled by the indexer API.
+        """
         return bool(self.config.custom_config.get("fail_on_error", False))
 
     def __del__(self):
