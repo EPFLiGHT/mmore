@@ -187,6 +187,17 @@ If no processor is specified for an extension, the first compatible processor is
 
 ⚠️ If the selected processor is not compatible with the file, the file is skipped.
 
+### Failure Handling
+By default, a file that fails to process is logged as a warning and skipped, so other files can still be processed.
+Set `fail_on_error` in `dispatcher_config` to `true` to make the first failure raise instead, which aborts the run:
+
+```yaml
+dispatcher_config:
+  fail_on_error: true
+```
+
+The indexer API always enables this option, so a job can report a failure.
+
 ## 🧹 Post-processing
 
 Post-processing refines the extracted text data to improve quality for downstream tasks. The infrastructure is modular and extensible: mmore natively supports the following post-processors: 
