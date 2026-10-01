@@ -49,12 +49,19 @@ paths:
                   type: string
                   format: binary
                   description: The file content
+                collectionName:
+                  type: string
+                  description: |
+                    Collection to index into. Defaults to the configured
+                    `collection_name`. The collection must already exist.
               required:
                 - fileId
                 - file
       responses:
         "201":
           description: File successfully uploaded
+        "404":
+          description: Collection not found
 
   /list_files:
     get:
@@ -112,11 +119,18 @@ paths:
                   type: string
                   format: binary
                   description: The new file content
+                collectionName:
+                  type: string
+                  description: |
+                    Collection the file is indexed in. Defaults to the
+                    configured `collection_name`.
               required:
                 - file
       responses:
         "200":
           description: File successfully updated
+        "404":
+          description: File or collection not found
 
     delete:
       tags:
@@ -132,9 +146,19 @@ paths:
           required: true
           schema:
             type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
       responses:
         "200":
           description: File successfully deleted
+        "404":
+          description: File or collection not found
 
     get:
       tags:
@@ -147,6 +171,14 @@ paths:
           required: true
           schema:
             type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
       responses:
         "200":
           description: File content
@@ -155,6 +187,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        "404":
+          description: File or collection not found
 
   /retrieve:
     post:
