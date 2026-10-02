@@ -219,7 +219,6 @@ def make_router(config_path: str) -> APIRouter:
                     }
                 },
             },
-            404: {"description": "Collection not found"},
             409: {
                 "description": "File ID already exists or is already being processed"
             },
@@ -232,7 +231,7 @@ def make_router(config_path: str) -> APIRouter:
         file: UploadFile = File(..., description="The file content"),
         collectionName: Optional[str] = Form(
             None,
-            description="Collection to index into",
+            description="Collection to index into, created if it does not exist",
         ),
     ):
         """
@@ -244,7 +243,8 @@ def make_router(config_path: str) -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="Provided file should have a filename"
             )
-        collection_name = _existing_collection(collectionName)
+        # Indexing creates the collection if it does not exist yet
+        collection_name = collectionName or COLLECTION_NAME
         if (FilePath(UPLOAD_DIR) / fileId).exists():
             raise HTTPException(
                 status_code=409, detail=f"File with ID {fileId} already exists"
@@ -294,7 +294,6 @@ def make_router(config_path: str) -> APIRouter:
                 },
             },
             400: {"description": "Number of IDs does not match number of files"},
-            404: {"description": "Collection not found"},
         },
     )
     async def upload_files(
@@ -302,7 +301,7 @@ def make_router(config_path: str) -> APIRouter:
         files: List[UploadFile] = File(..., description="Files to upload"),
         collectionName: Optional[str] = Form(
             None,
-            description="Collection to index into",
+            description="Collection to index into, created if it does not exist",
         ),
     ):
         """
@@ -311,7 +310,8 @@ def make_router(config_path: str) -> APIRouter:
         Returns a per-file outcome (jobId or error), so one bad file does not
         fail the whole batch.
         """
-        collection_name = _existing_collection(collectionName)
+        # Indexing creates the collection if it does not exist yet
+        collection_name = collectionName or COLLECTION_NAME
         listIds = [
             file_id.strip()
             for ids in listIds
