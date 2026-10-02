@@ -26,6 +26,12 @@ dispatcher_config:
       - sample_rate: 10
       - batch_size: 4
 
+    NemotronVLMProcessor:
+      - nemotron_model: "nvidia/nemotron-nano-12b-v2-vl"
+      - nemotron_dpi: 200
+      - nemotron_max_tokens: 4096
+      - nemotron_temperature: 0.0
+
     PDFProcessor:
       - PDFTEXT_CPU_WORKERS: 0
       - DETECTOR_BATCH_SIZE: 1
@@ -38,4 +44,4 @@ dispatcher_config:
       - TABLE_REC_BATCH_SIZE: 1
 
   processor_selection:
-    ".pdf": PDFProcessor
+    ".pdf": PDFProcessor # Change to NemotronVLMProcessor to use NVIDIA Nemotron.
