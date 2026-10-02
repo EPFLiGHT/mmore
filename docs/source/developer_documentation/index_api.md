@@ -173,7 +173,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 }
 ```
 
-**Errors**: `404` file or collection not found.
+**Errors**: `404` file or collection not found, `500` internal error while deleting the file (vector DB or filesystem).
 
 
 ### 📥 Download endpoint
@@ -189,7 +189,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 
 Returns the file with binary content.
 
-**Errors**: `404` file or collection not found.
+**Errors**: `404` file or collection not found, `500` internal error while retrieving the file.
 
 ### 🛰️ Job status endpoints
 
