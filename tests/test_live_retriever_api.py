@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from conftest import SAMPLE_DOCS, FakeSparseEmbedding
+from conftest import CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pymilvus import MilvusClient
@@ -52,7 +52,7 @@ def db_path(tmp_path_factory):
             ),
             client=client,
         )
-        indexer.index_documents(SAMPLE_DOCS, collection_name=_COLLECTION)
+        indexer.index_documents(CHUNKED_SAMPLE_DOCS, collection_name=_COLLECTION)
     return path
 
 
@@ -96,7 +96,7 @@ def test_list_files_returns_all_documents(client):
     response = client.get("/list_files", params={"collection_name": _COLLECTION})
     assert response.status_code == 200
     ids = {f["id"] for f in response.json()}
-    assert ids == {"doc-1", "doc-2", "doc-3"}
+    assert ids == {"doc-paris", "doc-eiffel", "doc-milvus"}
 
 
 def test_list_files_missing_collection_name(client):
@@ -143,7 +143,7 @@ def test_retrieve_response_shape(client):
 
 def test_retrieve_with_file_ids_filter(client):
     payload = {
-        "fileIds": ["doc-1"],
+        "fileIds": ["doc-paris"],
         "maxMatches": 3,
         "minSimilarity": -1.0,
         "query": "France",
@@ -152,7 +152,7 @@ def test_retrieve_with_file_ids_filter(client):
     assert response.status_code == 200
     results = response.json()
     returned_ids = {r["fileId"] for r in results}
-    assert returned_ids <= {"doc-1"}
+    assert returned_ids <= {"doc-paris"}
 
 
 def test_retrieve_max_matches_respected(client):
