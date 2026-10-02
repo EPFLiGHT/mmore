@@ -231,7 +231,8 @@ def make_router(config_path: str) -> APIRouter:
         file: UploadFile = File(..., description="The file content"),
         collectionName: Optional[str] = Form(
             None,
-            description="Collection to index into, created if it does not exist",
+            description="Collection to index into (defaults to the "
+            "configured collection)",
         ),
     ):
         """
@@ -301,7 +302,8 @@ def make_router(config_path: str) -> APIRouter:
         files: List[UploadFile] = File(..., description="Files to upload"),
         collectionName: Optional[str] = Form(
             None,
-            description="Collection to index into, created if it does not exist",
+            description="Collection to index into (defaults to the "
+            "configured collection)",
         ),
     ):
         """
