@@ -15,7 +15,12 @@ from marker.models import create_model_dict
 from marker.output import text_from_rendered
 from PIL import Image, UnidentifiedImageError
 
-from ...type import DocumentMetadata, FileDescriptor, MultimodalSample
+from ...type import (
+    DocumentMetadata,
+    FileDescriptor,
+    MultimodalRawInput,
+    MultimodalSample,
+)
 from ...ux import is_verbose, loading_model, progress
 from ..utils import clean_image, clean_text
 from .base import Processor, ProcessorConfig
@@ -72,7 +77,9 @@ class PDFProcessor(Processor):
 
     @staticmethod
     def load_models(
-        disable_image_extraction: bool = False, device: Optional[str] = None
+        disable_image_extraction: bool = False,
+        device: Optional[str] = None,
+        page_range: Optional[List[int]] = None,
     ):
         artifact_dict = PDFProcessor._get_artifacts(device)
 
@@ -86,6 +93,8 @@ class PDFProcessor(Processor):
         }
         if device is not None:
             marker_config["device"] = str(device)
+        if page_range is not None:
+            marker_config["page_range"] = ",".join(map(str, page_range))
         config_parser = ConfigParser(marker_config)
         converter = PdfConverter(
             artifact_dict=artifact_dict,
@@ -194,6 +203,21 @@ class PDFProcessor(Processor):
     _PAGE_SEP_RE = re.compile(r"\n\n\{(\d+)\}-{3,}\n\n")
 
     def process(self, file_path: str) -> MultimodalSample:
+        rendered = self._render(file_path)
+        return self._build_sample(file_path, rendered.text, rendered.modalities)
+
+    def process_page_range(
+        self, file_path: str, page_range: List[int]
+    ) -> MultimodalSample:
+        """Render only some pages of a PDF as one shard to merge later."""
+        self.converter = PDFProcessor.load_models(
+            disable_image_extraction=not self.config.extract_images,
+            device=self.config.custom_config.get("device"),
+            page_range=page_range,
+        )
+        return self._render(file_path)
+
+    def _render(self, file_path: str) -> MultimodalSample:
         if self.converter is None:
             self.converter = PDFProcessor.load_models(
                 disable_image_extraction=not self.config.custom_config.get(
@@ -204,15 +228,28 @@ class PDFProcessor(Processor):
         rendered = self.converter(file_path)
         text, _, images = text_from_rendered(rendered)
         text = re.sub(str(IMG_REGEX), "<attachment>", cast(str, text))
-        images = list(images.values())
+        return self.create_sample([text], list(images.values()))
 
-        paragraph_starts, text = self._parse_pagination(cast(str, text))
+    @classmethod
+    def merge_page_shards(
+        cls, file_path: str, shards: List[MultimodalSample]
+    ) -> MultimodalSample:
+        """Join rendered shards, given in page order, into one document sample."""
+        text = "".join(shard.text for shard in shards)
+        modalities = [m for shard in shards for m in shard.modalities]
+        return cls._build_sample(file_path, text, modalities)
+
+    @classmethod
+    def _build_sample(
+        cls, file_path: str, text: str, modalities: List[MultimodalRawInput]
+    ) -> MultimodalSample:
+        paragraph_starts, text = cls._parse_pagination(text)
 
         metadata = PDFMetadata(file_path=file_path)
         if paragraph_starts:
             metadata.paragraph_starts = paragraph_starts
 
-        return self.create_sample([text], images, metadata)
+        return MultimodalSample(text, modalities, metadata)
 
     @classmethod
     def _parse_pagination(
