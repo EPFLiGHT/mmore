@@ -23,7 +23,6 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import FileResponse, StreamingResponse
-from pymilvus import MilvusClient
 
 logger = logging.getLogger(__name__)
 RETRIVER_EMOJI = "🗂️"
@@ -490,23 +489,15 @@ def make_router(config_path: str) -> APIRouter:
             collection_name = _existing_collection(collectionName)
             _existing_indexed_file(fileId, collection_name)
 
+            # Delete from vector database first. Ensure that a failure keeps the local copy
+            delete_result = milvus_client.delete(
+                collection_name=collection_name,
+                filter=f"document_id == {json.dumps(fileId)}",
+            )
+            logger.info(f"Deleted document from vector DB: {delete_result}")
+
             # Delete the physical file
             os.remove(file_storage_path)
-
-            # Delete from vector database
-            try:
-                client = MilvusClient(
-                    uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
-                )
-                delete_result = client.delete(
-                    collection_name=collection_name,
-                    filter=f"document_id == {json.dumps(fileId)}",
-                )
-                logger.info(f"Deleted document from vector DB: {delete_result}")
-            except Exception as db_error:
-                logger.warning(
-                    f"Error deleting from vector DB (continuing): {str(db_error)}"
-                )
 
             return {
                 "status": "success",
