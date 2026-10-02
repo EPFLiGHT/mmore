@@ -337,14 +337,36 @@ def test_apply_uploaded_file_metadata_preserves_chunk_suffix():
 
 
 @pytest.fixture(scope="module")
-def indexer_client(tmp_path_factory):
+def indexer_db_path(tmp_path_factory):
+    """Path of the Milvus Lite database shared by the indexer API tests."""
+    return str(tmp_path_factory.mktemp("idx_db") / "test.db")
+
+
+@pytest.fixture(scope="module")
+def milvus_indexer(indexer_db_path):
+    """Milvus Lite-backed Indexer served by the indexer API."""
+    with patch(
+        "mmore.index.indexer.SparseModel.from_config",
+        return_value=FakeSparseEmbedding(),
+    ):
+        milvus_client = MilvusClient(indexer_db_path, enable_sparse=True)
+        return Indexer(
+            dense_model_config=DenseModelConfig(model_name="debug"),
+            sparse_model_config=SparseModelConfig(
+                model_name="naver/splade-cocondenser-selfdistil"
+            ),
+            client=milvus_client,
+        )
+
+
+@pytest.fixture(scope="module")
+def indexer_client(tmp_path_factory, indexer_db_path, milvus_indexer):
     """Builds the indexer FastAPI app."""
     upload_dir = str(tmp_path_factory.mktemp("idx_uploads"))
-    db_path = str(tmp_path_factory.mktemp("idx_db") / "test.db")
     config_file = str(tmp_path_factory.mktemp("idx_cfg") / "config.yaml")
 
     cfg = {
-        "db": {"uri": db_path, "name": "my_db"},
+        "db": {"uri": indexer_db_path, "name": "my_db"},
         "hybrid_search_weight": 0.5,
         "k": 2,
         "collection_name": _COLLECTION,
@@ -354,33 +376,20 @@ def indexer_client(tmp_path_factory):
     with open(config_file, "w") as f:
         yaml.dump(cfg, f)
 
-    # Create the Milvus Lite indexer
-    with patch(
-        "mmore.index.indexer.SparseModel.from_config",
-        return_value=FakeSparseEmbedding(),
-    ):
-        milvus_client = MilvusClient(db_path, enable_sparse=True)
-        the_indexer = Indexer(
-            dense_model_config=DenseModelConfig(model_name="debug"),
-            sparse_model_config=SparseModelConfig(
-                model_name="naver/splade-cocondenser-selfdistil"
-            ),
-            client=milvus_client,
-        )
-
-    # Pre-create a file for delete/download tests
+    # Pre-create files for delete/download/update tests
     pre_id = "pre-existing-doc"
-    pre_file = Path(upload_dir) / pre_id
-    pre_file.write_bytes(b"Pre-existing file content.")
-    the_indexer.index_documents(
-        [_fake_doc(str(pre_file), document_id=pre_id)],
-        collection_name=_COLLECTION,
-    )
+    for doc_id in (pre_id, "update-doc"):
+        pre_file = Path(upload_dir) / doc_id
+        pre_file.write_bytes(b"Pre-existing file content.")
+        milvus_indexer.index_documents(
+            [_fake_doc(str(pre_file), document_id=doc_id)],
+            collection_name=_COLLECTION,
+        )
     # Second collection
-    for other_id in ("other-download-doc", "other-delete-doc"):
+    for other_id in ("other-download-doc", "other-delete-doc", "other-guarded-doc"):
         other_file = Path(upload_dir) / other_id
         other_file.write_bytes(b"Other collection content.")
-        the_indexer.index_documents(
+        milvus_indexer.index_documents(
             [_fake_doc(str(other_file), document_id=other_id)],
             collection_name=_OTHER_COLLECTION,
         )
@@ -389,7 +398,7 @@ def indexer_client(tmp_path_factory):
     stack.enter_context(patch("mmore.run_index_api.UPLOAD_DIR", upload_dir))
     stack.enter_context(patch("mmore.run_index_api.register_all_processors"))
     stack.enter_context(
-        patch("mmore.run_index_api.get_indexer", return_value=the_indexer)
+        patch("mmore.run_index_api.get_indexer", return_value=milvus_indexer)
     )
 
     router = make_index_router(config_file)
@@ -716,7 +725,6 @@ def test_upload_bulk_failed_processing_does_not_consume_ids(indexer_client):
 def test_update_existing_file_success(indexer_client):
     tc, upload_dir, _ = indexer_client
     update_id = "update-doc"
-    Path(upload_dir, update_id).write_bytes(b"Original content.")
 
     fake_path = str(Path(upload_dir) / "update-doc.txt")
     with patch(
@@ -886,10 +894,12 @@ def test_delete_file_from_other_collection(indexer_client):
     assert not Path(upload_dir, "other-delete-doc").exists()
 
 
-def test_upload_file_into_missing_collection_creates_it(indexer_client):
+def test_upload_file_into_missing_collection_creates_it(indexer_client, milvus_indexer):
     tc, upload_dir, _ = indexer_client
     file_id = "new-collection-doc"
     fake_path = str(Path(upload_dir) / "n.txt")
+    # The collection does not exist before the upload
+    assert not milvus_indexer.client.has_collection("created_single")
 
     with patch(
         "mmore.run_index_api._process_files",
@@ -904,16 +914,19 @@ def test_upload_file_into_missing_collection_creates_it(indexer_client):
         assert _wait_job(tc, response.json()["jobId"])["status"] == "done"
 
     # The collection now exists and holds the file
+    assert milvus_indexer.client.has_collection("created_single")
     response = tc.get(
         f"/v1/files/{file_id}", params={"collectionName": "created_single"}
     )
     assert response.status_code == 200
 
 
-def test_upload_bulk_into_missing_collection_creates_it(indexer_client):
+def test_upload_bulk_into_missing_collection_creates_it(indexer_client, milvus_indexer):
     tc, upload_dir, _ = indexer_client
     file_id = "new-collection-bulk-doc"
     fake_path = str(Path(upload_dir) / "nb.txt")
+    # The collection does not exist before the upload
+    assert not milvus_indexer.client.has_collection("created_bulk")
 
     with patch(
         "mmore.run_index_api._process_files",
@@ -929,6 +942,7 @@ def test_upload_bulk_into_missing_collection_creates_it(indexer_client):
         assert _wait_job(tc, job["jobId"])["status"] == "done"
 
     # The collection now exists and holds the file
+    assert milvus_indexer.client.has_collection("created_bulk")
     response = tc.get(f"/v1/files/{file_id}", params={"collectionName": "created_bulk"})
     assert response.status_code == 200
 
