@@ -386,7 +386,13 @@ def indexer_client(tmp_path_factory, indexer_db_path, milvus_indexer):
             collection_name=_COLLECTION,
         )
     # Second collection
-    for other_id in ("other-download-doc", "other-delete-doc", "other-guarded-doc"):
+    for other_id in (
+        "other-download-doc",
+        "other-delete-doc",
+        "other-guarded-doc",
+        "other-update-doc",
+        "other-db-failure-doc",
+    ):
         other_file = Path(upload_dir) / other_id
         other_file.write_bytes(b"Other collection content.")
         milvus_indexer.index_documents(
@@ -868,6 +874,60 @@ def test_delete_file_from_other_collection(indexer_client):
     )
     assert response.status_code == 200
     assert not Path(upload_dir, "other-delete-doc").exists()
+
+
+def test_update_file_in_other_collection(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    file_id = "other-update-doc"
+    new_doc = _fake_doc(str(Path(upload_dir) / "u.txt"), document_id=file_id)
+    new_doc.text = "Updated other collection content."
+    new_doc.id = f"{file_id}+1"
+
+    with patch("mmore.run_index_api._process_files", return_value=[new_doc]) as process:
+        response = tc.put(
+            f"/v1/files/{file_id}",
+            data={"collectionName": _OTHER_COLLECTION},
+            files={"file": ("u.txt", b"Updated other bytes.", "text/plain")},
+        )
+        assert response.status_code == 202
+        assert _wait_job(tc, response.json()["jobId"])["status"] == "done"
+
+    assert process.call_args.args[2] == _OTHER_COLLECTION
+    # The old vectors are replaced by the new ones in the requested collection
+    rows = milvus_indexer.client.query(
+        collection_name=_OTHER_COLLECTION,
+        filter=f'document_id == "{file_id}"',
+        output_fields=["text"],
+    )
+    assert [row["text"] for row in rows] == ["Updated other collection content."]
+    # Nothing leaks into the configured collection
+    assert not milvus_indexer.client.query(
+        collection_name=_COLLECTION,
+        filter=f'document_id == "{file_id}"',
+        output_fields=["document_id"],
+    )
+    assert Path(upload_dir, file_id).read_bytes() == b"Updated other bytes."
+
+
+def test_delete_file_db_failure_keeps_local_copy(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    file_id = "other-db-failure-doc"
+
+    with patch.object(
+        milvus_indexer.client, "delete", side_effect=RuntimeError("milvus down")
+    ):
+        response = tc.delete(
+            f"/v1/files/{file_id}", params={"collectionName": _OTHER_COLLECTION}
+        )
+
+    assert response.status_code == 500
+    # The local copy and the vectors are both left in place
+    assert Path(upload_dir, file_id).read_bytes() == b"Other collection content."
+    assert milvus_indexer.client.query(
+        collection_name=_OTHER_COLLECTION,
+        filter=f'document_id == "{file_id}"',
+        output_fields=["document_id"],
+    )
 
 
 def test_upload_file_into_missing_collection_creates_it(indexer_client, milvus_indexer):
