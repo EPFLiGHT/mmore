@@ -53,15 +53,13 @@ paths:
                   type: string
                   description: |
                     Collection to index into. Defaults to the configured
-                    `collection_name`. The collection must already exist.
+                    `collection_name`. Created if it does not exist.
               required:
                 - fileId
                 - file
       responses:
         "201":
           description: File successfully uploaded
-        "404":
-          description: Collection not found
 
   /list_files:
     get:
