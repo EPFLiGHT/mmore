@@ -958,3 +958,48 @@ def test_update_file_in_missing_collection_returns_404(indexer_client):
     )
 
     assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# File indexed in another collection
+# ---------------------------------------------------------------------------
+
+
+def test_download_file_from_wrong_collection_returns_404(indexer_client):
+    tc, *_ = indexer_client
+    # "other-guarded-doc" is indexed in _OTHER_COLLECTION, not in _COLLECTION
+    response = tc.get(
+        "/v1/files/other-guarded-doc", params={"collectionName": _COLLECTION}
+    )
+
+    assert response.status_code == 404
+
+
+def test_delete_file_from_wrong_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    response = tc.delete(
+        "/v1/files/other-guarded-doc", params={"collectionName": _COLLECTION}
+    )
+
+    assert response.status_code == 404
+    # The file of the other collection is left intact
+    assert Path(upload_dir, "other-guarded-doc").read_bytes() == (
+        b"Other collection content."
+    )
+
+
+def test_update_file_in_wrong_collection_returns_404(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    with patch("mmore.run_index_api._process_files") as process:
+        response = tc.put(
+            "/v1/files/other-guarded-doc",
+            data={"collectionName": _COLLECTION},
+            files={"file": ("g.txt", b"new", "text/plain")},
+        )
+
+    assert response.status_code == 404
+    process.assert_not_called()
+    # The file of the other collection is left intact
+    assert Path(upload_dir, "other-guarded-doc").read_bytes() == (
+        b"Other collection content."
+    )

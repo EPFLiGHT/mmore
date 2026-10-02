@@ -135,6 +135,23 @@ def make_router(config_path: str) -> APIRouter:
             )
         return collection_name
 
+    def _existing_indexed_file(
+        file_id: str, collection_name: str, output_fields: Optional[list[str]] = None
+    ) -> dict:
+        """Return one indexed row of the file, raise HTTPException 404 if the file is not in the collection."""
+        rows = milvus_client.query(
+            collection_name=collection_name,
+            filter=f"document_id == {json.dumps(file_id)}",
+            output_fields=output_fields or ["document_id"],
+            limit=1,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File with ID {file_id} not found in collection {collection_name}",
+            )
+        return rows[0]
+
     def _stage_upload(file: UploadFile, filename: str) -> tuple[str, str]:
         """Save the uploaded bytes now, while the request is alive.
 
@@ -399,6 +416,7 @@ def make_router(config_path: str) -> APIRouter:
                 status_code=404, detail=f"File with ID {fileId} not found"
             )
         collection_name = _existing_collection(collectionName)
+        _existing_indexed_file(fileId, collection_name)
         if file.filename is None:
             raise HTTPException(
                 status_code=422, detail="Provided file should have a filename"
@@ -470,6 +488,7 @@ def make_router(config_path: str) -> APIRouter:
                 )
 
             collection_name = _existing_collection(collectionName)
+            _existing_indexed_file(fileId, collection_name)
 
             # Delete the physical file
             os.remove(file_storage_path)
@@ -537,29 +556,10 @@ def make_router(config_path: str) -> APIRouter:
             collection_name = _existing_collection(collectionName)
 
             # Retrieve the filename from metadata
-            try:
-                client = MilvusClient(
-                    uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
-                )
-                file_paths = client.query(
-                    collection_name=collection_name,
-                    filter=f"document_id == {json.dumps(fileId)}",
-                    output_fields=["file_path"],
-                )
-
-                if len(file_paths) == 0:
-                    raise ValueError(
-                        f"Document of id {fileId} not found in the database"
-                    )
-
-                # all the elements with the same id refer to the same file so they have the same path
-                file_path: str = file_paths[0]["file_path"]
-                filename = file_path.split("/")[-1]
-            except Exception as db_error:
-                logger.warning(
-                    f"Error deleting from vector DB (continuing): {str(db_error)}"
-                )
-                raise db_error
+            # all the elements with the same id refer to the same file so they have the same path
+            row = _existing_indexed_file(fileId, collection_name, ["file_path"])
+            file_path: str = row["file_path"]
+            filename = file_path.split("/")[-1]
 
             # Return the file
             return FileResponse(
