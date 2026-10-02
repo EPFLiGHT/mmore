@@ -494,7 +494,8 @@ class Retriever(BaseRetriever):
         self, collection_name: str, limit: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
-        List the unique files currently stored in the database, sorted by file id.
+        List up to ``limit`` unique files currently stored in the database, sorted
+        by file id.
 
         Args:
             collection_name: Name of the Milvus collection to query.
@@ -513,20 +514,15 @@ class Retriever(BaseRetriever):
                 batch_size=_MILVUS_QUERY_MAX_ROWS,
             )
             try:
-                while True:
-                    batch = iterator.next()
-                    if not batch:
-                        break
-
+                for batch in iter(iterator.next, []):
                     for res in batch:
                         doc_id = res.get("document_id") or res.get("entity", {}).get(
                             "document_id"
                         )
-                        fname = res.get("filename") or res.get("entity", {}).get(
-                            "filename", "Unknown"
-                        )
-
-                        if doc_id:
+                        if doc_id and doc_id not in id_to_filename:
+                            fname = res.get("filename") or res.get("entity", {}).get(
+                                "filename", "Unknown"
+                            )
                             id_to_filename[doc_id] = fname
             finally:
                 iterator.close()

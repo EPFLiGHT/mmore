@@ -6,7 +6,7 @@ then queries via the actual hybrid_search pipeline.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
+from conftest import CHUNKED_CORPUS, CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_core.documents import Document
 from pymilvus import MilvusClient
@@ -14,7 +14,6 @@ from pymilvus import MilvusClient
 from mmore.index.indexer import Indexer
 from mmore.rag.model import DenseModelConfig, SparseModelConfig
 from mmore.rag.retriever import Retriever
-from mmore.type import DocumentMetadata, MultimodalSample
 
 _COLLECTION = "test_col"
 
@@ -57,68 +56,12 @@ def retriever(populated_db):
     )
 
 
-_CHUNKED_COLLECTION = "chunked_col"
-_CHUNKED_N_DOCS = 8
-_CHUNKED_CHUNKS_PER_DOC = 5
-
-
-@pytest.fixture(scope="module")
-def chunked_db(tmp_path_factory):
-    """A chunk-granular collection: several entities share one document_id."""
-    db_path = str(tmp_path_factory.mktemp("chunked_db") / "test.db")
-
-    samples = []
-    for d in range(_CHUNKED_N_DOCS):
-        for c in range(_CHUNKED_CHUNKS_PER_DOC):
-            samples.append(
-                MultimodalSample(
-                    id=f"chunked-doc-{d:02d}-chunk-{c:02d}",
-                    document_id=f"chunked-doc-{d:02d}",
-                    text=f"document {d} chunk {c}",
-                    modalities=[],
-                    metadata=DocumentMetadata(
-                        file_path=f"/data/chunked-file-{d:02d}.txt",
-                        extra={"filename": f"chunked-file-{d:02d}.txt"},
-                    ),
-                )
-            )
-
-    with patch(
-        "mmore.index.indexer.SparseModel.from_config",
-        return_value=FakeSparseEmbedding(),
-    ):
-        client = MilvusClient(db_path, enable_sparse=True)
-        indexer = Indexer(
-            dense_model_config=DenseModelConfig(model_name="debug"),
-            sparse_model_config=SparseModelConfig(
-                model_name="naver/splade-cocondenser-selfdistil"
-            ),
-            client=client,
-        )
-        indexer.index_documents(samples, collection_name=_CHUNKED_COLLECTION)
-
-    return db_path
-
-
 @pytest.fixture
-def chunked_retriever(chunked_db, monkeypatch):
-    """Retriever over the chunked collection, with the Milvus row cap shrunk so
-    that listing the files has to span several batches."""
-    monkeypatch.setattr(
-        "mmore.rag.retriever._MILVUS_QUERY_MAX_ROWS",
-        _CHUNKED_CHUNKS_PER_DOC * 2,
-    )
-    client = MilvusClient(chunked_db, enable_sparse=True)
-    return Retriever(
-        dense_model=FakeEmbeddings(size=2048),
-        sparse_model=FakeSparseEmbedding(),
-        client=client,
-        hybrid_search_weight=0.5,
-        k=2,
-        use_web=False,
-        reranker_model=None,
-        reranker_tokenizer=None,
-    )
+def small_batch_retriever(retriever, monkeypatch):
+    """Same retriever, with the Milvus row iterator set below the number of chunks
+    so that listing the files has to span several batches."""
+    monkeypatch.setattr("mmore.rag.retriever._MILVUS_QUERY_MAX_ROWS", 2)
+    return retriever
 
 
 # ---------------------------------------------------------------------------
@@ -223,30 +166,25 @@ def test_list_files_returns_all_documents(retriever):
     assert returned_ids == expected_ids
 
 
-def test_list_files_limit_counts_files(chunked_retriever):
-    """when db has more chunk than files, calling list_files with a limit of n+1 files
-    must return n files"""
-    files = chunked_retriever.list_files(
-        collection_name=_CHUNKED_COLLECTION, limit=_CHUNKED_N_DOCS + 1
-    )
+@pytest.mark.parametrize("limit", range(1, len(CHUNKED_CORPUS) + 1))
+def test_list_files_limit_counts_files(small_batch_retriever, limit):
+    """The limit counts files, not chunks, and keeps the lowest file ids."""
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION, limit=limit)
 
-    assert len(files) == _CHUNKED_N_DOCS
+    assert [f["id"] for f in files] == sorted(CHUNKED_CORPUS.keys())[:limit]
 
 
-def test_list_files_is_sorted_by_id(chunked_retriever):
-    files = chunked_retriever.list_files(collection_name=_CHUNKED_COLLECTION)
+def test_list_files_is_sorted_by_id(small_batch_retriever):
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION)
 
     assert [f["id"] for f in files] == sorted(f["id"] for f in files)
 
 
-def test_list_files_returns_all_files_of_a_chunked_collection(chunked_retriever):
-    files = chunked_retriever.list_files(collection_name=_CHUNKED_COLLECTION)
+def test_list_files_returns_all_files_across_batches(small_batch_retriever):
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION)
 
-    assert {f["id"] for f in files} == {
-        f"chunked-doc-{d:02d}" for d in range(_CHUNKED_N_DOCS)
-    }
-    assert {f["filename"] for f in files} == {
-        f"chunked-file-{d:02d}.txt" for d in range(_CHUNKED_N_DOCS)
+    assert {f["id"]: f["filename"] for f in files} == {
+        document_id: f"{document_id}.txt" for document_id in CHUNKED_CORPUS
     }
 
 
