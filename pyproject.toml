@@ -226,8 +226,6 @@ conflicts = [
   ],
 ]
 
-override-dependencies = ["anthropic==0.73.0"]
-
 [tool.uv.sources]
 torch = [
   { index = "pytorch-cpu", extra = "cpu", marker = "platform_system != 'Darwin'" },

@@ -33,7 +33,7 @@ jobs:
         run: |
           uv venv .venv
           source .venv/bin/activate
-          uv pip install -e ".[process,index,rag,api,cpu,dev,websearch,privacy,paper_discovery]"
+          uv pip install -e ".[process,index,rag,api,cpu,dev,websearch,privacy,paper_discovery]" && uv pip check
 
       - name: Show installed cohere and langchain-cohere versions
         run: |
@@ -50,7 +50,8 @@ jobs:
         run: |
           uv venv .venv-colvision
           source .venv-colvision/bin/activate
-          uv pip install -e ".[colvision,cpu,dev]"
+          uv pip install -e ".[colvision,cpu,dev]" && uv pip check
+
 
       - name: Run tests - colvision
         run: |

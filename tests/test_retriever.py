@@ -6,7 +6,7 @@ then queries via the actual hybrid_search pipeline.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import SAMPLE_DOCS, FakeSparseEmbedding
+from conftest import CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_core.documents import Document
 from pymilvus import MilvusClient
@@ -36,7 +36,7 @@ def populated_db(tmp_path_factory):
             ),
             client=client,
         )
-        indexer.index_documents(SAMPLE_DOCS, collection_name=_COLLECTION)
+        indexer.index_documents(CHUNKED_SAMPLE_DOCS, collection_name=_COLLECTION)
 
     return db_path
 
@@ -161,7 +161,7 @@ def test_retrieve_min_score_filters_all(retriever):
 
 
 def test_retrieve_result_ids_are_known_docs(retriever):
-    known_ids = {d.id for d in SAMPLE_DOCS}
+    known_ids = {d.id for d in CHUNKED_SAMPLE_DOCS}
     results = retriever.retrieve("Paris", collection_name=_COLLECTION, k=3)
     for r in results:
         assert r["id"] in known_ids
@@ -191,11 +191,11 @@ def test_batch_retrieve_empty_queries(retriever):
 
 def test_get_documents_by_ids_returns_correct_docs(retriever):
     docs = retriever.get_documents_by_ids(
-        ["doc-1", "doc-3"], collection_name=_COLLECTION
+        ["doc-paris+1", "doc-milvus+0"], collection_name=_COLLECTION
     )
     assert len(docs) == 2
     returned_ids = {d.metadata["id"] for d in docs}
-    assert returned_ids == {"doc-1", "doc-3"}
+    assert returned_ids == {"doc-paris+1", "doc-milvus+0"}
     assert all(isinstance(d, Document) for d in docs)
 
 
@@ -219,7 +219,7 @@ def test_get_documents_by_ids_unknown_id(retriever):
 def test_list_files_returns_all_documents(retriever):
     files = retriever.list_files(collection_name=_COLLECTION)
     returned_ids = {f["id"] for f in files}
-    expected_ids = {d.document_id for d in SAMPLE_DOCS}
+    expected_ids = {d.document_id for d in CHUNKED_SAMPLE_DOCS}
     assert returned_ids == expected_ids
 
 
