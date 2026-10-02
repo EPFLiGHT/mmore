@@ -6,7 +6,7 @@ then queries via the actual hybrid_search pipeline.
 from unittest.mock import MagicMock, patch
 
 import pytest
-from conftest import CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
+from conftest import CHUNKED_CORPUS, CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
 from langchain_community.embeddings import FakeEmbeddings
 from langchain_core.documents import Document
 from pymilvus import MilvusClient
@@ -54,6 +54,14 @@ def retriever(populated_db):
         reranker_model=None,
         reranker_tokenizer=None,
     )
+
+
+@pytest.fixture
+def small_batch_retriever(retriever, monkeypatch):
+    """Same retriever, with the Milvus row iterator set below the number of chunks
+    so that listing the files has to span several batches."""
+    monkeypatch.setattr("mmore.rag.retriever._MILVUS_QUERY_MAX_ROWS", 2)
+    return retriever
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +164,28 @@ def test_list_files_returns_all_documents(retriever):
     returned_ids = {f["id"] for f in files}
     expected_ids = {d.document_id for d in CHUNKED_SAMPLE_DOCS}
     assert returned_ids == expected_ids
+
+
+@pytest.mark.parametrize("limit", range(1, len(CHUNKED_CORPUS) + 1))
+def test_list_files_limit_counts_files(small_batch_retriever, limit):
+    """The limit counts files, not chunks, and keeps the lowest file ids."""
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION, limit=limit)
+
+    assert [f["id"] for f in files] == sorted(CHUNKED_CORPUS.keys())[:limit]
+
+
+def test_list_files_is_sorted_by_id(small_batch_retriever):
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION)
+
+    assert [f["id"] for f in files] == sorted(f["id"] for f in files)
+
+
+def test_list_files_returns_all_files_across_batches(small_batch_retriever):
+    files = small_batch_retriever.list_files(collection_name=_COLLECTION)
+
+    assert {f["id"]: f["filename"] for f in files} == {
+        document_id: f"{document_id}.txt" for document_id in CHUNKED_CORPUS
+    }
 
 
 # ---------------------------------------------------------------------------
