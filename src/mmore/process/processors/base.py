@@ -32,7 +32,8 @@ def handle_failure(file_path: str, error: Exception, fail_on_error: bool) -> Non
     if fail_on_error:
         logger.error(f"Failed to process {file_path}: {error}")
         raise error
-    logger.warning(f"Failed to process {file_path}, skipping it: {error}")
+    else:
+        logger.warning(f"Failed to process {file_path}, skipping it: {error}")
 
 
 class ProcessorConfig:
