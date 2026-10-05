@@ -1,13 +1,25 @@
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, List, Optional, Type, TypeVar, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import yaml
 from dacite import Config, from_dict
 
 if TYPE_CHECKING:
     from .index.indexer import Indexer
+    from .rag.model.dense.base import DenseModelConfig
+    from .rag.model.sparse.base import SparseModelConfig
     from .rag.retriever import Retriever, RetrieverConfig
     from .type import MultimodalSample
 
@@ -60,11 +72,15 @@ LiteralStringDumper.add_representer(str, str_presenter)
 indexers = {}
 retrievers = {}
 # Model configs of each known collection
-_collection_models = {}
+_collection_models: Dict[str, Tuple["DenseModelConfig", "SparseModelConfig"]] = {}
 
 
 def _get_shared_indexer(
-    models: tuple, uri: str, db_name: str, device: Optional[str], client=None
+    models: Tuple["DenseModelConfig", "SparseModelConfig"],
+    uri: str,
+    db_name: str,
+    device: Optional[str],
+    client=None,
 ) -> "Indexer":
     """Return the cached indexer for these (dense, sparse) model configs, loading it on first use."""
 
