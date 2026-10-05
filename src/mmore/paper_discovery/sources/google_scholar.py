@@ -32,7 +32,7 @@ class GoogleScholarAdapter(SourceAdapter):
 
     def search(self, query: str, category_title: str) -> list[Paper]:
         try:
-            from scholarly import scholarly
+            from scholarly import scholarly  # pyright: ignore[reportMissingImports]
         except ImportError:
             logger.warning(
                 "scholarly not installed; install with `pip install scholarly` "
