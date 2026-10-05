@@ -162,13 +162,8 @@ class JobQueue:
         else:
             job.error = str(error)
             job.status = JobStatus.FAILED
-            logger.error(
-                "[JobQueue] job %s failed (gpu=%s): %s",
-                job_id,
-                device,
-                error,
-                exc_info=error,
-            )
+            logger.error("[JobQueue] job %s failed (gpu=%s): %s", job_id, device, error)
+            logger.debug("[JobQueue] job %s traceback", job_id, exc_info=error)
 
     def _pending_count(self) -> int:
         return sum(not j.status.is_terminal for j in self._jobs.values())

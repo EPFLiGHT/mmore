@@ -430,6 +430,30 @@ def test_upload_file_success(indexer_client):
     assert Path(upload_dir, "new-doc").exists()
 
 
+def test_upload_unprocessable_file_fails_the_job(indexer_client):
+    tc, upload_dir, _ = indexer_client
+
+    with patch(
+        "mmore.run_index_api._process_files",
+        side_effect=RuntimeError(
+            "Failed to load document (PDFium: Data format error)."
+        ),
+    ):
+        response = tc.post(
+            "/v1/files",
+            data={"fileId": "broken-doc"},
+            files={"file": ("random.pdf", b"\x00not a pdf", "application/pdf")},
+        )
+        assert response.status_code == 202
+        job = _wait_job(tc, response.json()["jobId"])
+
+    assert job["status"] == "failed"
+    assert job["result"] is None
+    assert "PDFium: Data format error" in job["error"]
+
+    assert not Path(upload_dir, "broken-doc").exists()
+
+
 def test_uploaded_file_has_filename_in_list_files(tmp_path):
     upload_dir = tmp_path / "uploads"
     upload_dir.mkdir()
