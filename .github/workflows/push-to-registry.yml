@@ -27,6 +27,12 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
 
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Check lockfile before building
+        run: uv lock --check
+
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
 
@@ -78,6 +84,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+
+      - name: Install uv
+        run: pipx install uv
+
+      - name: Check lockfile before building
+        run: uv lock --check
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3

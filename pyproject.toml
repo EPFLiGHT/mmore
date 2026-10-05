@@ -23,11 +23,11 @@ authors = [
     { name = "Achille Triomphe", email = "achille.triomphe@epfl.ch" },
     { name = "Victor Zablocki", email = "victor.zablocki@epfl.ch" },
     { name = "Adam Chahed Ouazzani", email = "adam.chahedouazzani@epfl.ch" },
-    { name = "Omar Ziyad Azgaoui", email = "omar.azgaoui@epfl.ch"},
-    { name = "Clara Delandre", email = "clara.delandre@epfl.ch"},
-    { name = "Arthur Perrin", email="arthur.perrin@telecom-sudparis.eu" },
-    { name = "Chadi Ait Ekioui", email="chadi.ait_ekioui@telecom-sudparis.eu" },
-    { name = "Mathieu Bonnet", email="mathieu.bonnet@telecom-sudparis.eu" }
+    { name = "Omar Ziyad Azgaoui", email = "omar.azgaoui@epfl.ch" },
+    { name = "Clara Delandre", email = "clara.delandre@epfl.ch" },
+    { name = "Arthur Perrin", email = "arthur.perrin@telecom-sudparis.eu" },
+    { name = "Chadi Ait Ekioui", email = "chadi.ait_ekioui@telecom-sudparis.eu" },
+    { name = "Mathieu Bonnet", email = "mathieu.bonnet@telecom-sudparis.eu" },
 ]
 requires-python = ">=3.10"
 dependencies = [
@@ -154,11 +154,7 @@ privacy = [
     "faker>=30",
 ]
 
-privacy-openai-filter = [
-    "mmore[privacy]",
-    "transformers>=5.6",
-    "peft>=0.18",
-]
+privacy-openai-filter = ["mmore[privacy]", "transformers>=5.6", "peft>=0.18"]
 
 # --- Composite + variant extras ---
 
@@ -169,72 +165,55 @@ tui = [
     "uv",
 ]
 
-all = [
-    "mmore[process,rag,api,websearch,tui,privacy,paper_discovery]",
-]
+all = ["mmore[process,rag,api,websearch,tui,privacy,paper_discovery]"]
 
-cpu = [
-    "torch>=2.7.0",
-    "torchvision",
-]
-cu126 = [
-    "torch>=2.7.0",
-    "torchvision",
-]
+cpu = ["torch>=2.7.0", "torchvision"]
+cu126 = ["torch>=2.7.0", "torchvision"]
 
-websearch = [
-    "tavily-python>=0.3.0",
-    "ddgs>=6.0",
-]
+websearch = ["tavily-python>=0.3.0", "ddgs>=6.0"]
 
-paper_discovery = [
-    "mmore[process]",
-    "requests>=2.31",
-    "beautifulsoup4>=4.13",
-]
+paper_discovery = ["mmore[process]", "requests>=2.31", "beautifulsoup4>=4.13"]
 
 dev = ["pytest>=8.3.4", "pytest-timeout>=2.3.1", "ruff>=0.4.0", "pyright"]
 
 [tool.uv]
 conflicts = [
-  [
-    { extra = "cpu" },
-    { extra = "cu126" },
-  ],
-  [
-    { extra = "process" },
-    { extra = "colvision" },
-  ],
-  [
-    { extra = "all" },
-    { extra = "colvision" },
-  ],
-  [
-    # privacy-openai-filter needs transformers>=5 but has conflicts with
-    # marker-pdf in `process`/`all` (transformers<5)
-    { extra = "privacy-openai-filter" },
-    { extra = "process" },
-  ],
-  [
-    { extra = "privacy-openai-filter" },
-    { extra = "all" },
-  ],
-  [
-    # different versions of transformers
-    { extra = "privacy-openai-filter" },
-    { extra = "colvision" },
-  ],
+    [{ extra = "cpu" }, { extra = "cu126" }],
+    [{ extra = "process" }, { extra = "colvision" }],
+    [{ extra = "all" }, { extra = "colvision" }],
+    [
+        # privacy-openai-filter needs transformers>=5 but has conflicts with
+        # marker-pdf in `process`/`all` (transformers<5)
+        { extra = "privacy-openai-filter" },
+        { extra = "process" },
+    ],
+    [{ extra = "privacy-openai-filter" }, { extra = "all" }],
+    [
+        # different versions of transformers
+        { extra = "privacy-openai-filter" },
+        { extra = "colvision" },
+    ],
+    [
+        # different versions of transformers
+        { extra = "paper_discovery" },
+        { extra = "colvision" },
+    ],
+    [
+        # different versions of transformers
+        { extra = "paper_discovery" },
+        { extra = "privacy-openai-filter" },
+    ],
 ]
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cpu", extra = "cpu", marker = "platform_system != 'Darwin'" },
-  { index = "pytorch-cu126", extra="cu126", marker = "platform_machine != 'aarch64'"},
-  # { url = "https://download.pytorch.org/whl/cu126/torch-2.5.1-cp311-cp311-linux_aarch64.whl", extra="cu126",  marker = "platform_machine == 'aarch64'" },
+    { index = "pytorch-cpu", extra = "cpu", marker = "platform_system != 'Darwin'" },
+    { index = "pytorch-cu126", extra = "cu126", marker = "platform_machine != 'aarch64'" },
+    # { url = "https://download.pytorch.org/whl/cu126/torch-2.5.1-cp311-cp311-linux_aarch64.whl", extra="cu126",  marker = "platform_machine == 'aarch64'" },
 ]
 torchvision = [
-  { index = "pytorch-cpu", extra = "cpu", marker = "platform_system != 'Darwin'" },
-  { index = "pytorch-cu126", extra = "cu126", marker = "platform_machine != 'aarch64'" },
+    { index = "pytorch-cpu", extra = "cpu", marker = "platform_system != 'Darwin'" },
+    { index = "pytorch-cu126", extra = "cu126", marker = "platform_machine != 'aarch64'" },
 ]
 
 [[tool.uv.index]]
@@ -252,19 +231,24 @@ mmore = "mmore.cli:main"
 
 [tool.setuptools]
 packages = ["mmore"]
-package-dir = {"" = "src"}
+package-dir = { "" = "src" }
 
 [tool.pytest.ini_options]
 filterwarnings = ["ignore::Warning"]
 testpaths = ["tests"]
 
 [tool.ruff]
-exclude = ["src/mmore/run_retriever.py"]    # TODO: add back when GH CI bug is fixed
+exclude = [
+    "src/mmore/run_retriever.py",
+] # TODO: add back when GH CI bug is fixed
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "N"]
 fixable = ["ALL"]
-ignore = ["E501", "E402"]   # Avoid enforcing line-length violations (`E501`) and Module level import not at top of file (`E402`)
+ignore = [
+    "E501",
+    "E402",
+] # Avoid enforcing line-length violations (`E501`) and Module level import not at top of file (`E402`)
 
 [tool.ruff.lint.per-file-ignores]
 "__init__.py" = ["F401"]
