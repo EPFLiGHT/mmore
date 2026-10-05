@@ -191,7 +191,9 @@ class TestProxify:
 
 
 class TestLooksLikePdf:
-    def _resp(self, content, url="https://x.com/paper.pdf", ctype="application/pdf"):
+    def _resp(
+        self, content, url="https://example.org/paper.pdf", ctype="application/pdf"
+    ):
         r = MagicMock()
         r.content = content
         r.url = url
@@ -212,14 +214,14 @@ class TestDownloadPdf:
         r.status_code = 200
         r.content = content
         r.text = content.decode("utf-8", errors="ignore")
-        r.url = "https://x.com/paper.pdf"
+        r.url = "https://example.org/paper.pdf"
         r.headers = {"Content-Type": ctype}
         return r
 
     def test_login_page_on_a_pdf_url_is_not_saved(self, tmp_path):
         login = self._resp(b'<form><input type="password"></form>', "text/html")
         with patch("mmore.paper_discovery.pdf.requests.get", return_value=login):
-            result = download_pdf("https://x.com/paper.pdf", str(tmp_path))
+            result = download_pdf("https://example.org/paper.pdf", str(tmp_path))
         assert result.path is None
         assert result.login_page
         assert not any(tmp_path.iterdir())
@@ -280,7 +282,7 @@ class TestEnrichWithPdfText:
         return fake
 
     def test_empty_text_is_not_a_success(self, tmp_path, caplog):
-        paper = Paper(title="T", url="https://x.com/a.pdf")
+        paper = Paper(title="T", url="https://example.org/a.pdf")
         with (
             patch(
                 "mmore.paper_discovery.pipeline.download_pdf",
@@ -296,7 +298,7 @@ class TestEnrichWithPdfText:
 
     def test_non_pdf_cache_file_is_replaced(self, tmp_path, caplog):
         pipeline = self._pipeline(tmp_path)
-        url = "https://x.com/a.pdf"
+        url = "https://example.org/a.pdf"
         paper = Paper(title="T", url=url)
         cached = expected_pdf_path(url, pipeline.config.pdf_dir)
         cached.parent.mkdir(parents=True)
@@ -316,7 +318,7 @@ class TestEnrichWithPdfText:
 
     def test_valid_cache_file_skips_download(self, tmp_path, caplog):
         pipeline = self._pipeline(tmp_path)
-        url = "https://x.com/a.pdf"
+        url = "https://example.org/a.pdf"
         paper = Paper(title="T", url=url)
         cached = expected_pdf_path(url, pipeline.config.pdf_dir)
         cached.parent.mkdir(parents=True)
