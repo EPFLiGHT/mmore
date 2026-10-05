@@ -141,13 +141,15 @@ The default just identifies mmore + the repo URL, which works but doesn't tell a
 
 ## 💾 PDF caching
 
-`pdf_dir` is reused across runs. Before downloading a PDF, the pipeline checks whether a file with the same name already exists; if so, the HTTP fetch is skipped and text is extracted directly from the cached file.
+`pdf_dir` is reused across runs. Each PDF is saved under a hash of its URL. If that file already exists and is a real PDF, the download is skipped. If it isn't a real PDF, it is deleted and downloaded again.
 
-The summary line at the end of a run shows the split:
+A paper only counts as a success if text was extracted from it. The summary line at the end of a run shows the split:
 
 ```
-PDF download: 108/124 succeeded (45 cached, 63 fresh), 16 paywalled, 0 errors, 0 skipped
+PDF download: 108/124 succeeded (45 cached, 63 fresh), 16 paywalled, 0 errors, 0 skipped, 0 with no text
 ```
+
+> Caches from versions before this naming change aren't reused. Those PDFs are downloaded again.
 
 This makes interrupted runs cheap to resume — every PDF that landed on disk before Ctrl+C is reused, only the missing ones are fetched.
 
