@@ -1,0 +1,31 @@
+# Pyxis/enroot environment definition for the OmniDocBench bench job.
+# Place this at /capstor/scratch/cscs/$USER/envs/mmore-vlm.toml (or adjust
+# the --environment path in bench_omnidocbench.sbatch).
+#
+# Clariden = GH200 (ARM64). We use the NGC PyTorch container (multi-arch,
+# tuned for Grace-Hopper) and install vLLM at job startup into a persistent
+# venv on scratch — so the install only happens the first time.
+#
+# Build once on a login node:
+#   enroot import -o $SCRATCH/images/ngc-pytorch-24.12.sqsh \
+#       docker://nvcr.io/nvidia/pytorch:24.12-py3
+
+image = "/capstor/scratch/cscs/arthurperrin/images/ngc-pytorch-24.12.sqsh"
+
+mounts = [
+    "/capstor/scratch/cscs/arthurperrin:/capstor/scratch/cscs/arthurperrin",
+    "/iopsstor/scratch/cscs/arthurperrin:/iopsstor/scratch/cscs/arthurperrin",
+    "/capstor/store/cscs/swissai/a127:/capstor/store/cscs/swissai/a127",
+]
+
+workdir = "/capstor/scratch/cscs/arthurperrin/mmore"
+
+[env]
+# Xet is the default high-perf transfer in huggingface_hub 1.x — do NOT
+# set HF_HUB_ENABLE_HF_TRANSFER=1 unless hf_transfer is also installed,
+# otherwise every model download fails immediately.
+PYTHONUNBUFFERED = "1"
+# Persistent venv path (filled with vLLM + mmore deps on first run)
+VLLM_VENV = "/capstor/scratch/cscs/arthurperrin/envs/vllm-venv"
+# Add HF_TOKEN here if you need gated models (Llama-3.2-Vision):
+# HF_TOKEN = "hf_..."
