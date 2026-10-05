@@ -6,10 +6,12 @@ import multiprocessing
 import os
 import shutil
 import tempfile
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, wait
+from datetime import datetime
 from pathlib import Path as FilePath
 from typing import Callable, List, Optional
 
+import pymupdf
 import torch
 import uvicorn
 from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Path, UploadFile
@@ -27,7 +29,10 @@ logging.basicConfig(
 from mmore.profiler import enable_profiling_from_env
 
 from .job_queue import DuplicateJobError, Job, JobQueue, QueueFullError
+from .process.post_processor.pipeline import PPPipeline, PPPipelineConfig
 from .process.processors import register_all_processors
+from .process.processors.base import ProcessorConfig
+from .process.processors.pdf_processor import PDFProcessor
 from .rag.retriever import RetrieverConfig
 from .type import MultimodalSample
 from .utils import get_indexer, load_config, process_files_default
@@ -39,7 +44,6 @@ os.makedirs(UPLOAD_DIR, exist_ok=True)
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
-
 
 POLL_INTERVAL = 2.0
 HEARTBEAT_SECONDS = 15
@@ -55,6 +59,52 @@ def _process_files(pool, input_dir, collection_name, extensions, device, output_
         device=device,
         output_path=output_path,
     ).result()
+
+
+def _split_page_ranges(page_count: int, n_parts: int) -> List[List[int]]:
+    """Cut pages into n_pages shards [0..page_count-1 ]"""
+    n_parts = max(1, min(n_parts, page_count))
+    base, extra = divmod(page_count, n_parts)
+    ranges, start = [], 0
+    for i in range(n_parts):
+        end = start + base + (1 if i < extra else 0)
+        ranges.append(list(range(start, end)))
+        start = end
+    return ranges
+
+
+def _process_pdf_split(pools, file_path, devices, page_count, output_path):
+    """Render page ranges of one PDF on several devices at once, then chunk."""
+    ranges = _split_page_ranges(page_count, len(devices))
+    futures = [
+        pools[device].submit(
+            PDFProcessor(
+                ProcessorConfig(
+                    extract_images=True,
+                    custom_config={
+                        "output_path": os.path.join(output_path, f"shard_{i}"),
+                        "device": device,
+                    },
+                )
+            ).process_page_range,
+            file_path,
+            page_range,
+        )
+        for i, (device, page_range) in enumerate(zip(devices, ranges))
+    ]
+    wait(futures)
+    shards = [future.result() for future in futures]
+
+    document = PDFProcessor.merge_page_shards(file_path, shards)
+    document.metadata.processed_at = datetime.now().isoformat()
+    document.metadata.processor_type = PDFProcessor.__name__
+
+    default_config = {
+        "pp_modules": [{"type": "chunker"}],
+        "output": {"output_path": output_path},
+    }
+    config: PPPipelineConfig = load_config(default_config, PPPipelineConfig)
+    return PPPipeline.from_config(config)([document])
 
 
 def _job_payload(job: Job) -> dict:
@@ -136,20 +186,50 @@ def make_router(config_path: str) -> APIRouter:
         file_id: str,
         filename: str,
         replace: bool,
+        allow_split: bool = False,
     ) -> Callable[[str], dict]:
         extension = FilePath(filename).suffix.lower()
+        file_path = os.path.join(input_dir, filename)
+        output_path = os.path.join(job_dir, "out")
+
+        def split_page_count() -> int:
+            """Page count of a PDF that may be split across devices, else 0."""
+            if not (allow_split and extension == ".pdf" and len(jobs.devices) > 1):
+                return 0
+            try:
+                with pymupdf.open(file_path) as pdf:
+                    return len(pdf)
+            except Exception as e:
+                # Leave unreadable files to the regular path and its errors
+                logger.warning("Could not count pages of %s: %s", filename, e)
+                return 0
 
         def ingest(device: str) -> dict:
             try:
-                # Processing runs in the device's subprocess
-                documents = _process_files(
-                    process_pools[device],
-                    input_dir,
-                    COLLECTION_NAME,
-                    [extension],
-                    device,
-                    os.path.join(job_dir, "out"),
-                )
+                page_count = split_page_count()
+                max_extra = min(page_count, len(jobs.devices)) - 1
+                with jobs.borrow_idle_devices(device, max_extra) as extra:
+                    if extra:
+                        devices = [device, *extra]
+                        logger.info(
+                            "Splitting %s (%d pages) across %s",
+                            filename,
+                            page_count,
+                            devices,
+                        )
+                        documents = _process_pdf_split(
+                            process_pools, file_path, devices, page_count, output_path
+                        )
+                    else:
+                        # Processing runs in the device's subprocess
+                        documents = _process_files(
+                            process_pools[device],
+                            input_dir,
+                            COLLECTION_NAME,
+                            [extension],
+                            device,
+                            output_path,
+                        )
                 _apply_uploaded_file_metadata(documents, file_id, filename)
 
                 indexer = get_indexer(
@@ -208,6 +288,9 @@ def make_router(config_path: str) -> APIRouter:
     async def upload_file(
         fileId: str = Form(..., description="Unique identifier for the file"),
         file: UploadFile = File(..., description="The file content"),
+        splitAcrossDevices: bool = Form(
+            False, description="For a PDF, split its pages evenly across the idle GPUs."
+        ),
     ):
         """
         Queue a new file for processing and indexing.
@@ -226,7 +309,12 @@ def make_router(config_path: str) -> APIRouter:
         job_dir, input_dir = _stage_upload(file, file.filename)
         await file.close()
         ingest = _make_ingest_job(
-            job_dir, input_dir, fileId, file.filename, replace=False
+            job_dir,
+            input_dir,
+            fileId,
+            file.filename,
+            replace=False,
+            allow_split=splitAcrossDevices,
         )
         try:
             job_id = jobs.submit(fileId, file.filename, ingest)
@@ -337,6 +425,10 @@ def make_router(config_path: str) -> APIRouter:
     async def update_file(
         fileId: str = Path(..., description="ID of the file to update"),
         file: UploadFile = File(..., description="The new file content"),
+        splitAcrossDevices: bool = Form(
+            False,
+            description="        For a PDF, split its pages evenly across the idle GPUs.",
+        ),
     ):
         """
         Queue a replacement for an existing file and re-index it.
@@ -356,7 +448,12 @@ def make_router(config_path: str) -> APIRouter:
         job_dir, input_dir = _stage_upload(file, file.filename)
         await file.close()
         ingest = _make_ingest_job(
-            job_dir, input_dir, fileId, file.filename, replace=True
+            job_dir,
+            input_dir,
+            fileId,
+            file.filename,
+            replace=True,
+            allow_split=splitAcrossDevices,
         )
         try:
             job_id = jobs.submit(fileId, file.filename, ingest)
