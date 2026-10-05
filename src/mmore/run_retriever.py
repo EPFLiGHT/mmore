@@ -148,7 +148,7 @@ def make_router(config_file: str) -> APIRouter:
     @router.get(
         "/list_files",
         tags=["Files"],
-        summary="List files in a collection",
+        summary="List files in a collection, sorted by file id",
         responses={
             200: {
                 "description": "Files currently stored in the collection",
@@ -164,7 +164,12 @@ def make_router(config_file: str) -> APIRouter:
         },
     )
     def list_files(
-        collection_name: str, limit: int = Query(default=16000, ge=1, le=100000)
+        collection_name: str,
+        limit: Optional[int] = Query(
+            default=None,
+            ge=1,
+            description="Maximum number of files to return, keeping the lowest file ids.",
+        ),
     ):
         """List all files currently in the database."""
         return retriever_obj.list_files(collection_name=collection_name, limit=limit)

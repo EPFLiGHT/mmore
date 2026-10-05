@@ -61,7 +61,7 @@ paths:
       tags:
         - Files
       summary: List all files
-      description: Retrieve a list of all files stored in the system
+      description: Retrieve a list of all files stored in the system, sorted by file id.
       parameters:
         - name: collection_name
           in: query
@@ -74,7 +74,7 @@ paths:
           required: false
           schema:
             type: integer
-            default: 16000
+            minimum: 1
       responses:
         "200":
           description: A list of files
