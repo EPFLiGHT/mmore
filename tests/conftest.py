@@ -62,10 +62,26 @@ CHUNKED_CORPUS: Dict[str, List[str]] = {
     ],
 }
 
+# Corpus of a second collection, disjoint from CHUNKED_CORPUS
+OTHER_CHUNKED_CORPUS: Dict[str, List[str]] = {
+    "doc-rome": [
+        "Rome is the capital of Italy.",
+        "Rome is home to the Vatican Museums.",
+        "The Tiber river flows through Rome.",
+    ],
+    "doc-colosseum": [
+        "The Colosseum could hold around 50,000 spectators.",
+        "The Colosseum was completed in 80 AD.",
+    ],
+    "doc-venice": [
+        "Venice is built on more than a hundred small islands.",
+    ],
+}
 
-def _build_chunked_docs() -> List[MultimodalSample]:
+
+def _build_chunked_docs(corpus: Dict[str, List[str]]) -> List[MultimodalSample]:
     samples = []
-    for document_id, chunks in CHUNKED_CORPUS.items():
+    for document_id, chunks in corpus.items():
         for i, text in enumerate(chunks):
             samples.append(
                 MultimodalSample(
@@ -82,7 +98,8 @@ def _build_chunked_docs() -> List[MultimodalSample]:
     return samples
 
 
-CHUNKED_SAMPLE_DOCS = _build_chunked_docs()
+CHUNKED_SAMPLE_DOCS = _build_chunked_docs(CHUNKED_CORPUS)
+OTHER_CHUNKED_SAMPLE_DOCS = _build_chunked_docs(OTHER_CHUNKED_CORPUS)
 
 
 @pytest.fixture

@@ -139,6 +139,22 @@ class Retriever(BaseRetriever):
             reranker_tokenizer=reranker_tokenizer,
         )
 
+    def with_models(
+        self,
+        dense_model_config: DenseModelConfig,
+        sparse_model_config: SparseModelConfig,
+    ) -> "Retriever":
+        """Copy of this retriever embedding queries with other models.
+
+        The Milvus client and the reranker are shared with this retriever.
+        """
+        return self.model_copy(
+            update={
+                "dense_model": DenseModel.from_config(dense_model_config),
+                "sparse_model": SparseModel.from_config(sparse_model_config),
+            }
+        )
+
     def compute_query_embeddings(
         self, query: str
     ) -> Tuple[List[List[float]], List[Dict[int, float]]]:

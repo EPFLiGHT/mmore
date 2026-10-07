@@ -8,16 +8,20 @@ import json
 import re
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, cast
 
 import uvicorn
 from dotenv import load_dotenv
 from fastapi import APIRouter, FastAPI, HTTPException, Query
 from langchain_core.documents import Document
 from pydantic import BaseModel, Field
+from pymilvus import MilvusClient
 from tqdm import tqdm
 
+from mmore.index.indexer import get_model_from_index
 from mmore.profiler import enable_profiling_from_env, profile_function
+from mmore.rag.model.dense.base import DenseModelConfig
+from mmore.rag.model.sparse.base import SparseModelConfig
 from mmore.rag.retriever import Retriever, RetrieverConfig
 from mmore.utils import load_config
 from mmore.ux import quiet_noisy_libs, setup_logging, step_intro
@@ -119,9 +123,16 @@ class RetrieverQuery(BaseModel):
         le=1.0,
         description="Minimum similarity score for results (-1.0 to 1.0)",
     )
+    collectionName: Optional[str] = Field(
+        None,
+        description="Collection to search in (defaults to the configured collection)",
+    )
 
 
 _ID_PATTERN = re.compile(r'^[^"+]+$')
+
+# (dense model name, dense is multimodal, sparse model name, sparse is multimodal)
+ModelsKey = tuple[str, bool, str, bool]
 
 
 def _chunk_metadata(paragraph_positions) -> Optional[dict]:
@@ -134,6 +145,32 @@ def _chunk_metadata(paragraph_positions) -> Optional[dict]:
     }
 
 
+def _collection_models(
+    client: MilvusClient, collection_name: str
+) -> tuple[DenseModelConfig, SparseModelConfig]:
+    return (
+        cast(
+            DenseModelConfig,
+            get_model_from_index(client, "dense_embedding", collection_name),
+        ),
+        cast(
+            SparseModelConfig,
+            get_model_from_index(client, "sparse_embedding", collection_name),
+        ),
+    )
+
+
+def _models_key(
+    dense_config: DenseModelConfig, sparse_config: SparseModelConfig
+) -> ModelsKey:
+    return (
+        dense_config.model_name,
+        dense_config.is_multimodal,
+        sparse_config.model_name,
+        sparse_config.is_multimodal,
+    )
+
+
 def make_router(config_file: str) -> APIRouter:
     quiet_noisy_libs()
     router = APIRouter()
@@ -144,6 +181,43 @@ def make_router(config_file: str) -> APIRouter:
     logger.debug("Running retriever...")
     retriever_obj = Retriever.from_config(config)
     logger.debug("Retriever loaded!")
+
+    # Retriever associated with each collection, initialized with the configured
+    # retriever
+    collection_retrievers: dict[str, Retriever] = {
+        config.collection_name: retriever_obj
+    }
+    # Retriever cache, initialized with the configured retriever
+    configured_dense, configured_sparse = _collection_models(
+        retriever_obj.client, config.collection_name
+    )
+    models_retrievers: dict[ModelsKey, Retriever] = {
+        _models_key(configured_dense, configured_sparse): retriever_obj
+    }
+
+    def _existing_collection(collection_name: Optional[str]) -> str:
+        """Resolve the requested collection, raise HTTPException 404 if it does not exist."""
+        if collection_name is None:
+            collection_name = config.collection_name
+        if not retriever_obj.client.has_collection(collection_name):
+            raise HTTPException(
+                status_code=404, detail=f"Collection {collection_name} not found"
+            )
+        return collection_name
+
+    def _collection_retriever(collection_name: str) -> Retriever:
+        """Return the retriever embedding queries with the collection's models."""
+        if collection_name not in collection_retrievers:
+            dense_config, sparse_config = _collection_models(
+                retriever_obj.client, collection_name
+            )
+            key = _models_key(dense_config, sparse_config)
+            if key not in models_retrievers:
+                models_retrievers[key] = retriever_obj.with_models(
+                    dense_config, sparse_config
+                )
+            collection_retrievers[collection_name] = models_retrievers[key]
+        return collection_retrievers[collection_name]
 
     @router.get(
         "/list_files",
@@ -193,17 +267,19 @@ def make_router(config_file: str) -> APIRouter:
                     }
                 },
             },
+            404: {"description": "Collection not found"},
         },
     )
     def retriever(query: RetrieverQuery):
         """Query the retriever"""
+        collection_name = _existing_collection(query.collectionName)
 
-        docs_for_query = retriever_obj.invoke(
+        docs_for_query = _collection_retriever(collection_name).invoke(
             query.query,
             document_ids=query.fileIds,
             k=query.maxMatches,
             min_score=query.minSimilarity,
-            collection_name=config.collection_name,
+            collection_name=collection_name,
         )
 
         docs_info = []
@@ -250,17 +326,28 @@ def make_router(config_file: str) -> APIRouter:
                     }
                 },
             },
-            400: {"description": "fileId or chunkId contains a forbidden character ('+' or '\"')"},
-            404: {"description": "Chunk not found for the given file"},
+            400: {
+                "description": "fileId or chunkId contains a forbidden character ('+' or '\"')"
+            },
+            404: {"description": "Collection or chunk not found"},
         },
     )
-    def get_chunk(fileId: str, chunkId: str):
+    def get_chunk(
+        fileId: str,
+        chunkId: str,
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the chunk is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
         """Fetch a chunk's content and positional metadata by reference."""
         if not _ID_PATTERN.match(fileId) or not _ID_PATTERN.match(chunkId):
             raise HTTPException(400, "fileId and chunkId must not contain '+' or '\"'")
+        collection_name = _existing_collection(collectionName)
         chunk_ref_literal = json.dumps(f"{fileId}+{chunkId}")
         results = retriever_obj.client.query(
-            collection_name=config.collection_name,
+            collection_name=collection_name,
             filter=f"id in [{chunk_ref_literal}]",
             output_fields=[
                 "text",
@@ -271,7 +358,11 @@ def make_router(config_file: str) -> APIRouter:
             limit=1,
         )
         if not results:
-            raise HTTPException(404, f"Chunk {chunkId} not found for file {fileId}")
+            raise HTTPException(
+                404,
+                f"Chunk {chunkId} not found for file {fileId} "
+                f"in collection {collection_name}",
+            )
         row = results[0]
         entity = row.get("entity", {})
         return {

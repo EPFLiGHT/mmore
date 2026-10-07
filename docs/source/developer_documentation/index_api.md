@@ -12,6 +12,8 @@ The **Indexer API** allows users to **upload, update, download, delete, and inde
 
 Uploads are **asynchronous**: the upload endpoints validate the request, queue a background job, and return `202 Accepted` with a `jobId` immediately. Processing and indexing then run in the background, one job per GPU. Clients track progress with the job status endpoints (snapshot or SSE stream).
 
+Every file operation endpoint takes an optional `collectionName` to run the operation on a collection other than the configured `collection_name`. If the passed collection does not exist, uploads create it, while update, delete and download return `404`.
+
 ## ⚙️ Backend server setup
 
 ### Setup Instructions
@@ -82,7 +84,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | --- | --- | --- |
 | `fileId` | `str` (form) | Unique identifier for the file |
 | `file` | `UploadFile` (form) | File content to upload |
-- rejects duplicate IDs with `409`
+| `collectionName` | `str` (form, optional) | Collection to index into, created if missing |
 - queues a background job, returns `202` with a `jobId`
 
 **Response** (`202 Accepted`):
@@ -94,6 +96,8 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 }
 ```
 
+**Errors**: `409` file ID already exists or is being processed, `422` file without a name, `503` job queue full.
+
 
 #### ▶️ `POST /v1/files/bulk`
 
@@ -103,6 +107,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | --- | --- | --- |
 | `listIds` | `List[str]` (form) | Comma-separated list of file IDs |
 | `files` | `List[UploadFile]` (form) | Files to upload |
+| `collectionName` | `str` (form, optional) | Collection to index all files into, created if missing |
 - validates 1-to-1 correspondence between files and IDs
 - queues **one independent job per file**, a bad file does not fail the batch
 
@@ -117,6 +122,8 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 }
 ```
 
+**Errors**: `400` number of IDs does not match number of files.
+
 
 ### 🔁 Update Endpoint
 
@@ -128,6 +135,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | --- | --- | --- |
 | `fileId` | `str` (path) | Existing file ID |
 | `file` | `UploadFile` (form) | New file to replace with |
+| `collectionName` | `str` (form, optional) | Collection the file is indexed in |
 - queues a background job, returns `202` with a `jobId`
 - old vectors are replaced only after the new content is processed (no data loss on failure)
 
@@ -140,6 +148,8 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 }
 ```
 
+**Errors**: `404` file or collection not found, `409` file already being processed, `422` file without a name, `503` job queue full.
+
 
 ### 🗑️ Delete endpoint
 
@@ -150,6 +160,7 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `fileId` | `str` (path) | ID of the file to delete |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
 - deletes both local file and vector DB entry.
 
 **Response**:
@@ -162,6 +173,8 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 }
 ```
 
+**Errors**: `404` file or collection not found, `500` internal error while deleting the file (vector DB or filesystem).
+
 
 ### 📥 Download endpoint
 
@@ -172,8 +185,11 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | Parameter | Type | Description |
 | --- | --- | --- |
 | `fileId` | `str` (path) | ID of the file to download |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
 
 Returns the file with binary content.
+
+**Errors**: `404` file or collection not found, `500` internal error while retrieving the file.
 
 ### 🛰️ Job status endpoints
 

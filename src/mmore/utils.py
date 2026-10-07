@@ -1,13 +1,25 @@
 import logging
 import os
 from enum import Enum
-from typing import TYPE_CHECKING, Dict, List, Optional, Type, TypeVar, Union, cast
+from typing import (
+    TYPE_CHECKING,
+    Dict,
+    List,
+    Optional,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+    cast,
+)
 
 import yaml
 from dacite import Config, from_dict
 
 if TYPE_CHECKING:
     from .index.indexer import Indexer
+    from .rag.model.dense.base import DenseModelConfig
+    from .rag.model.sparse.base import SparseModelConfig
     from .rag.retriever import Retriever, RetrieverConfig
     from .type import MultimodalSample
 
@@ -59,6 +71,39 @@ LiteralStringDumper.add_representer(str, str_presenter)
 # Cache indexers in memory
 indexers = {}
 retrievers = {}
+# Model configs of each known collection
+_collection_models: Dict[str, Tuple["DenseModelConfig", "SparseModelConfig"]] = {}
+
+
+def _get_shared_indexer(
+    models: Tuple["DenseModelConfig", "SparseModelConfig"],
+    uri: str,
+    db_name: str,
+    device: Optional[str],
+    client=None,
+) -> "Indexer":
+    """Return the cached indexer for these (dense, sparse) model configs, loading it on first use."""
+
+    from pymilvus import MilvusClient
+
+    from .index.indexer import Indexer
+
+    dense_config, sparse_config = models
+    key = (
+        dense_config.model_name,
+        dense_config.is_multimodal,
+        sparse_config.model_name,
+        sparse_config.is_multimodal,
+        device,
+    )
+    if key not in indexers:
+        indexers[key] = Indexer(
+            dense_model_config=dense_config,
+            sparse_model_config=sparse_config,
+            client=client or MilvusClient(uri=uri, db_name=db_name, enable_sparse=True),
+            device=device,
+        )
+    return indexers[key]
 
 
 def create_new_indexer(
@@ -66,7 +111,6 @@ def create_new_indexer(
 ) -> "Indexer":
     """Create a new indexer with default configuration"""
 
-    from .index.indexer import DBConfig, Indexer, IndexerConfig
     from .rag.model.dense.base import DenseModelConfig
     from .rag.model.sparse.base import SparseModelConfig
 
@@ -78,26 +122,12 @@ def create_new_indexer(
 
         sparse_config = SparseModelConfig(model_name="splade", is_multimodal=False)
 
-        db_config = DBConfig(uri=uri, name=db_name)
+        models = (dense_config, sparse_config)
+        indexer = _get_shared_indexer(models, uri, db_name, device)
 
-        # Create indexer config
-        config = IndexerConfig(
-            dense_model=dense_config, sparse_model=sparse_config, db=db_config
-        )
-
-        # Create an empty list of documents for initialization
-        empty_docs = []
-
-        # Create indexer from documents (this will create the collection)
-        indexer = Indexer.from_documents(
-            config=config,
-            documents=empty_docs,
-            collection_name=collection_name,
-            device=device,
-        )
-
-        # Store in cache
-        indexers[(collection_name, device)] = indexer
+        # Index an empty list of documents to create the collection
+        indexer.index_documents([], collection_name=collection_name)
+        _collection_models[collection_name] = models
 
         logging.info(
             f"Successfully created new indexer for collection: {collection_name}"
@@ -110,18 +140,19 @@ def create_new_indexer(
 def get_indexer(
     collection_name: str, uri: str, db_name: str, device: Optional[str] = None
 ) -> "Indexer":
-    """Get an existing indexer in cached Dict or load from the collection.
+    """Get the indexer of a collection, creating the collection if it does not exist.
 
-    Cached per (collection, device) so each GPU gets its own embedding replica.
+    Indexers are shared across collections using the same models, with one replica
+    per device so each GPU gets its own embedding replica.
     """
 
-    from .index.indexer import Indexer, get_model_from_index
+    from .index.indexer import get_model_from_index
     from .rag.model.dense.base import DenseModelConfig
     from .rag.model.sparse.base import SparseModelConfig
 
-    key = (collection_name, device)
-    if key in indexers:
-        return indexers[key]
+    models = _collection_models.get(collection_name)
+    if models is not None:
+        return _get_shared_indexer(models, uri, db_name, device)
 
     try:
         from pymilvus import MilvusClient
@@ -143,15 +174,9 @@ def get_indexer(
             get_model_from_index(client, "sparse_embedding", collection_name),
         )
 
-        # Create and store the indexer
-        indexer = Indexer(
-            dense_model_config=dense_config,
-            sparse_model_config=sparse_config,
-            client=client,
-            device=device,
-        )
-
-        indexers[key] = indexer
+        models = (dense_config, sparse_config)
+        indexer = _get_shared_indexer(models, uri, db_name, device, client=client)
+        _collection_models[collection_name] = models
 
         return indexer
     except Exception as e:

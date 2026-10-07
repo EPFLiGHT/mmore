@@ -12,9 +12,17 @@ from typing import Callable, List, Optional
 
 import torch
 import uvicorn
-from fastapi import APIRouter, FastAPI, File, Form, HTTPException, Path, UploadFile
+from fastapi import (
+    APIRouter,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Path,
+    Query,
+    UploadFile,
+)
 from fastapi.responses import FileResponse, StreamingResponse
-from pymilvus import MilvusClient
 
 logger = logging.getLogger(__name__)
 RETRIVER_EMOJI = "🗂️"
@@ -92,7 +100,8 @@ def make_router(config_path: str) -> APIRouter:
     COLLECTION_NAME = config.collection_name or "my_docs"
 
     # Initialize the index database and the processors
-    get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
+    indexer = get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
+    milvus_client = indexer.client
     register_all_processors(preload=True)
 
     jobs = JobQueue(
@@ -115,6 +124,33 @@ def make_router(config_path: str) -> APIRouter:
 
     router.add_event_handler("shutdown", _shutdown)
 
+    def _existing_collection(collection_name: Optional[str]) -> str:
+        """Resolve the requested collection, raise HTTPException 404 if it does not exist."""
+        if collection_name is None:
+            collection_name = COLLECTION_NAME
+        if not milvus_client.has_collection(collection_name):
+            raise HTTPException(
+                status_code=404, detail=f"Collection {collection_name} not found"
+            )
+        return collection_name
+
+    def _existing_indexed_file(
+        file_id: str, collection_name: str, output_fields: Optional[list[str]] = None
+    ) -> dict:
+        """Return one indexed row of the file, raise HTTPException 404 if the file is not in the collection."""
+        rows = milvus_client.query(
+            collection_name=collection_name,
+            filter=f"document_id == {json.dumps(file_id)}",
+            output_fields=output_fields or ["document_id"],
+            limit=1,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File with ID {file_id} not found in collection {collection_name}",
+            )
+        return rows[0]
+
     def _stage_upload(file: UploadFile, filename: str) -> tuple[str, str]:
         """Save the uploaded bytes now, while the request is alive.
 
@@ -133,6 +169,7 @@ def make_router(config_path: str) -> APIRouter:
     def _make_ingest_job(
         job_dir: str,
         input_dir: str,
+        collection_name: str,
         file_id: str,
         filename: str,
         replace: bool,
@@ -145,7 +182,7 @@ def make_router(config_path: str) -> APIRouter:
                 documents = _process_files(
                     process_pools[device],
                     input_dir,
-                    COLLECTION_NAME,
+                    collection_name,
                     [extension],
                     device,
                     os.path.join(job_dir, "out"),
@@ -153,19 +190,19 @@ def make_router(config_path: str) -> APIRouter:
                 _apply_uploaded_file_metadata(documents, file_id, filename)
 
                 indexer = get_indexer(
-                    COLLECTION_NAME, MILVUS_URI, MILVUS_DB, device=device
+                    collection_name, MILVUS_URI, MILVUS_DB, device=device
                 )
                 if str(device).startswith("cuda"):
                     torch.cuda.set_device(torch.device(device))
                 if replace:
                     indexer.client.delete(
-                        collection_name=COLLECTION_NAME,
+                        collection_name=collection_name,
                         filter=f"document_id == {json.dumps(file_id)}",
                     )
                 indexer.index_documents(
-                    documents=documents, collection_name=COLLECTION_NAME
+                    documents=documents, collection_name=collection_name
                 )
-                indexer.client.flush(COLLECTION_NAME)
+                indexer.client.flush(collection_name)
 
                 # Persist the permanent copy only on success
                 dest = FilePath(UPLOAD_DIR) / file_id
@@ -208,6 +245,11 @@ def make_router(config_path: str) -> APIRouter:
     async def upload_file(
         fileId: str = Form(..., description="Unique identifier for the file"),
         file: UploadFile = File(..., description="The file content"),
+        collectionName: Optional[str] = Form(
+            None,
+            description="Collection to index into (defaults to the "
+            "configured collection)",
+        ),
     ):
         """
         Queue a new file for processing and indexing.
@@ -218,6 +260,8 @@ def make_router(config_path: str) -> APIRouter:
             raise HTTPException(
                 status_code=422, detail="Provided file should have a filename"
             )
+        # Indexing creates the collection if it does not exist yet
+        collection_name = collectionName or COLLECTION_NAME
         if (FilePath(UPLOAD_DIR) / fileId).exists():
             raise HTTPException(
                 status_code=409, detail=f"File with ID {fileId} already exists"
@@ -226,7 +270,12 @@ def make_router(config_path: str) -> APIRouter:
         job_dir, input_dir = _stage_upload(file, file.filename)
         await file.close()
         ingest = _make_ingest_job(
-            job_dir, input_dir, fileId, file.filename, replace=False
+            job_dir,
+            input_dir,
+            collection_name=collection_name,
+            file_id=fileId,
+            filename=file.filename,
+            replace=False,
         )
         try:
             job_id = jobs.submit(fileId, file.filename, ingest)
@@ -267,6 +316,11 @@ def make_router(config_path: str) -> APIRouter:
     async def upload_files(
         listIds: List[str] = Form(..., description="List of IDs for the files"),
         files: List[UploadFile] = File(..., description="Files to upload"),
+        collectionName: Optional[str] = Form(
+            None,
+            description="Collection to index into (defaults to the "
+            "configured collection)",
+        ),
     ):
         """
         Queue multiple files, one independent job per file.
@@ -274,6 +328,8 @@ def make_router(config_path: str) -> APIRouter:
         Returns a per-file outcome (jobId or error), so one bad file does not
         fail the whole batch.
         """
+        # Indexing creates the collection if it does not exist yet
+        collection_name = collectionName or COLLECTION_NAME
         listIds = [
             file_id.strip()
             for ids in listIds
@@ -300,7 +356,12 @@ def make_router(config_path: str) -> APIRouter:
             job_dir, input_dir = _stage_upload(file, file.filename)
             await file.close()
             ingest = _make_ingest_job(
-                job_dir, input_dir, file_id, file.filename, replace=False
+                job_dir,
+                input_dir,
+                collection_name=collection_name,
+                file_id=file_id,
+                filename=file.filename,
+                replace=False,
             )
             try:
                 job_id = jobs.submit(file_id, file.filename, ingest)
@@ -328,7 +389,7 @@ def make_router(config_path: str) -> APIRouter:
                     }
                 },
             },
-            404: {"description": "File not found"},
+            404: {"description": "File or collection not found"},
             409: {"description": "File is already being processed"},
             422: {"description": "Uploaded file has no filename"},
             503: {"description": "Job queue is full, retry later"},
@@ -337,6 +398,11 @@ def make_router(config_path: str) -> APIRouter:
     async def update_file(
         fileId: str = Path(..., description="ID of the file to update"),
         file: UploadFile = File(..., description="The new file content"),
+        collectionName: Optional[str] = Form(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
     ):
         """
         Queue a replacement for an existing file and re-index it.
@@ -348,6 +414,8 @@ def make_router(config_path: str) -> APIRouter:
             raise HTTPException(
                 status_code=404, detail=f"File with ID {fileId} not found"
             )
+        collection_name = _existing_collection(collectionName)
+        _existing_indexed_file(fileId, collection_name)
         if file.filename is None:
             raise HTTPException(
                 status_code=422, detail="Provided file should have a filename"
@@ -356,7 +424,12 @@ def make_router(config_path: str) -> APIRouter:
         job_dir, input_dir = _stage_upload(file, file.filename)
         await file.close()
         ingest = _make_ingest_job(
-            job_dir, input_dir, fileId, file.filename, replace=True
+            job_dir,
+            input_dir,
+            collection_name=collection_name,
+            file_id=fileId,
+            filename=file.filename,
+            replace=True,
         )
         try:
             job_id = jobs.submit(fileId, file.filename, ingest)
@@ -389,12 +462,17 @@ def make_router(config_path: str) -> APIRouter:
                     }
                 },
             },
-            404: {"description": "File not found"},
+            404: {"description": "File or collection not found"},
             500: {"description": "Internal error while deleting the file"},
         },
     )
     async def delete_file(
         fileId: str = Path(..., description="ID of the file to delete"),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
     ):
         """
         Delete a file from the system.
@@ -408,23 +486,18 @@ def make_router(config_path: str) -> APIRouter:
                     status_code=404, detail=f"File with ID {fileId} not found"
                 )
 
+            collection_name = _existing_collection(collectionName)
+            _existing_indexed_file(fileId, collection_name)
+
+            # Delete from vector database first. Ensure that a failure keeps the local copy
+            delete_result = milvus_client.delete(
+                collection_name=collection_name,
+                filter=f"document_id == {json.dumps(fileId)}",
+            )
+            logger.info(f"Deleted document from vector DB: {delete_result}")
+
             # Delete the physical file
             os.remove(file_storage_path)
-
-            # Delete from vector database
-            try:
-                client = MilvusClient(
-                    uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
-                )
-                delete_result = client.delete(
-                    collection_name=COLLECTION_NAME,
-                    filter=f"document_id == {json.dumps(fileId)}",
-                )
-                logger.info(f"Deleted document from vector DB: {delete_result}")
-            except Exception as db_error:
-                logger.warning(
-                    f"Error deleting from vector DB (continuing): {str(db_error)}"
-                )
 
             return {
                 "status": "success",
@@ -449,12 +522,17 @@ def make_router(config_path: str) -> APIRouter:
                 "description": "Binary file content",
                 "content": {"application/octet-stream": {}},
             },
-            404: {"description": "File not found"},
+            404: {"description": "File or collection not found"},
             500: {"description": "Internal error while retrieving the file"},
         },
     )
     async def download_file(
         fileId: str = Path(..., description="ID of the file to download"),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
     ):
         """
         Download a file from the system.
@@ -466,31 +544,13 @@ def make_router(config_path: str) -> APIRouter:
                 raise HTTPException(
                     status_code=404, detail=f"File with ID {fileId} not found"
                 )
+            collection_name = _existing_collection(collectionName)
 
             # Retrieve the filename from metadata
-            try:
-                client = MilvusClient(
-                    uri=MILVUS_URI, db_name=MILVUS_DB, enable_sparse=True
-                )
-                file_paths = client.query(
-                    collection_name=COLLECTION_NAME,
-                    filter=f"document_id == {json.dumps(fileId)}",
-                    output_fields=["file_path"],
-                )
-
-                if len(file_paths) == 0:
-                    raise ValueError(
-                        f"Document of id {fileId} not found in the database"
-                    )
-
-                # all the elements with the same id refer to the same file so they have the same path
-                file_path: str = file_paths[0]["file_path"]
-                filename = file_path.split("/")[-1]
-            except Exception as db_error:
-                logger.warning(
-                    f"Error deleting from vector DB (continuing): {str(db_error)}"
-                )
-                raise db_error
+            # all the elements with the same id refer to the same file so they have the same path
+            row = _existing_indexed_file(fileId, collection_name, ["file_path"])
+            file_path: str = row["file_path"]
+            filename = file_path.split("/")[-1]
 
             # Return the file
             return FileResponse(

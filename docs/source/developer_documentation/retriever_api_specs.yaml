@@ -49,12 +49,77 @@ paths:
                   type: string
                   format: binary
                   description: The file content
+                collectionName:
+                  type: string
+                  description: |
+                    Collection to index into. Defaults to the configured
+                    `collection_name`. Created if it does not exist.
               required:
                 - fileId
                 - file
       responses:
         "201":
           description: File successfully uploaded
+
+  /files/bulk:
+    post:
+      tags:
+        - File Operations
+      summary: Upload multiple files
+      description: |
+        Upload several files at once, one independent job per file. All files
+        are indexed into the same collection.
+
+         **Requirements**:
+        - One unique ID per file, in the same order as the files
+      requestBody:
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                listIds:
+                  type: array
+                  items:
+                    type: string
+                  description: |
+                    IDs of the files, in the same order as `files`. Each
+                    entry may also hold several comma-separated IDs.
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+                  description: The files' contents
+                collectionName:
+                  type: string
+                  description: |
+                    Collection to index into. Defaults to the configured
+                    `collection_name`. Created if it does not exist.
+              required:
+                - listIds
+                - files
+      responses:
+        "202":
+          description: Per-file outcome, either a jobId or an error
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        fileId:
+                          type: string
+                        jobId:
+                          type: string
+                        error:
+                          type: string
+        "400":
+          description: Number of IDs does not match number of files
 
   /list_files:
     get:
@@ -112,11 +177,18 @@ paths:
                   type: string
                   format: binary
                   description: The new file content
+                collectionName:
+                  type: string
+                  description: |
+                    Collection the file is indexed in. Defaults to the
+                    configured `collection_name`.
               required:
                 - file
       responses:
         "200":
           description: File successfully updated
+        "404":
+          description: File or collection not found
 
     delete:
       tags:
@@ -132,9 +204,19 @@ paths:
           required: true
           schema:
             type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
       responses:
         "200":
           description: File successfully deleted
+        "404":
+          description: File or collection not found
 
     get:
       tags:
@@ -147,6 +229,14 @@ paths:
           required: true
           schema:
             type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
       responses:
         "200":
           description: File content
@@ -155,6 +245,8 @@ paths:
               schema:
                 type: string
                 format: binary
+        "404":
+          description: File or collection not found
 
   /retrieve:
     post:
@@ -191,6 +283,12 @@ paths:
                 query:
                   type: string
                   description: Search query
+                collectionName:
+                  type: string
+                  description: |
+                    Collection to search in. Defaults to the configured
+                    `collection_name`. Only this collection is searched:
+                    `fileIds` of another collection match nothing.
               required:
                 - fileIds
                 - query
@@ -232,6 +330,8 @@ paths:
                         Positional range of the chunk inside the source document.
                         `null` when the source has no page/paragraph structure.
                 description: Results sorted by similarity (highest first)
+        "404":
+          description: Collection not found
 
   /chunks/{fileId}/{chunkId}:
     get:
@@ -259,6 +359,14 @@ paths:
           schema:
             type: string
             pattern: '^[^"+]+$'
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the chunk is indexed in. Defaults to the configured
+            `collection_name`. Only this collection is looked up.
+          schema:
+            type: string
       responses:
         "200":
           description: The chunk's content and positional metadata
@@ -292,7 +400,7 @@ paths:
         "400":
           description: Invalid `fileId` or `chunkId` (e.g. contains disallowed characters)
         "404":
-          description: No chunk found for the given `fileId` + `chunkId`
+          description: Collection not found, or no chunk found for the given `fileId` + `chunkId` in it
 
 components:
   schemas:
