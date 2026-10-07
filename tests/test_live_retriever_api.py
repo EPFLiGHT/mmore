@@ -12,7 +12,13 @@ from unittest.mock import patch
 
 import pytest
 import yaml
-from conftest import CHUNKED_SAMPLE_DOCS, FakeSparseEmbedding
+from conftest import (
+    CHUNKED_CORPUS,
+    CHUNKED_SAMPLE_DOCS,
+    OTHER_CHUNKED_CORPUS,
+    OTHER_CHUNKED_SAMPLE_DOCS,
+    FakeSparseEmbedding,
+)
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from pymilvus import MilvusClient
@@ -54,6 +60,9 @@ def db_path(tmp_path_factory):
             client=client,
         )
         indexer.index_documents(CHUNKED_SAMPLE_DOCS, collection_name=_COLLECTION)
+        indexer.index_documents(
+            OTHER_CHUNKED_SAMPLE_DOCS, collection_name=_OTHER_COLLECTION
+        )
     return path
 
 
@@ -209,6 +218,81 @@ def test_retrieve_invalid_min_similarity_returns_422(client):
     }
     response = client.post("/v1/retrieve", json=payload)
     assert response.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Per-request collection (collectionName) on the retriever API
+# ---------------------------------------------------------------------------
+
+
+def test_retrieve_in_other_collection(client):
+    payload = {
+        "fileIds": [],
+        "maxMatches": 10,
+        "minSimilarity": -1.0,
+        "query": "capital",
+        "collectionName": _OTHER_COLLECTION,
+    }
+    response = client.post("/v1/retrieve", json=payload)
+    assert response.status_code == 200
+    assert {r["fileId"] for r in response.json()} == set(OTHER_CHUNKED_CORPUS)
+
+
+def test_retrieve_defaults_to_configured_collection(client):
+    payload = {
+        "fileIds": [],
+        "maxMatches": 10,
+        "minSimilarity": -1.0,
+        "query": "capital",
+    }
+    response = client.post("/v1/retrieve", json=payload)
+    assert response.status_code == 200
+    assert {r["fileId"] for r in response.json()} == set(CHUNKED_CORPUS)
+
+
+def test_retrieve_file_ids_of_other_collection_returns_empty(client):
+    payload = {
+        "fileIds": ["doc-rome"],
+        "maxMatches": 10,
+        "minSimilarity": -1.0,
+        "query": "capital",
+    }
+    response = client.post("/v1/retrieve", json=payload)
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_retrieve_missing_collection_returns_404(client):
+    payload = {
+        "fileIds": [],
+        "maxMatches": 10,
+        "minSimilarity": -1.0,
+        "query": "capital",
+        "collectionName": "missing_col",
+    }
+    response = client.post("/v1/retrieve", json=payload)
+    assert response.status_code == 404
+
+
+def test_get_chunk_in_other_collection(client):
+    response = client.get(
+        "/v1/chunks/doc-rome/0", params={"collectionName": _OTHER_COLLECTION}
+    )
+    assert response.status_code == 200
+    assert response.json()["content"] == "Rome is the capital of Italy."
+
+
+def test_get_chunk_of_other_collection_returns_404(client):
+    response = client.get("/v1/chunks/doc-rome/0")
+    assert response.status_code == 404
+    assert _COLLECTION in response.json()["detail"]
+
+
+def test_get_chunk_missing_collection_returns_404(client):
+    response = client.get(
+        "/v1/chunks/doc-paris/0", params={"collectionName": "missing_col"}
+    )
+    assert response.status_code == 404
 
 
 # ---------------------------------------------------------------------------
