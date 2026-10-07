@@ -283,6 +283,12 @@ paths:
                 query:
                   type: string
                   description: Search query
+                collectionName:
+                  type: string
+                  description: |
+                    Collection to search in. Defaults to the configured
+                    `collection_name`. Only this collection is searched:
+                    `fileIds` of another collection match nothing.
               required:
                 - fileIds
                 - query
@@ -324,6 +330,8 @@ paths:
                         Positional range of the chunk inside the source document.
                         `null` when the source has no page/paragraph structure.
                 description: Results sorted by similarity (highest first)
+        "404":
+          description: Collection not found
 
   /chunks/{fileId}/{chunkId}:
     get:
@@ -351,6 +359,14 @@ paths:
           schema:
             type: string
             pattern: '^[^"+]+$'
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the chunk is indexed in. Defaults to the configured
+            `collection_name`. Only this collection is looked up.
+          schema:
+            type: string
       responses:
         "200":
           description: The chunk's content and positional metadata
@@ -384,7 +400,7 @@ paths:
         "400":
           description: Invalid `fileId` or `chunkId` (e.g. contains disallowed characters)
         "404":
-          description: No chunk found for the given `fileId` + `chunkId`
+          description: Collection not found, or no chunk found for the given `fileId` + `chunkId` in it
 
 components:
   schemas:
