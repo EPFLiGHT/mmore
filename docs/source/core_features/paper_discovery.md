@@ -15,10 +15,10 @@ uv pip install "mmore[paper_discovery]"
 For optional Google Scholar support (captcha-prone, best-effort):
 
 ```bash
-uv pip install scholarly
+uv pip install "mmore[google_scholar]"
 ```
 
-`scholarly` is **not** in the `paper_discovery` extra by design — it is captcha-prone. Install only if needed.
+This is a separate extra because Google Scholar is captcha-prone and `scholarly` pulls in extra packages such as selenium. Install it only if you need it.
 
 ## Supported sources
 
@@ -27,7 +27,7 @@ uv pip install scholarly
 | **OpenAlex** | Broadest general index of academic papers. Abstracts included by default. |
 | **Europe PMC** | Biomedical and life-sciences literature with links to full text where available. |
 | **arXiv** | Preprints in ML, physics, math, and CS. Slower than the others because arXiv enforces a 3-second gap between requests. |
-| **Google Scholar** | Widest overall coverage but captcha-prone. Opt-in — requires `scholarly`. |
+| **Google Scholar** | Widest overall coverage but captcha-prone. Opt-in — requires the `google_scholar` extra. |
 
 All four sources are anonymous — no API keys needed. Precise rate limits, retry back-off, and API-specific details live in each adapter's docstring under `src/mmore/paper_discovery/sources/`.
 
@@ -80,7 +80,7 @@ Each name under a category must match a `word` in your synonyms file. For every 
 
 ### 3. Create a config file
 
-See [`examples/paper_discovery/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/master/examples/paper_discovery/config.yaml). It points at your `synonyms_path` and `categories_path`.
+See [`examples/paper_discovery/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/paper_discovery/config.yaml). It points at your `synonyms_path` and `categories_path`.
 
 ### 4. Run the pipeline
 
@@ -141,13 +141,15 @@ The default just identifies mmore + the repo URL, which works but doesn't tell a
 
 ## 💾 PDF caching
 
-`pdf_dir` is reused across runs. Before downloading a PDF, the pipeline checks whether a file with the same name already exists; if so, the HTTP fetch is skipped and text is extracted directly from the cached file.
+`pdf_dir` is reused across runs. Each PDF is saved under a hash of its URL. If that file already exists and is a real PDF, the download is skipped. If it isn't a real PDF, it is deleted and downloaded again.
 
-The summary line at the end of a run shows the split:
+A paper only counts as a success if text was extracted from it. The summary line at the end of a run shows the split:
 
 ```
-PDF download: 108/124 succeeded (45 cached, 63 fresh), 16 paywalled, 0 errors, 0 skipped
+PDF download: 108/124 succeeded (45 cached, 63 fresh), 16 paywalled, 0 errors, 0 skipped, 0 with no text
 ```
+
+> Caches from versions before this naming change aren't reused. Those PDFs are downloaded again.
 
 This makes interrupted runs cheap to resume — every PDF that landed on disk before Ctrl+C is reused, only the missing ones are fetched.
 

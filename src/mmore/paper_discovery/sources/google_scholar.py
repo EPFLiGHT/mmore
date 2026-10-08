@@ -35,8 +35,8 @@ class GoogleScholarAdapter(SourceAdapter):
             from scholarly import scholarly
         except ImportError:
             logger.warning(
-                "scholarly not installed; install with `pip install scholarly` "
-                "to enable Google Scholar source"
+                "scholarly not installed; install with "
+                '`pip install "mmore[google_scholar]"` to enable Google Scholar source'
             )
             return []
 

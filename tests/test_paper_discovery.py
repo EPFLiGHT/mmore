@@ -8,7 +8,17 @@ from mmore.paper_discovery.boolean import (
     build_boolean_queries,
     load_synonyms,
 )
-from mmore.paper_discovery.pdf import _looks_like_login_page, _proxify
+from mmore.paper_discovery.config import PaperDiscoveryConfig
+from mmore.paper_discovery.pdf import (
+    DownloadResult,
+    _find_pdf_link,
+    _looks_like_login_page,
+    _looks_like_pdf,
+    _proxify,
+    download_pdf,
+    expected_pdf_path,
+)
+from mmore.paper_discovery.pipeline import PaperDiscoveryPipeline
 from mmore.paper_discovery.schema import Paper, SourceName, SynonymEntry
 from mmore.paper_discovery.sources._utils import coerce_year, first_year
 from mmore.paper_discovery.sources.arxiv import (
@@ -180,6 +190,177 @@ class TestProxify:
         assert "//login?url=" not in out
 
 
+class TestLooksLikePdf:
+    def _resp(
+        self, content, url="https://example.org/paper.pdf", ctype="application/pdf"
+    ):
+        r = MagicMock()
+        r.content = content
+        r.url = url
+        r.headers = {"Content-Type": ctype}
+        return r
+
+    def test_accepts_the_pdf_signature(self):
+        assert _looks_like_pdf(self._resp(b"%PDF-1.7\n..."))
+
+    def test_rejects_html_from_a_pdf_url(self):
+        # The URL and Content-Type both say PDF, but the body is a login page.
+        assert not _looks_like_pdf(self._resp(b"<html><body>Sign in</body></html>"))
+
+
+class TestDownloadPdf:
+    def _resp(self, content, ctype):
+        r = MagicMock()
+        r.status_code = 200
+        r.content = content
+        r.text = content.decode("utf-8", errors="ignore")
+        r.url = "https://example.org/paper.pdf"
+        r.headers = {"Content-Type": ctype}
+        return r
+
+    def test_login_page_on_a_pdf_url_is_not_saved(self, tmp_path):
+        login = self._resp(b'<form><input type="password"></form>', "text/html")
+        with patch("mmore.paper_discovery.pdf.requests.get", return_value=login):
+            result = download_pdf("https://example.org/paper.pdf", str(tmp_path))
+        assert result.path is None
+        assert result.login_page
+        assert not any(tmp_path.iterdir())
+
+    def _landing_then_pdf(self, final_url):
+        landing = self._resp(
+            b'<meta name="citation_pdf_url" content="/pdf/1.pdf">', "text/html"
+        )
+        landing.url = final_url  # where the request ended up after redirects
+        return [landing, self._resp(b"%PDF-1.7\n", "application/pdf")]
+
+    def test_pdf_from_a_landing_page_is_cached_under_the_paper_url(self, tmp_path):
+        url = "https://example.org/article/1"
+        with patch(
+            "mmore.paper_discovery.pdf.requests.get",
+            side_effect=self._landing_then_pdf(url),
+        ):
+            result = download_pdf(url, str(tmp_path))
+        assert result.path == str(expected_pdf_path(url, str(tmp_path)))
+
+    def test_relative_pdf_link_follows_the_redirect(self, tmp_path):
+        get = MagicMock(
+            side_effect=self._landing_then_pdf("https://publisher.example.org/a/1")
+        )
+        with patch("mmore.paper_discovery.pdf.requests.get", get):
+            download_pdf("https://doi.org/10.1/abc", str(tmp_path))
+        assert (
+            get.call_args_list[1].args[0] == "https://publisher.example.org/pdf/1.pdf"
+        )
+
+
+class TestExpectedPdfPath:
+    def test_urls_ending_alike_get_different_files(self, tmp_path):
+        a = expected_pdf_path("https://a.org/article/1/pdf", str(tmp_path))
+        b = expected_pdf_path("https://b.org/article/2/pdf", str(tmp_path))
+        assert a != b
+
+    def test_same_url_gets_the_same_file(self, tmp_path):
+        url = "https://a.org/article/1/pdf"
+        assert expected_pdf_path(url, str(tmp_path)) == expected_pdf_path(
+            url, str(tmp_path)
+        )
+
+
+class TestFindPdfLink:
+    def test_prefers_citation_pdf_url(self):
+        html = """
+        <html><head>
+          <meta name="citation_pdf_url" content="/article/1/main.pdf">
+        </head><body>
+          <a href="/related/2/pdf">Related article</a>
+        </body></html>
+        """
+        assert (
+            _find_pdf_link(html, base="https://pub.org/article/1")
+            == "https://pub.org/article/1/main.pdf"
+        )
+
+    def test_falls_back_to_links(self):
+        html = '<a href="/article/1/pdf">PDF</a>'
+        assert (
+            _find_pdf_link(html, base="https://pub.org/article/1")
+            == "https://pub.org/article/1/pdf"
+        )
+
+
+class TestEnrichWithPdfText:
+    def _pipeline(self, tmp_path):
+        cfg = PaperDiscoveryConfig(
+            synonyms_path="unused",
+            categories_path="unused",
+            output_file=str(tmp_path / "out.jsonl"),
+            pdf_dir=str(tmp_path / "pdfs"),
+        )
+        return PaperDiscoveryPipeline(cfg)
+
+    def _download_ok(self, tmp_path):
+        def fake(url, save_dir, **kwargs):
+            path = expected_pdf_path(url, save_dir)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(b"%PDF-1.7\n")
+            return DownloadResult(path=str(path))
+
+        return fake
+
+    def test_empty_text_is_not_a_success(self, tmp_path, caplog):
+        paper = Paper(title="T", url="https://example.org/a.pdf")
+        with (
+            patch(
+                "mmore.paper_discovery.pipeline.download_pdf",
+                side_effect=self._download_ok(tmp_path),
+            ),
+            patch("mmore.paper_discovery.pipeline.extract_text", return_value=""),
+            caplog.at_level("INFO"),
+        ):
+            self._pipeline(tmp_path)._enrich_with_pdf_text([paper])
+        assert paper.extracted_text is None
+        assert "0/1 succeeded" in caplog.text
+        assert "1 with no text" in caplog.text
+
+    def test_non_pdf_cache_file_is_replaced(self, tmp_path, caplog):
+        pipeline = self._pipeline(tmp_path)
+        url = "https://example.org/a.pdf"
+        paper = Paper(title="T", url=url)
+        cached = expected_pdf_path(url, pipeline.config.pdf_dir)
+        cached.parent.mkdir(parents=True)
+        cached.write_bytes(b"<html>login</html>")
+
+        download = MagicMock(side_effect=self._download_ok(tmp_path))
+        with (
+            patch("mmore.paper_discovery.pipeline.download_pdf", download),
+            patch("mmore.paper_discovery.pipeline.extract_text", return_value="text"),
+            caplog.at_level("INFO"),
+        ):
+            pipeline._enrich_with_pdf_text([paper])
+        download.assert_called_once()
+        assert cached.read_bytes().startswith(b"%PDF-")
+        assert paper.extracted_text == "text"
+        assert "1/1 succeeded (0 cached, 1 fresh)" in caplog.text
+
+    def test_valid_cache_file_skips_download(self, tmp_path, caplog):
+        pipeline = self._pipeline(tmp_path)
+        url = "https://example.org/a.pdf"
+        paper = Paper(title="T", url=url)
+        cached = expected_pdf_path(url, pipeline.config.pdf_dir)
+        cached.parent.mkdir(parents=True)
+        cached.write_bytes(b"%PDF-1.7\n")
+
+        download = MagicMock()
+        with (
+            patch("mmore.paper_discovery.pipeline.download_pdf", download),
+            patch("mmore.paper_discovery.pipeline.extract_text", return_value="text"),
+            caplog.at_level("INFO"),
+        ):
+            pipeline._enrich_with_pdf_text([paper])
+        download.assert_not_called()
+        assert "1/1 succeeded (1 cached, 0 fresh)" in caplog.text
+
+
 # ---------------------------------------------------------------------------
 # Shared source helpers
 # ---------------------------------------------------------------------------
@@ -318,7 +499,7 @@ class TestLoadSynonyms:
 
 class TestPaperSchema:
     def test_to_dict_includes_all_fields(self):
-        p = Paper(title="t", source="arxiv")
+        p = Paper(title="t", source=SourceName.ARXIV)
         d = p.to_dict()
         for k in (
             "title",
@@ -352,11 +533,11 @@ class TestPaperToMultimodalSample:
     def test_metadata_carries_paper_fields(self):
         p = Paper(
             title="A Paper",
-            authors="Ada Lovelace",
+            authors=["Ada Lovelace"],
             url="http://x/p.pdf",
             abstract="abs",
             year=2024,
-            source="arxiv",
+            source=SourceName.ARXIV,
             search_category="Cat",
         )
         s = p.to_multimodal_sample(pdf_path="/tmp/p.pdf")
@@ -368,7 +549,7 @@ class TestPaperToMultimodalSample:
         assert s.metadata.extra["year"] == 2024
 
     def test_none_fields_dropped_from_extra(self):
-        p = Paper(title="T", source="arxiv")  # authors, url, year, ... = None
+        p = Paper(title="T", source=SourceName.ARXIV)  # authors, url, year, ... = None
         s = p.to_multimodal_sample()
         assert "authors" not in s.metadata.extra
         assert "year" not in s.metadata.extra
