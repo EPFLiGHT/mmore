@@ -87,7 +87,9 @@ def download_pdf(
         logger.debug("download_pdf got a sign-in page for %s", url)
         return DownloadResult(status=r.status_code, login_page=True)
 
-    pdf_url = _find_pdf_link(r.text, base=url)
+    # Relative links are relative to the page we ended up on after redirects,
+    # e.g. the publisher's page a DOI link redirects to.
+    pdf_url = _find_pdf_link(r.text, base=r.url)
     if not pdf_url:
         return DownloadResult(status=r.status_code)
 
@@ -106,7 +108,9 @@ def download_pdf(
         return DownloadResult(paywalled=True, status=r2.status_code)
 
     if r2.status_code == 200 and _looks_like_pdf(r2):
-        return DownloadResult(path=_save_pdf(r2.content, pdf_url, save_dir))
+        # Saved under the paper's URL, not the link we followed, so the
+        # cache check finds it next time.
+        return DownloadResult(path=_save_pdf(r2.content, url, save_dir))
     if _looks_like_login_page(r2):
         return DownloadResult(status=r2.status_code, login_page=True)
     return DownloadResult(status=r2.status_code)

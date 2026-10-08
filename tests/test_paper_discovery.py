@@ -226,6 +226,32 @@ class TestDownloadPdf:
         assert result.login_page
         assert not any(tmp_path.iterdir())
 
+    def _landing_then_pdf(self, final_url):
+        landing = self._resp(
+            b'<meta name="citation_pdf_url" content="/pdf/1.pdf">', "text/html"
+        )
+        landing.url = final_url  # where the request ended up after redirects
+        return [landing, self._resp(b"%PDF-1.7\n", "application/pdf")]
+
+    def test_pdf_from_a_landing_page_is_cached_under_the_paper_url(self, tmp_path):
+        url = "https://example.org/article/1"
+        with patch(
+            "mmore.paper_discovery.pdf.requests.get",
+            side_effect=self._landing_then_pdf(url),
+        ):
+            result = download_pdf(url, str(tmp_path))
+        assert result.path == str(expected_pdf_path(url, str(tmp_path)))
+
+    def test_relative_pdf_link_follows_the_redirect(self, tmp_path):
+        get = MagicMock(
+            side_effect=self._landing_then_pdf("https://publisher.example.org/a/1")
+        )
+        with patch("mmore.paper_discovery.pdf.requests.get", get):
+            download_pdf("https://doi.org/10.1/abc", str(tmp_path))
+        assert (
+            get.call_args_list[1].args[0] == "https://publisher.example.org/pdf/1.pdf"
+        )
+
 
 class TestExpectedPdfPath:
     def test_urls_ending_alike_get_different_files(self, tmp_path):
