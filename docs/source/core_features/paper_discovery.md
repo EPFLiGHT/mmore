@@ -15,10 +15,10 @@ uv pip install "mmore[paper_discovery]"
 For optional Google Scholar support (captcha-prone, best-effort):
 
 ```bash
-uv pip install scholarly
+uv pip install "mmore[google_scholar]"
 ```
 
-`scholarly` is **not** in the `paper_discovery` extra by design — it is captcha-prone. Install only if needed.
+This is a separate extra because Google Scholar is captcha-prone and `scholarly` pulls in extra packages such as selenium. Install it only if you need it.
 
 ## Supported sources
 
@@ -27,7 +27,7 @@ uv pip install scholarly
 | **OpenAlex** | Broadest general index of academic papers. Abstracts included by default. |
 | **Europe PMC** | Biomedical and life-sciences literature with links to full text where available. |
 | **arXiv** | Preprints in ML, physics, math, and CS. Slower than the others because arXiv enforces a 3-second gap between requests. |
-| **Google Scholar** | Widest overall coverage but captcha-prone. Opt-in — requires `scholarly`. |
+| **Google Scholar** | Widest overall coverage but captcha-prone. Opt-in — requires the `google_scholar` extra. |
 
 All four sources are anonymous — no API keys needed. Precise rate limits, retry back-off, and API-specific details live in each adapter's docstring under `src/mmore/paper_discovery/sources/`.
 

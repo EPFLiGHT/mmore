@@ -19,7 +19,7 @@ sources:
   - openalex
   - europepmc
   - arxiv
-  # - google_scholar  # opt-in, captcha-prone. Requires `pip install scholarly`.
+  # - google_scholar  # opt-in, captcha-prone. Requires `pip install "mmore[google_scholar]"`.
   #                   See docs/core_features/paper_discovery.md.
 
 download_pdfs: true
