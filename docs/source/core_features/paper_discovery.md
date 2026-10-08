@@ -80,7 +80,7 @@ Each name under a category must match a `word` in your synonyms file. For every 
 
 ### 3. Create a config file
 
-See [`examples/paper_discovery/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/master/examples/paper_discovery/config.yaml). It points at your `synonyms_path` and `categories_path`.
+See [`examples/paper_discovery/config.yaml`](https://github.com/EPFLiGHT/mmore/blob/main/examples/paper_discovery/config.yaml). It points at your `synonyms_path` and `categories_path`.
 
 ### 4. Run the pipeline
 
