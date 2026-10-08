@@ -318,7 +318,7 @@ class TestLoadSynonyms:
 
 class TestPaperSchema:
     def test_to_dict_includes_all_fields(self):
-        p = Paper(title="t", source="arxiv")
+        p = Paper(title="t", source=SourceName.ARXIV)
         d = p.to_dict()
         for k in (
             "title",
@@ -352,11 +352,11 @@ class TestPaperToMultimodalSample:
     def test_metadata_carries_paper_fields(self):
         p = Paper(
             title="A Paper",
-            authors="Ada Lovelace",
+            authors=["Ada Lovelace"],
             url="http://x/p.pdf",
             abstract="abs",
             year=2024,
-            source="arxiv",
+            source=SourceName.ARXIV,
             search_category="Cat",
         )
         s = p.to_multimodal_sample(pdf_path="/tmp/p.pdf")
@@ -368,7 +368,7 @@ class TestPaperToMultimodalSample:
         assert s.metadata.extra["year"] == 2024
 
     def test_none_fields_dropped_from_extra(self):
-        p = Paper(title="T", source="arxiv")  # authors, url, year, ... = None
+        p = Paper(title="T", source=SourceName.ARXIV)  # authors, url, year, ... = None
         s = p.to_multimodal_sample()
         assert "authors" not in s.metadata.extra
         assert "year" not in s.metadata.extra
