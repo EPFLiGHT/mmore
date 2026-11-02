@@ -12,7 +12,7 @@ The **Indexer API** allows users to **upload, update, download, delete, and inde
 
 Uploads are **asynchronous**: the upload endpoints validate the request, queue a background job, and return `202 Accepted` with a `jobId` immediately. Processing and indexing then run in the background, one job per GPU. Clients track progress with the job status endpoints (snapshot or SSE stream).
 
-Every file operation endpoint takes an optional `collectionName` to run the operation on a collection other than the configured `collection_name`. If the passed collection does not exist, uploads create it, while update, delete and download return `404`.
+Every file operation endpoint takes an optional `collectionName` to run the operation on a collection other than the configured `collection_name`. If the passed collection does not exist, uploads create it, while update, delete, download and metadata operations return `404`.
 
 ## ⚙️ Backend server setup
 
@@ -187,9 +187,77 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | `fileId` | `str` (path) | ID of the file to download |
 | `collectionName` | `str` (query, optional) | Collection the file is indexed in |
 
-Returns the file with binary content.
+Returns the file with binary content, named after the file's `filename` metadata.
 
 **Errors**: `404` file or collection not found, `500` internal error while retrieving the file.
+
+### 🏷️ Metadata endpoints
+
+Metadata is stored on every chunk of a file. These endpoints only deal with **file-level** metadata: keys present on all chunks of the file with the same value (e.g. `filename`). Chunk-level metadata such as `paragraph_positions` is not returned and cannot be patched.
+
+#### 🔎 `GET /v1/files/{fileId}/metadata`
+
+**Get the file-level metadata of a file**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+
+**Response**: the file-level metadata, `chunks` is the number of chunks of the file.
+
+```json
+{
+  "fileId": "doc123",
+  "collectionName": "my_docs",
+  "chunks": 12,
+  "metadata": {
+    "filename": "report.pdf",
+    "file_path": "./uploads/doc123"
+  }
+}
+```
+
+**Errors**: `404` file or collection not found.
+
+#### 🩹 `PATCH /v1/files/{fileId}/metadata`
+
+**Patch the file-level metadata of a file, without re-indexing**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+| body | JSON object | Existing keys to update, others are left untouched |
+
+```bash
+curl -X PATCH "http://localhost:8000/v1/files/doc123/metadata?collectionName=my_docs" \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "renamed.pdf"}'
+```
+
+- the patch is applied to every chunk of the file, embeddings are kept as is
+- only existing keys can be updated: keys are never added nor deleted (`null` is rejected)
+- values must be JSON scalars (string, number, boolean)
+- an existing key keeps its type (a string stays a string, a number a number)
+- `id`, `document_id`, `text`, the embeddings, `file_path`, `processed_at` and `processor_type` are protected
+- the chunks are rewritten in batches, a failure midway can leave the file partially patched: the patch is idempotent, send it again
+
+**Response**: same shape as `GET /v1/files/{fileId}/metadata`, after the patch (`chunks` is the number of rewritten chunks).
+
+```json
+{
+  "fileId": "doc123",
+  "collectionName": "my_docs",
+  "chunks": 12,
+  "metadata": {
+    "filename": "renamed.pdf",
+    "file_path": "./uploads/doc123"
+  }
+}
+```
+
+**Errors**: `404` file or collection not found, `422` invalid patch (empty, protected or unknown key, wrong type, non-scalar or null value, or chunk-level key), with the list of problems in `detail`.
 
 ### 🛰️ Job status endpoints
 
