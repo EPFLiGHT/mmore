@@ -137,8 +137,9 @@ def _json_type(value: Any) -> str:
 def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[str]:
     """Check a merge patch against the file's chunks, return the list of errors.
 
-    The patch is a merge: a new key is added, an existing key is updated.
-    - protected keys cannot be patched
+    The patch is a merge: a new key is added, an existing key is updated,
+    a key set to null is deleted (a missing one is a no-op).
+    - protected keys cannot be patched, nor deleted
     - an existing key must be file-level (same value on all chunks)
     - an existing key keeps its JSON type
     """
@@ -148,9 +149,10 @@ def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[st
     for key, value in patch.items():
         if key in PROTECTED_METADATA:
             errors.append(f"'{key}' is protected and cannot be patched")
-        elif not isinstance(value, PATCHABLE_TYPES):
+        elif value is not None and not isinstance(value, PATCHABLE_TYPES):
             errors.append(
-                f"'{key}' must be a string, number or boolean, got {_json_type(value)}"
+                f"'{key}' must be a string, number, boolean or null, "
+                f"got {_json_type(value)}"
             )
         elif key in existing and key not in shared:
             errors.append(
@@ -158,7 +160,8 @@ def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[st
                 "only file-level metadata can be patched"
             )
         elif (
-            key in shared
+            value is not None
+            and key in shared
             and shared[key] is not None
             and _json_type(value) != _json_type(shared[key])
         ):
@@ -735,7 +738,7 @@ def make_router(config_path: str) -> APIRouter:
             404: {"description": "File or collection not found"},
             422: {
                 "description": "Invalid patch (protected key, wrong "
-                "type, non-scalar or null value, or chunk-level key)"
+                "type, non-scalar value, or chunk-level key)"
             },
         },
     )
@@ -744,7 +747,8 @@ def make_router(config_path: str) -> APIRouter:
         patch: Dict[str, Any] = Body(
             ...,
             description="Merged into the file's metadata: new keys are added, "
-            "existing keys are updated, the others are left untouched",
+            "existing keys are updated, null deletes a key, the others are left "
+            "untouched",
             examples=[{"filename": "renamed.pdf"}],
         ),
         collectionName: Optional[str] = Query(
@@ -766,9 +770,15 @@ def make_router(config_path: str) -> APIRouter:
         if errors:
             raise HTTPException(status_code=422, detail=errors)
 
-        # Set the patched keys on every chunk, the others are left untouched
+        # Merge on every chunk: null deletes the key, the others are left untouched.
+        # Json body with null value is considered as python None type
+        # (https://docs.python.org/3/library/json.html#json-to-py-table)
         for row in rows:
-            row.update(patch)
+            for key, value in patch.items():
+                if value is None:
+                    row.pop(key, None)
+                else:
+                    row[key] = value
 
         # Full-row upsert: current Milvus Lite version does not support partial updates
         for i in range(0, len(rows), FILE_ROWS_BATCH_SIZE):
@@ -812,7 +822,7 @@ def make_router(config_path: str) -> APIRouter:
             404: {"description": "Chunk or collection not found"},
             422: {
                 "description": "Invalid patch (protected key, wrong "
-                "type, non-scalar or null value)"
+                "type or non-scalar value)"
             },
         },
     )
@@ -822,7 +832,8 @@ def make_router(config_path: str) -> APIRouter:
         patch: Dict[str, Any] = Body(
             ...,
             description="Merged into the chunk's metadata: new keys are added, "
-            "existing keys are updated, the others are left untouched",
+            "existing keys are updated, null deletes a key, the others are left "
+            "untouched",
             examples=[{"reviewed": True}],
         ),
         collectionName: Optional[str] = Query(
@@ -860,7 +871,14 @@ def make_router(config_path: str) -> APIRouter:
         if errors:
             raise HTTPException(status_code=422, detail=errors)
 
-        row.update(patch)
+        # Merge on this chunk only: null deletes the key.
+        # A JSON null in the body arrives as None: FastAPI parses it with json.loads
+        # (https://docs.python.org/3/library/json.html#json-to-py-table)
+        for key, value in patch.items():
+            if value is None:
+                row.pop(key, None)
+            else:
+                row[key] = value
         milvus_client.upsert(collection_name=collection_name, data=[row])
         milvus_client.flush(collection_name)
 
