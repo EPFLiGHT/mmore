@@ -1410,6 +1410,25 @@ def test_patch_updates_given_keys_and_keeps_the_others(indexer_client, milvus_in
     assert {r["filename"] for r in rows} == {"original.pdf"}
 
 
+def test_patch_merges_new_keys_on_every_chunk(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-merge-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/meta-merge-doc/metadata",
+        json={"author": "Ada", "filename": "renamed.pdf"},
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert metadata["author"] == "Ada"
+    assert metadata["filename"] == "renamed.pdf"
+    assert metadata["pages"] == 4
+    rows = _chunk_rows(milvus_indexer, "meta-merge-doc")
+    assert {r["author"] for r in rows} == {"Ada"}
+    assert [r["chunk_no"] for r in rows] == [0, 1, 2]
+
+
 @pytest.mark.parametrize(
     "patch_body",
     [
@@ -1421,7 +1440,6 @@ def test_patch_updates_given_keys_and_keeps_the_others(indexer_client, milvus_in
         {"chunk_no": 0},  # chunk-level key
         {"tags": ["a", "b"]},  # non-scalar
         {"filename": None},  # null, a patch never deletes keys
-        {"author": "Ada"},  # unknown key, a patch never adds keys
         {},  # empty patch
     ],
 )

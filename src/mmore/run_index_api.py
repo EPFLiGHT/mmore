@@ -137,10 +137,10 @@ def _json_type(value: Any) -> str:
 def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[str]:
     """Check a merge patch against the file's chunks, return the list of errors.
 
+    The patch is a merge: a new key is added, an existing key is updated.
     - protected keys cannot be patched
-    - only existing keys can be patched, new keys are never added
-    - the key must be file-level (same value on all chunks)
-    - the key keeps its JSON type
+    - an existing key must be file-level (same value on all chunks)
+    - an existing key keeps its JSON type
     """
     shared = _file_level_metadata(rows)
     existing = {k for row in rows for k in row} - SCHEMA_FIELDS
@@ -148,13 +148,11 @@ def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[st
     for key, value in patch.items():
         if key in PROTECTED_METADATA:
             errors.append(f"'{key}' is protected and cannot be patched")
-        elif key not in existing:
-            errors.append(f"'{key}' is not a metadata of the file, it cannot be added")
         elif not isinstance(value, PATCHABLE_TYPES):
             errors.append(
                 f"'{key}' must be a string, number or boolean, got {_json_type(value)}"
             )
-        elif key not in shared:
+        elif key in existing and key not in shared:
             errors.append(
                 f"'{key}' differs across the chunks of the file, "
                 "only file-level metadata can be patched"
@@ -736,7 +734,7 @@ def make_router(config_path: str) -> APIRouter:
             },
             404: {"description": "File or collection not found"},
             422: {
-                "description": "Invalid patch (protected or unknown key, wrong "
+                "description": "Invalid patch (protected key, wrong "
                 "type, non-scalar or null value, or chunk-level key)"
             },
         },
@@ -745,8 +743,8 @@ def make_router(config_path: str) -> APIRouter:
         fileId: str = Path(..., description="ID of the file"),
         patch: Dict[str, Any] = Body(
             ...,
-            description="Existing keys to update on the file, the others are left "
-            "untouched. Keys are never added nor deleted",
+            description="Merged into the file's metadata: new keys are added, "
+            "existing keys are updated, the others are left untouched",
             examples=[{"filename": "renamed.pdf"}],
         ),
         collectionName: Optional[str] = Query(
