@@ -786,6 +786,92 @@ def make_router(config_path: str) -> APIRouter:
             "metadata": _file_level_metadata(rows),
         }
 
+    @router.patch(
+        "/v1/files/{fileId}/chunks/{chunkId}/metadata",
+        tags=["File Operations"],
+        summary="Patch the metadata of a single chunk",
+        responses={
+            200: {
+                "description": "Chunk metadata after the patch",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "fileId": "doc123",
+                            "chunkId": "3",
+                            "collectionName": "my_docs",
+                            "metadata": {
+                                "filename": "report.pdf",
+                                "file_path": "./uploads/doc123",
+                                "paragraph_positions": [[120, 340]],
+                                "reviewed": True,
+                            },
+                        }
+                    }
+                },
+            },
+            404: {"description": "Chunk or collection not found"},
+            422: {
+                "description": "Invalid patch (protected key, wrong "
+                "type, non-scalar or null value)"
+            },
+        },
+    )
+    def patch_chunk_metadata(
+        fileId: str = Path(..., description="ID of the file"),
+        chunkId: str = Path(..., description="ID of the chunk within the file"),
+        patch: Dict[str, Any] = Body(
+            ...,
+            description="Merged into the chunk's metadata: new keys are added, "
+            "existing keys are updated, the others are left untouched",
+            examples=[{"reviewed": True}],
+        ),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
+        """
+        Patch the metadata of one chunk only, without re-indexing.
+
+        The other chunks of the file are left untouched: patching a file-level key
+        here makes it differ across the chunks, choosing the right key is the caller's
+        responsibility.
+        """
+        collection_name = _existing_collection(collectionName)
+        if not patch:
+            raise HTTPException(status_code=422, detail="Empty patch")
+
+        rows = milvus_client.query(
+            collection_name=collection_name,
+            filter=f"id == {json.dumps(f'{fileId}+{chunkId}')}",
+            output_fields=["*"],
+            limit=1,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chunk {chunkId} of file {fileId} not found "
+                f"in collection {collection_name}",
+            )
+        row = rows[0]
+        # A single chunk: only the protected keys, value and type checks apply
+        errors = _validate_metadata_patch(patch, [row])
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
+
+        row.update(patch)
+        milvus_client.upsert(collection_name=collection_name, data=[row])
+        milvus_client.flush(collection_name)
+
+        logger.info(f"Patched metadata of chunk {fileId}+{chunkId}: {patch}")
+        return {
+            "fileId": fileId,
+            "chunkId": chunkId,
+            "collectionName": collection_name,
+            "metadata": {k: v for k, v in row.items() if k not in SCHEMA_FIELDS},
+        }
+
     @router.get(
         "/v1/jobs/{jobId}",
         tags=["Jobs"],
