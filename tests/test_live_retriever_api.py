@@ -1410,6 +1410,38 @@ def test_patch_updates_given_keys_and_keeps_the_others(indexer_client, milvus_in
     assert {r["filename"] for r in rows} == {"original.pdf"}
 
 
+def test_patch_null_deletes_key_on_every_chunk(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-del-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/meta-del-doc/metadata",
+        json={"pages": None, "filename": "renamed.pdf"},
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert "pages" not in metadata
+    assert metadata["filename"] == "renamed.pdf"
+    rows = _chunk_rows(milvus_indexer, "meta-del-doc")
+    assert all("pages" not in r for r in rows)
+    assert [r["chunk_no"] for r in rows] == [0, 1, 2]
+
+
+def test_patch_null_on_missing_key_is_a_no_op(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-noop-doc", _COLLECTION)
+    before = _chunk_rows(milvus_indexer, "meta-noop-doc")
+
+    response = tc.patch("/v1/files/meta-noop-doc/metadata", json={"author": None})
+
+    assert response.status_code == 200
+    after = _chunk_rows(milvus_indexer, "meta-noop-doc")
+    assert [{k: v for k, v in r.items() if "embedding" not in k} for r in after] == [
+        {k: v for k, v in r.items() if "embedding" not in k} for r in before
+    ]
+
+
 def test_patch_merges_new_keys_on_every_chunk(indexer_client, milvus_indexer):
     tc, upload_dir, _ = indexer_client
     _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-merge-doc", _COLLECTION)
@@ -1439,7 +1471,8 @@ def test_patch_merges_new_keys_on_every_chunk(indexer_client, milvus_indexer):
         {"filename": 42},  # type change string -> number
         {"chunk_no": 0},  # chunk-level key
         {"tags": ["a", "b"]},  # non-scalar
-        {"filename": None},  # null, a patch never deletes keys
+        {"file_path": None},  # protected keys cannot be deleted
+        {"chunk_no": None},  # chunk-level key cannot be deleted file-wide
         {},  # empty patch
     ],
 )
@@ -1525,10 +1558,27 @@ def test_patch_chunk_merges_on_that_chunk_only(indexer_client, milvus_indexer):
         assert new["sparse_embedding"] == old["sparse_embedding"]
 
 
+def test_patch_chunk_null_deletes_key_on_that_chunk_only(
+    indexer_client, milvus_indexer
+):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-del-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/chunk-del-doc/chunks/1/metadata", json={"chunk_no": None}
+    )
+
+    assert response.status_code == 200
+    assert "chunk_no" not in response.json()["metadata"]
+    rows = _chunk_rows(milvus_indexer, "chunk-del-doc")
+    assert [r.get("chunk_no") for r in rows] == [0, None, 2]
+    assert {r["filename"] for r in rows} == {"original.pdf"}
+
+
 def test_patch_chunk_file_level_key_makes_it_chunk_level(
     indexer_client, milvus_indexer
 ):
-    """Patching filename on one chunk (callers responsability to ensure correect field is patched)"""
+    """Patching filename on one chunk (it is the caller's responsibility to ensure the correct field is patched)"""
     tc, upload_dir, _ = indexer_client
     _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-fname-doc", _COLLECTION)
 
@@ -1549,7 +1599,7 @@ def test_patch_chunk_file_level_key_makes_it_chunk_level(
         {"file_path": "/n1/n2"},  # protected
         {"document_id": "other"},  # schema field
         {"chunk_no": "ten"},  # type change number -> string
-        {"chunk_no": None},  # null, a patch never deletes keys
+        {"file_path": None},  # protected keys cannot be deleted
         {"tags": ["a", "b"]},  # non-scalar
     ],
 )
