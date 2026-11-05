@@ -1261,3 +1261,405 @@ def test_update_file_in_wrong_collection_returns_404(indexer_client):
     assert Path(upload_dir, "other-guarded-doc").read_bytes() == (
         b"Other collection content."
     )
+
+
+# ---------------------------------------------------------------------------
+# GET / PATCH /v1/files/{fileId}/metadata
+# ---------------------------------------------------------------------------
+
+
+def _index_multi_chunk_file(
+    milvus_indexer, upload_dir: str, file_id: str, collection: str, n_chunks: int = 3
+) -> None:
+    """Index a file with a file-level (filename, pages) and a chunk-level (chunk_no) key."""
+    stored = Path(upload_dir) / file_id
+    stored.write_bytes(b"Multi chunk content.")
+    docs = [
+        MultimodalSample(
+            id=f"{file_id}+{i}",
+            document_id=file_id,
+            text=f"Chunk {i} of {file_id}.",
+            modalities=[],
+            metadata=DocumentMetadata(
+                file_path=str(stored),
+                extra={"filename": "original.pdf", "pages": 4, "chunk_no": i},
+            ),
+        )
+        for i in range(n_chunks)
+    ]
+    milvus_indexer.index_documents(docs, collection_name=collection)
+    milvus_indexer.client.flush(collection)
+
+
+def _chunk_rows(milvus_indexer, file_id: str, collection: str = _COLLECTION):
+    return sorted(
+        milvus_indexer.client.query(
+            collection_name=collection,
+            filter=f"document_id == {json.dumps(file_id)}",
+            output_fields=["*"],
+        ),
+        key=lambda r: r["id"],
+    )
+
+
+def test_get_metadata_returns_file_level_keys_only(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-get-doc", _COLLECTION)
+
+    response = tc.get("/v1/files/meta-get-doc/metadata")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fileId"] == "meta-get-doc"
+    assert body["collectionName"] == _COLLECTION
+    assert body["chunks"] == 3
+    assert body["metadata"]["filename"] == "original.pdf"
+    assert body["metadata"]["pages"] == 4
+    assert "chunk_no" not in body["metadata"]
+    assert "dense_embedding" not in body["metadata"]
+
+
+def test_get_metadata_reflects_patch(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-get-patched", _COLLECTION)
+
+    tc.patch("/v1/files/meta-get-patched/metadata", json={"filename": "renamed.pdf"})
+    response = tc.get("/v1/files/meta-get-patched/metadata")
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["filename"] == "renamed.pdf"
+
+
+def test_get_metadata_in_other_collection(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(
+        milvus_indexer, upload_dir, "meta-get-other", _OTHER_COLLECTION
+    )
+
+    assert tc.get("/v1/files/meta-get-other/metadata").status_code == 404
+    response = tc.get(
+        "/v1/files/meta-get-other/metadata",
+        params={"collectionName": _OTHER_COLLECTION},
+    )
+    assert response.status_code == 200
+    assert response.json()["collectionName"] == _OTHER_COLLECTION
+
+
+def test_get_metadata_nonexistent_file_returns_404(indexer_client):
+    tc, *_ = indexer_client
+    assert tc.get("/v1/files/no-such-doc/metadata").status_code == 404
+
+
+def test_get_metadata_missing_collection_returns_404(indexer_client):
+    tc, _, pre_id = indexer_client
+    response = tc.get(
+        f"/v1/files/{pre_id}/metadata", params={"collectionName": "missing_col"}
+    )
+    assert response.status_code == 404
+
+
+def test_patch_filename_updates_every_chunk_without_reindexing(
+    indexer_client, milvus_indexer
+):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-rename-doc", _COLLECTION)
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-bystander", _COLLECTION)
+    before = _chunk_rows(milvus_indexer, "meta-rename-doc")
+
+    response = tc.patch(
+        "/v1/files/meta-rename-doc/metadata", json={"filename": "renamed.pdf"}
+    )
+
+    assert response.status_code == 200
+    assert response.json()["metadata"]["filename"] == "renamed.pdf"
+    after = _chunk_rows(milvus_indexer, "meta-rename-doc")
+    assert len(after) == len(before)
+    for old, new in zip(before, after):
+        assert new["filename"] == "renamed.pdf"
+        assert new["chunk_no"] == old["chunk_no"]
+        assert new["text"] == old["text"]
+        assert new["dense_embedding"] == pytest.approx(old["dense_embedding"])
+        assert new["sparse_embedding"] == old["sparse_embedding"]
+    bystander = _chunk_rows(milvus_indexer, "meta-bystander")
+    assert {r["filename"] for r in bystander} == {"original.pdf"}
+
+
+def test_patch_filename_is_used_on_download(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-dl-doc", _COLLECTION)
+
+    tc.patch("/v1/files/meta-dl-doc/metadata", json={"filename": "renamed.pdf"})
+    response = tc.get("/v1/files/meta-dl-doc")
+
+    assert response.status_code == 200
+    assert "renamed.pdf" in response.headers["content-disposition"]
+
+
+def test_patch_updates_given_keys_and_keeps_the_others(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-keep-doc", _COLLECTION)
+
+    response = tc.patch("/v1/files/meta-keep-doc/metadata", json={"pages": 5})
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert metadata["pages"] == 5
+    assert metadata["filename"] == "original.pdf"
+    rows = _chunk_rows(milvus_indexer, "meta-keep-doc")
+    assert {r["pages"] for r in rows} == {5}
+    assert {r["filename"] for r in rows} == {"original.pdf"}
+
+
+def test_patch_null_deletes_key_on_every_chunk(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-del-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/meta-del-doc/metadata",
+        json={"pages": None, "filename": "renamed.pdf"},
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert "pages" not in metadata
+    assert metadata["filename"] == "renamed.pdf"
+    rows = _chunk_rows(milvus_indexer, "meta-del-doc")
+    assert all("pages" not in r for r in rows)
+    assert [r["chunk_no"] for r in rows] == [0, 1, 2]
+
+
+def test_patch_null_on_missing_key_is_a_no_op(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-noop-doc", _COLLECTION)
+    before = _chunk_rows(milvus_indexer, "meta-noop-doc")
+
+    response = tc.patch("/v1/files/meta-noop-doc/metadata", json={"author": None})
+
+    assert response.status_code == 200
+    after = _chunk_rows(milvus_indexer, "meta-noop-doc")
+    assert [{k: v for k, v in r.items() if "embedding" not in k} for r in after] == [
+        {k: v for k, v in r.items() if "embedding" not in k} for r in before
+    ]
+
+
+def test_patch_merges_new_keys_on_every_chunk(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-merge-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/meta-merge-doc/metadata",
+        json={"author": "Ada", "filename": "renamed.pdf"},
+    )
+
+    assert response.status_code == 200
+    metadata = response.json()["metadata"]
+    assert metadata["author"] == "Ada"
+    assert metadata["filename"] == "renamed.pdf"
+    assert metadata["pages"] == 4
+    rows = _chunk_rows(milvus_indexer, "meta-merge-doc")
+    assert {r["author"] for r in rows} == {"Ada"}
+    assert [r["chunk_no"] for r in rows] == [0, 1, 2]
+
+
+@pytest.mark.parametrize(
+    "patch_body",
+    [
+        {"file_path": "/n1/n2"},  # protected
+        {"document_id": "other"},  # schema field
+        {"pages": "four"},  # type change number -> string
+        {"pages": True},  # bool is not a number
+        {"filename": 42},  # type change string -> number
+        {"chunk_no": 0},  # chunk-level key
+        {"tags": ["a", "b"]},  # non-scalar
+        {"file_path": None},  # protected keys cannot be deleted
+        {"chunk_no": None},  # chunk-level key cannot be deleted file-wide
+        {},  # empty patch
+    ],
+)
+def test_patch_invalid_returns_422_and_changes_nothing(
+    indexer_client, milvus_indexer, patch_body
+):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "meta-invalid-doc", _COLLECTION)
+    before = _chunk_rows(milvus_indexer, "meta-invalid-doc")
+
+    response = tc.patch("/v1/files/meta-invalid-doc/metadata", json=patch_body)
+
+    assert response.status_code == 422
+    after = _chunk_rows(milvus_indexer, "meta-invalid-doc")
+    assert [r["filename"] for r in after] == [r["filename"] for r in before]
+    assert [r["pages"] for r in after] == [r["pages"] for r in before]
+
+
+def test_patch_nonexistent_file_returns_404(indexer_client):
+    tc, *_ = indexer_client
+    response = tc.patch("/v1/files/no-such-doc/metadata", json={"filename": "x"})
+    assert response.status_code == 404
+
+
+def test_patch_missing_collection_returns_404(indexer_client):
+    tc, _, pre_id = indexer_client
+    response = tc.patch(
+        f"/v1/files/{pre_id}/metadata",
+        params={"collectionName": "missing_col"},
+        json={"filename": "x"},
+    )
+    assert response.status_code == 404
+
+
+def test_patch_in_other_collection(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(
+        milvus_indexer, upload_dir, "meta-other-doc", _OTHER_COLLECTION
+    )
+
+    wrong = tc.patch("/v1/files/meta-other-doc/metadata", json={"filename": "x"})
+    assert wrong.status_code == 404
+
+    response = tc.patch(
+        "/v1/files/meta-other-doc/metadata",
+        params={"collectionName": _OTHER_COLLECTION},
+        json={"filename": "renamed.pdf"},
+    )
+    assert response.status_code == 200
+    rows = _chunk_rows(milvus_indexer, "meta-other-doc", _OTHER_COLLECTION)
+    assert {r["filename"] for r in rows} == {"renamed.pdf"}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /v1/files/{fileId}/chunks/{chunkId}/metadata
+# ---------------------------------------------------------------------------
+
+
+def test_patch_chunk_merges_on_that_chunk_only(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-patch-doc", _COLLECTION)
+    before = _chunk_rows(milvus_indexer, "chunk-patch-doc")
+
+    response = tc.patch(
+        "/v1/files/chunk-patch-doc/chunks/1/metadata",
+        json={"chunk_no": 10, "reviewed": True},
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["fileId"] == "chunk-patch-doc"
+    assert body["chunkId"] == "1"
+    assert body["metadata"]["chunk_no"] == 10
+    assert body["metadata"]["reviewed"] is True
+    assert body["metadata"]["filename"] == "original.pdf"
+    assert "dense_embedding" not in body["metadata"]
+    after = _chunk_rows(milvus_indexer, "chunk-patch-doc")
+    assert [r["chunk_no"] for r in after] == [0, 10, 2]
+    assert [("reviewed" in r) for r in after] == [False, True, False]
+    for old, new in zip(before, after):
+        assert new["text"] == old["text"]
+        assert new["dense_embedding"] == pytest.approx(old["dense_embedding"])
+        assert new["sparse_embedding"] == old["sparse_embedding"]
+
+
+def test_patch_chunk_null_deletes_key_on_that_chunk_only(
+    indexer_client, milvus_indexer
+):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-del-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/chunk-del-doc/chunks/1/metadata", json={"chunk_no": None}
+    )
+
+    assert response.status_code == 200
+    assert "chunk_no" not in response.json()["metadata"]
+    rows = _chunk_rows(milvus_indexer, "chunk-del-doc")
+    assert [r.get("chunk_no") for r in rows] == [0, None, 2]
+    assert {r["filename"] for r in rows} == {"original.pdf"}
+
+
+def test_patch_chunk_file_level_key_makes_it_chunk_level(
+    indexer_client, milvus_indexer
+):
+    """Patching filename on one chunk (it is the caller's responsibility to ensure the correct field is patched)"""
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-fname-doc", _COLLECTION)
+
+    response = tc.patch(
+        "/v1/files/chunk-fname-doc/chunks/0/metadata", json={"filename": "other.pdf"}
+    )
+
+    assert response.status_code == 200
+    file_metadata = tc.get("/v1/files/chunk-fname-doc/metadata").json()["metadata"]
+    assert "filename" not in file_metadata
+    assert file_metadata["pages"] == 4
+
+
+@pytest.mark.parametrize(
+    "patch_body",
+    [
+        {},  # empty patch
+        {"file_path": "/n1/n2"},  # protected
+        {"document_id": "other"},  # schema field
+        {"chunk_no": "ten"},  # type change number -> string
+        {"file_path": None},  # protected keys cannot be deleted
+        {"tags": ["a", "b"]},  # non-scalar
+    ],
+)
+def test_patch_chunk_invalid_returns_422_and_changes_nothing(
+    indexer_client, milvus_indexer, patch_body
+):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(
+        milvus_indexer, upload_dir, "chunk-invalid-doc", _COLLECTION
+    )
+
+    response = tc.patch(
+        "/v1/files/chunk-invalid-doc/chunks/1/metadata", json=patch_body
+    )
+
+    assert response.status_code == 422
+    rows = _chunk_rows(milvus_indexer, "chunk-invalid-doc")
+    assert [r["chunk_no"] for r in rows] == [0, 1, 2]
+    assert {r["file_path"] for r in rows} == {
+        str(Path(upload_dir) / "chunk-invalid-doc")
+    }
+
+
+def test_patch_chunk_not_found_returns_404(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(milvus_indexer, upload_dir, "chunk-404-doc", _COLLECTION)
+    body = {"reviewed": True}
+
+    assert (
+        tc.patch("/v1/files/chunk-404-doc/chunks/99/metadata", json=body).status_code
+        == 404
+    )
+    assert (
+        tc.patch("/v1/files/no-such-doc/chunks/0/metadata", json=body).status_code
+        == 404
+    )
+    response = tc.patch(
+        "/v1/files/chunk-404-doc/chunks/0/metadata",
+        params={"collectionName": "missing_col"},
+        json=body,
+    )
+    assert response.status_code == 404
+
+
+def test_patch_chunk_in_other_collection(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    _index_multi_chunk_file(
+        milvus_indexer, upload_dir, "chunk-other-doc", _OTHER_COLLECTION
+    )
+    body = {"reviewed": True}
+
+    wrong = tc.patch("/v1/files/chunk-other-doc/chunks/0/metadata", json=body)
+    assert wrong.status_code == 404
+
+    response = tc.patch(
+        "/v1/files/chunk-other-doc/chunks/0/metadata",
+        params={"collectionName": _OTHER_COLLECTION},
+        json=body,
+    )
+    assert response.status_code == 200
+    assert response.json()["collectionName"] == _OTHER_COLLECTION
+    rows = _chunk_rows(milvus_indexer, "chunk-other-doc", _OTHER_COLLECTION)
+    assert [("reviewed" in r) for r in rows] == [True, False, False]
