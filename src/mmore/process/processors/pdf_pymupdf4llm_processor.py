@@ -36,6 +36,8 @@ DEFAULT_IMAGE_DPI = 300
 class PDFPyMuPDF4LLMProcessor(pdf_processor.PDFProcessor):
     """`PDFProcessor` whose fast mode extracts Markdown via pymupdf4llm."""
 
+    OPT_IN = True
+
     def process_fast(self, file_path: str) -> MultimodalSample:
         """Extract the PDF as per-page Markdown instead of the raw text layer."""
         pdf_doc = pymupdf.Document(file_path)

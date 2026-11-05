@@ -195,3 +195,24 @@ def test_pymupdf4llm_processor_is_opt_in():
     )
 
     assert selected is PDFPyMuPDF4LLMProcessor
+
+
+def test_opt_in_processor_is_skipped_whatever_the_registry_order(monkeypatch):
+    from mmore.process.processors.pdf_processor import PDFProcessor
+    from mmore.process.processors.pdf_pymupdf4llm_processor import (
+        PDFPyMuPDF4LLMProcessor,
+    )
+
+    # pymupdf4llm registered first: the default must still be PDFProcessor
+    monkeypatch.setattr(
+        ProcessorRegistry,
+        "_registry",
+        [PDFPyMuPDF4LLMProcessor, PDFProcessor],
+    )
+    pdf_file = make_file_descriptor("test.pdf", ".pdf")
+
+    assert AutoProcessor.from_file(pdf_file) is PDFProcessor
+    assert (
+        AutoProcessor.from_file(pdf_file, preferred_processor="PDFPyMuPDF4LLMProcessor")
+        is PDFPyMuPDF4LLMProcessor
+    )
