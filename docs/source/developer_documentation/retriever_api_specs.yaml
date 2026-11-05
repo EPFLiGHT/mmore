@@ -225,7 +225,9 @@ paths:
       tags:
         - File Operations
       summary: Download a file
-      description: Download a file from the system
+      description: |
+        Download a file from the system. The file is named after its
+        `filename` metadata (see `PATCH /files/{fileId}/metadata`).
       parameters:
         - name: fileId
           in: path
@@ -250,6 +252,181 @@ paths:
                 format: binary
         "404":
           description: File or collection not found
+
+  /files/{fileId}/metadata:
+    get:
+      tags:
+        - File Operations
+      summary: Get the file-level metadata of a file
+      description: |
+        Returns the metadata shared by every chunk of the file: keys present on
+        all its chunks with the same value (e.g. `filename`). Chunk-level
+        metadata (e.g. `paragraph_positions`) is not included.
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
+      responses:
+        "200":
+          description: File-level metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileMetadata"
+        "404":
+          description: File or collection not found
+
+    patch:
+      tags:
+        - File Operations
+      summary: Patch the file-level metadata of a file
+      description: |
+        Merges the body into the metadata of every chunk of the file, without
+        re-indexing (embeddings are kept as is).
+
+        - a new key is added, an existing key is updated, a key set to `null`
+          is deleted (deleting a missing key is a no-op)
+        - values must be JSON scalars (string, number, boolean) or `null`
+        - an existing key keeps its type
+        - protected keys cannot be patched nor deleted: `id`, `document_id`,
+          `text`, the embeddings, `file_path`, `processed_at`, `processor_type`
+        - a key that differs across the chunks (chunk-level) cannot be patched
+          file-wide, use `PATCH /files/{fileId}/chunks/{chunkId}/metadata`
+
+        **Warning**: the chunks are rewritten in batches, a failure midway can
+        leave the file partially patched. The patch is idempotent, send it again.
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetadataPatch"
+            example:
+              filename: renamed.pdf
+              author: null
+      responses:
+        "200":
+          description: File-level metadata after the patch
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileMetadata"
+        "404":
+          description: File or collection not found
+        "422":
+          description: |
+            Invalid patch (empty, protected key, wrong type, non-scalar value,
+            or chunk-level key), with the list of problems in `detail`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataPatchErrors"
+
+  /files/{fileId}/chunks/{chunkId}/metadata:
+    patch:
+      tags:
+        - File Operations
+      summary: Patch the metadata of a single chunk
+      description: |
+        Merges the body into the metadata of one chunk only, without
+        re-indexing. The other chunks of the file are left untouched.
+
+        Same rules as `PATCH /files/{fileId}/metadata` (merge, `null` deletes,
+        JSON scalars, type kept, protected keys), except that any key can be
+        patched on the chunk.
+
+        **Warning**: choosing the right key is the caller's responsibility.
+        Patching a file-level key (e.g. `filename`) on one chunk makes it differ
+        across the chunks, so it is no longer returned by
+        `GET /files/{fileId}/metadata`.
+      parameters:
+        - name: fileId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: chunkId
+          in: path
+          required: true
+          description: Identifier of the chunk within the file (as returned by `/retrieve`)
+          schema:
+            type: string
+        - name: collectionName
+          in: query
+          required: false
+          description: |
+            Collection the file is indexed in. Defaults to the configured
+            `collection_name`.
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MetadataPatch"
+            example:
+              reviewed: true
+      responses:
+        "200":
+          description: Every metadata of the chunk after the patch, chunk-level keys included
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fileId:
+                    type: string
+                  chunkId:
+                    type: string
+                  collectionName:
+                    type: string
+                  metadata:
+                    type: object
+                    additionalProperties: true
+              example:
+                fileId: doc123
+                chunkId: "3"
+                collectionName: my_docs
+                metadata:
+                  filename: report.pdf
+                  file_path: ./uploads/doc123
+                  paragraph_positions: [[120, 340]]
+                  reviewed: true
+        "404":
+          description: Chunk or collection not found
+        "422":
+          description: |
+            Invalid patch (empty, protected key, wrong type or non-scalar
+            value), with the list of problems in `detail`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetadataPatchErrors"
 
   /retrieve:
     post:
@@ -406,6 +583,53 @@ paths:
 
 components:
   schemas:
+    MetadataPatch:
+      type: object
+      description: |
+        Merge patch: a key is added or updated with the given value, a key set
+        to `null` is deleted, keys not in the body are left untouched.
+      minProperties: 1
+      additionalProperties:
+        type:
+          - string
+          - number
+          - boolean
+          - "null"
+    FileMetadata:
+      type: object
+      properties:
+        fileId:
+          type: string
+        collectionName:
+          type: string
+        chunks:
+          type: integer
+          description: Number of chunks of the file
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Metadata shared by every chunk of the file
+      example:
+        fileId: doc123
+        collectionName: my_docs
+        chunks: 12
+        metadata:
+          filename: report.pdf
+          file_path: ./uploads/doc123
+    MetadataPatchErrors:
+      type: object
+      properties:
+        detail:
+          description: One message per invalid key, or a single message for an empty patch
+          oneOf:
+            - type: array
+              items:
+                type: string
+            - type: string
+      example:
+        detail:
+          - "'file_path' is protected and cannot be patched"
+          - "'filename' must stay a string, got number"
     ChunkPosition:
       type: object
       properties:

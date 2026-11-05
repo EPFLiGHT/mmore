@@ -193,7 +193,12 @@ Returns the file with binary content, named after the file's `filename` metadata
 
 ### 🏷️ Metadata endpoints
 
-Metadata is stored on every chunk of a file. These endpoints only deal with **file-level** metadata: keys present on all chunks of the file with the same value (e.g. `filename`). Chunk-level metadata such as `paragraph_positions` is not returned and cannot be patched.
+Metadata is stored on every chunk of a file, there are two kinds of keys:
+
+- **file-level** metadata: keys present on all chunks of the file with the same value (e.g. `filename`). `GET` and `PATCH /v1/files/{fileId}/metadata` only deal with these, a file patch is applied to every chunk.
+- **chunk-level** metadata: keys whose value differs from one chunk to another (e.g. `paragraph_positions`). They are not returned by the file `GET` and cannot be patched file-wide, use `PATCH /v1/files/{fileId}/chunks/{chunkId}/metadata` to patch a single chunk.
+
+Both patches are a merge: a new key is added, an existing key is updated and a key set to `null` is deleted.
 
 #### 🔎 `GET /v1/files/{fileId}/metadata`
 
@@ -228,7 +233,7 @@ Metadata is stored on every chunk of a file. These endpoints only deal with **fi
 | --- | --- | --- |
 | `fileId` | `str` (path) | ID of the file |
 | `collectionName` | `str` (query, optional) | Collection the file is indexed in |
-| body | JSON object | Existing keys to update, others are left untouched |
+| body | JSON object | Merged into the metadata: new keys are added, existing keys are updated, `null` deletes a key, others are left untouched |
 
 ```bash
 curl -X PATCH "http://localhost:8000/v1/files/doc123/metadata?collectionName=my_docs" \
@@ -237,7 +242,7 @@ curl -X PATCH "http://localhost:8000/v1/files/doc123/metadata?collectionName=my_
 ```
 
 - the patch is applied to every chunk of the file, embeddings are kept as is
-- only existing keys can be updated: keys are never added nor deleted (`null` is rejected)
+- the patch is a merge: a new key is added to every chunk, an existing key is updated, a key set to `null` is deleted from every chunk (deleting a missing key is a no-op)
 - values must be JSON scalars (string, number, boolean)
 - an existing key keeps its type (a string stays a string, a number a number)
 - `id`, `document_id`, `text`, the embeddings, `file_path`, `processed_at` and `processor_type` are protected
@@ -257,7 +262,46 @@ curl -X PATCH "http://localhost:8000/v1/files/doc123/metadata?collectionName=my_
 }
 ```
 
-**Errors**: `404` file or collection not found, `422` invalid patch (empty, protected or unknown key, wrong type, non-scalar or null value, or chunk-level key), with the list of problems in `detail`.
+**Errors**: `404` file or collection not found, `422` invalid patch (empty, protected key, wrong type, non-scalar value, or chunk-level key, including setting it to `null`), with the list of problems in `detail`.
+
+#### 🧩 `PATCH /v1/files/{fileId}/chunks/{chunkId}/metadata`
+
+**Patch the metadata of a single chunk, without re-indexing**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `chunkId` | `str` (path) | ID of the chunk within the file (as returned by `/v1/retrieve`) |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+| body | JSON object | Merged into the chunk's metadata: new keys are added, existing keys are updated, `null` deletes a key, others are left untouched |
+
+```bash
+curl -X PATCH "http://localhost:8000/v1/files/doc123/chunks/3/metadata" \
+  -H "Content-Type: application/json" \
+  -d '{"reviewed": true}'
+```
+
+- only this chunk is rewritten, the other chunks of the file are left untouched, embeddings are kept as is
+- same rules as the file patch: protected keys (they cannot be deleted either), JSON scalars or `null` to delete, an existing key keeps its type
+- choosing the right key is the caller's responsibility: patching a file-level key (e.g. `filename`) on one chunk makes it differ across the chunks, so it is no longer returned by `GET /v1/files/{fileId}/metadata`
+
+**Response**: every metadata of the chunk after the patch, chunk-level keys included.
+
+```json
+{
+  "fileId": "doc123",
+  "chunkId": "3",
+  "collectionName": "my_docs",
+  "metadata": {
+    "filename": "report.pdf",
+    "file_path": "./uploads/doc123",
+    "paragraph_positions": [[120, 340]],
+    "reviewed": true
+  }
+}
+```
+
+**Errors**: `404` chunk or collection not found, `422` invalid patch (empty, protected key, wrong type or non-scalar value), with the list of problems in `detail`.
 
 ### 🛰️ Job status endpoints
 
