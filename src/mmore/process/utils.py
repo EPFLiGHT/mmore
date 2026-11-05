@@ -24,12 +24,15 @@ def jsonl_path(path: str, filename: str = "final.jsonl") -> str:
     return os.path.normpath(os.path.join(path, filename))
 
 
-def clean_text(text: str) -> str:
+def clean_text(text: str, keep_two_line_breaks: bool = False) -> str:
     """
     Clean a given text using `cleantext` library. https://pypi.org/project/clean-text/
 
     Args:
         text (str): Input text to be cleaned.
+        keep_two_line_breaks (bool): Preserve blank lines (``\n\n``) instead of
+            collapsing them to a single newline. Needed to keep Markdown block
+            structure (paragraphs, tables, headings) intact.
 
     Returns:
         str: Cleaned text.
@@ -39,6 +42,7 @@ def clean_text(text: str) -> str:
         fix_unicode=True,
         to_ascii=False,
         lower=False,
+        keep_two_line_breaks=keep_two_line_breaks,
         no_line_breaks=False,
         no_urls=False,
         no_emails=True,

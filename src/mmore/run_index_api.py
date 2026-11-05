@@ -102,7 +102,7 @@ def make_router(config_path: str) -> APIRouter:
     # Initialize the index database and the processors
     indexer = get_indexer(COLLECTION_NAME, MILVUS_URI, MILVUS_DB)
     milvus_client = indexer.client
-    register_all_processors(preload=True)
+    register_all_processors(preload=False)
 
     jobs = JobQueue(
         jobs_per_gpu=config.jobs_per_gpu,
