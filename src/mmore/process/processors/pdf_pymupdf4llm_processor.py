@@ -20,7 +20,7 @@ from typing import List, Optional, Tuple, cast
 
 import pymupdf
 import pymupdf4llm
-from PIL import Image, UnidentifiedImageError
+from PIL import Image
 
 from ...type import MultimodalSample
 from ..utils import clean_image, clean_text
@@ -53,7 +53,7 @@ class PDFPyMuPDF4LLMProcessor(pdf_processor.PDFProcessor):
                 data = link.split(",", 1)[1]
                 return Image.open(io.BytesIO(base64.b64decode(data))).convert("RGB")
 
-            except (IndexError, ValueError, UnidentifiedImageError) as e:
+            except Exception as e:
                 logging.error(f"Could not decode embedded image: {e}")
                 return None
 
