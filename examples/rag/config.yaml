@@ -7,6 +7,7 @@ rag:
       uri: ./proc_demo.db
       name: 'my_db'
     hybrid_search_weight: 0.5
+    hybrid_ranker: weighted  # or rrf: fuse dense and sparse by rank instead of score
     k: 5
     use_web: false
     reranker_model_name: BAAI/bge-reranker-base   
