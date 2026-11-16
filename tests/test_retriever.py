@@ -90,6 +90,43 @@ def test_retrieve_sparse_only(retriever):
     assert 1 <= len(results) <= 2
 
 
+def _query_vectors(retriever, query):
+    """A dense query vector equal to a stored chunk's own vector, so the
+    dense-only top 1 is known, and that chunk is not the sparse-only top 1."""
+    sparse = [retriever.sparse_model.embed_query(query)]
+    sparse_top = retriever.client.search(
+        collection_name=_COLLECTION,
+        data=sparse,
+        anns_field="sparse_embedding",
+        search_params={"metric_type": "IP"},
+        limit=1,
+    )[0][0]["id"]
+    rows = retriever.client.query(
+        collection_name=_COLLECTION,
+        filter=f'id != "{sparse_top}"',
+        output_fields=["dense_embedding"],
+        limit=1,
+    )
+    return rows[0]["id"], sparse_top, [rows[0]["dense_embedding"]], sparse
+
+
+@pytest.mark.parametrize("search_type", ["dense", "sparse"])
+def test_single_search_type_ranks_by_its_own_model(retriever, search_type):
+    dense_top, sparse_top, dense, sparse = _query_vectors(
+        retriever, "capital of France"
+    )
+    with patch.object(
+        Retriever, "compute_query_embeddings", return_value=(dense, sparse)
+    ):
+        results = retriever.retrieve(
+            "capital of France",
+            collection_name=_COLLECTION,
+            k=1,
+            search_type=search_type,
+        )
+    assert results[0]["id"] == (dense_top if search_type == "dense" else sparse_top)
+
+
 def test_retrieve_k_zero_returns_empty(retriever):
     results = retriever.retrieve("anything", collection_name=_COLLECTION, k=0)
     assert results == []

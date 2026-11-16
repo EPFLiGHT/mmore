@@ -60,8 +60,6 @@ class Retriever(BaseRetriever):
 
     _search_types = Literal["dense", "sparse", "hybrid"]
 
-    _search_weights = {"dense": 0, "sparse": 1}
-
     _retrieve_seconds: float = 0.0
     _rerank_seconds: float = 0.0
 
@@ -207,7 +205,6 @@ class Retriever(BaseRetriever):
         assert search_type in get_args(self._search_types), (
             f"Invalid search_type: {search_type}. Must be 'dense', 'sparse', or 'hybrid'"
         )
-        search_weight = self._search_weights.get(search_type, self.hybrid_search_weight)
 
         # Combute both dense and sparse embeddings for the query
         dense_embedding, sparse_embedding = self.compute_query_embeddings(query)
@@ -256,22 +253,37 @@ class Retriever(BaseRetriever):
         if expr is not None:
             search_param_2["expr"] = expr
 
-        # Create AnnSearchRequest objects from the parameter dictionaries
-        request_1 = AnnSearchRequest(**search_param_1)
-        request_2 = AnnSearchRequest(**search_param_2)
+        if search_type in ("dense", "sparse"):
+            # A single search on the one field. Fusing with the other field at
+            # weight 0 would still rank its hits, and the weight is the dense one.
+            single = search_param_1 if search_type == "dense" else search_param_2
+            res = self.client.search(
+                collection_name=collection_name,
+                data=single["data"],
+                anns_field=single["anns_field"],
+                search_params=single["param"],
+                filter=expr or "",
+                limit=k,
+                output_fields=output_fields,
+                partition_names=partition_names,
+            )
+        else:
+            # Create AnnSearchRequest objects from the parameter dictionaries
+            request_1 = AnnSearchRequest(**search_param_1)
+            request_2 = AnnSearchRequest(**search_param_2)
 
-        # Call the Milvus hybrid_search to perform both searches and then rerank results.
-        # The WeightedRanker combined the scores from the dense and sparse searches
-        res = self.client.hybrid_search(
-            reqs=[request_1, request_2],  # List of AnnSearchRequests
-            ranker=WeightedRanker(
-                search_weight, 1 - search_weight
-            ),  # Reranking strategy
-            limit=k,
-            output_fields=output_fields,
-            collection_name=collection_name,
-            partition_names=partition_names,
-        )
+            # Call the Milvus hybrid_search to perform both searches and then rerank results.
+            # The WeightedRanker combined the scores from the dense and sparse searches
+            res = self.client.hybrid_search(
+                reqs=[request_1, request_2],  # List of AnnSearchRequests
+                ranker=WeightedRanker(
+                    self.hybrid_search_weight, 1 - self.hybrid_search_weight
+                ),  # Reranking strategy
+                limit=k,
+                output_fields=output_fields,
+                collection_name=collection_name,
+                partition_names=partition_names,
+            )
 
         # Apply the threshold of min_score
         return list(
