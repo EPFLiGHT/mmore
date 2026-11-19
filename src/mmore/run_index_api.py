@@ -34,6 +34,7 @@ logging.basicConfig(
 
 from mmore.profiler import enable_profiling_from_env
 
+from .index.indexer import get_model_from_index
 from .job_queue import DuplicateJobError, Job, JobQueue, QueueFullError
 from .process.processors import register_all_processors
 from .rag.retriever import RetrieverConfig
@@ -511,6 +512,123 @@ def make_router(config_path: str) -> APIRouter:
         except Exception as e:
             logger.error(f"Error deleting file: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.post(
+        "/v1/files/{fileId}/move",
+        tags=["File Operations"],
+        summary="Move an indexed file to another collection",
+        responses={
+            200: {
+                "description": "File moved",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "fileId": "doc123",
+                            "collectionName": "my_docs",
+                            "targetCollectionName": "archive",
+                            "chunks": 12,
+                        }
+                    }
+                },
+            },
+            400: {"description": "Source and target collections are the same"},
+            404: {"description": "File or collection not found"},
+            409: {
+                "description": "File already in the target collection or "
+                "already being processed"
+            },
+            422: {"description": "Collections use different embedding models"},
+            500: {"description": "Internal error while moving the file"},
+        },
+    )
+    def move_file(
+        fileId: str = Path(..., description="ID of the file to move"),
+        targetCollectionName: str = Form(
+            ..., description="Collection to move the file into"
+        ),
+        collectionName: Optional[str] = Form(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
+        """
+        Move the chunks of a file to another collection without re-processing.
+
+        The stored vectors are copied as-is, so both collections must use the
+        same embedding models. Chunks are inserted into the target before being
+        deleted from the source: an interruption can leave the file in both
+        collections, never in neither. The move is not atomic.
+        """
+        source = _existing_collection(collectionName)
+        target = _existing_collection(targetCollectionName)
+        if source == target:
+            raise HTTPException(
+                status_code=400,
+                detail="Source and target collections must be different",
+            )
+
+        try:
+            with jobs.reserve(fileId):
+                _existing_indexed_file(fileId, source)
+                file_filter = f"document_id == {json.dumps(fileId)}"
+                if milvus_client.query(
+                    collection_name=target,
+                    filter=file_filter,
+                    output_fields=["document_id"],
+                    limit=1,
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"File with ID {fileId} already exists in "
+                        f"collection {target}",
+                    )
+                for index_name in ("dense_embedding", "sparse_embedding"):
+                    if get_model_from_index(
+                        milvus_client, index_name, source
+                    ) != get_model_from_index(milvus_client, index_name, target):
+                        raise HTTPException(
+                            status_code=422,
+                            detail=f"Collections {source} and {target} use "
+                            f"different {index_name} models",
+                        )
+
+                # Stream the rows (vectors and dynamic metadata included)
+                chunks = 0
+                iterator = milvus_client.query_iterator(
+                    collection_name=source,
+                    filter=file_filter,
+                    output_fields=["*"],
+                    batch_size=256,
+                )
+                try:
+                    while batch := iterator.next():
+                        milvus_client.insert(collection_name=target, data=batch)
+                        chunks += len(batch)
+                finally:
+                    iterator.close()
+                milvus_client.flush(target)
+
+                milvus_client.delete(collection_name=source, filter=file_filter)
+                milvus_client.flush(source)
+        except DuplicateJobError:
+            raise HTTPException(
+                status_code=409,
+                detail=f"File with ID {fileId} is already being processed",
+            )
+        except HTTPException:
+            raise
+        except Exception as e:
+            logger.error(f"Error moving file: {str(e)}", exc_info=True)
+            raise HTTPException(status_code=500, detail=str(e))
+
+        logger.info(f"Moved {chunks} chunk(s) of {fileId} from {source} to {target}")
+        return {
+            "fileId": fileId,
+            "collectionName": source,
+            "targetCollectionName": target,
+            "chunks": chunks,
+        }
 
     @router.get(
         "/v1/files/{fileId}",

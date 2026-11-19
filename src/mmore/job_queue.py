@@ -11,9 +11,10 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Callable, Optional
+from typing import Callable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +121,29 @@ class JobQueue:
         )
         self._executor.submit(self._run, job_id, work_fn)
         return job_id
+
+    @contextmanager
+    def reserve(self, file_id: str) -> Iterator[None]:
+        """Hold file_id for synchronous work outside the queue (e.g. a move).
+
+        Example (moving a file to another collection)::
+
+            with jobs.reserve(file_id):
+                # file_id is held: a concurrent upload or delete of the same
+                # file gets DuplicateJobError instead of racing the move.
+                copy_chunks(source, target)
+                delete_chunks(source)
+            # Released here, even if copy_chunks or delete_chunks raised.
+        """
+        with self._lock:
+            if file_id in self._reserved:
+                raise DuplicateJobError(file_id)
+            self._reserved.add(file_id)
+        try:
+            yield
+        finally:
+            with self._lock:
+                self._reserved.discard(file_id)
 
     def get(self, job_id: str) -> Optional[Job]:
         return self._jobs.get(job_id)

@@ -5,6 +5,7 @@ Integration tests for the live retrieval API using a Milvus DB:
 """
 
 import json
+import threading
 import time
 from contextlib import ExitStack
 from pathlib import Path
@@ -1261,3 +1262,145 @@ def test_update_file_in_wrong_collection_returns_404(indexer_client):
     assert Path(upload_dir, "other-guarded-doc").read_bytes() == (
         b"Other collection content."
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /v1/files/{fileId}/move
+# ---------------------------------------------------------------------------
+
+
+def _rows(milvus_indexer, collection: str, file_id: str) -> list[dict]:
+    return milvus_indexer.client.query(
+        collection_name=collection,
+        filter=f'document_id == "{file_id}"',
+        output_fields=["text"],
+    )
+
+
+def test_move_file_to_other_collection(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    file_id = "move-doc"
+    milvus_indexer.index_documents(
+        [_fake_doc(str(Path(upload_dir) / file_id), document_id=file_id)],
+        collection_name=_COLLECTION,
+    )
+
+    response = tc.post(
+        f"/v1/files/{file_id}/move",
+        data={"targetCollectionName": _OTHER_COLLECTION},
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "fileId": file_id,
+        "collectionName": _COLLECTION,
+        "targetCollectionName": _OTHER_COLLECTION,
+        "chunks": 1,
+    }
+    # The chunks left the source and landed in the target unchanged
+    assert not _rows(milvus_indexer, _COLLECTION, file_id)
+    assert [
+        row["text"] for row in _rows(milvus_indexer, _OTHER_COLLECTION, file_id)
+    ] == ["Test document content."]
+
+
+def test_move_file_to_same_collection_returns_400(indexer_client):
+    tc, _, pre_id = indexer_client
+    response = tc.post(
+        f"/v1/files/{pre_id}/move",
+        data={"targetCollectionName": _COLLECTION, "collectionName": _COLLECTION},
+    )
+    assert response.status_code == 400
+
+
+def test_move_file_to_missing_collection_returns_404(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    file_id = "move-missing-target-doc"
+    milvus_indexer.index_documents(
+        [_fake_doc(str(Path(upload_dir) / file_id), document_id=file_id)],
+        collection_name=_COLLECTION,
+    )
+
+    response = tc.post(
+        f"/v1/files/{file_id}/move", data={"targetCollectionName": "missing"}
+    )
+
+    assert response.status_code == 404
+    # The file stays in the source collection
+    assert _rows(milvus_indexer, _COLLECTION, file_id)
+
+
+def test_move_missing_file_returns_404(indexer_client):
+    tc, *_ = indexer_client
+    response = tc.post(
+        "/v1/files/never-indexed-doc/move",
+        data={"targetCollectionName": _OTHER_COLLECTION},
+    )
+    assert response.status_code == 404
+
+
+def test_move_file_while_job_in_flight_returns_409(indexer_client):
+    tc, upload_dir, _ = indexer_client
+    file_id = "move-busy-doc"
+    release = threading.Event()
+
+    def blocked_processing(*args, **kwargs):
+        release.wait(timeout=10)
+        return [_fake_doc(str(Path(upload_dir) / file_id), document_id=file_id)]
+
+    with patch("mmore.run_index_api._process_files", side_effect=blocked_processing):
+        upload = tc.post(
+            "/v1/files",
+            data={"fileId": file_id},
+            files={"file": ("busy.txt", b"busy", "text/plain")},
+        )
+        assert upload.status_code == 202
+
+        # The upload holds the file id until its job finishes
+        response = tc.post(
+            f"/v1/files/{file_id}/move",
+            data={"targetCollectionName": _OTHER_COLLECTION},
+        )
+
+        release.set()
+        assert _wait_job(tc, upload.json()["jobId"])["status"] == "done"
+
+    assert response.status_code == 409
+    assert "already being processed" in response.json()["detail"]
+
+
+def test_move_file_between_different_models_returns_422(indexer_client, milvus_indexer):
+    tc, upload_dir, _ = indexer_client
+    file_id = "move-hetero-doc"
+    hetero_collection = "move_hetero_col"
+    with (
+        patch(
+            "mmore.index.indexer.DenseModel.from_config",
+            return_value=DeterministicFakeEmbedding(size=_HETERO_DIM),
+        ),
+        patch(
+            "mmore.index.indexer.SparseModel.from_config",
+            return_value=FakeSparseEmbedding(),
+        ),
+    ):
+        Indexer(
+            dense_model_config=_HETERO_DENSE,
+            sparse_model_config=_HETERO_SPARSE,
+            client=milvus_indexer.client,
+        ).index_documents(
+            [_fake_doc(str(Path(upload_dir) / "hetero"), document_id="hetero")],
+            collection_name=hetero_collection,
+        )
+    milvus_indexer.index_documents(
+        [_fake_doc(str(Path(upload_dir) / file_id), document_id=file_id)],
+        collection_name=_COLLECTION,
+    )
+
+    response = tc.post(
+        f"/v1/files/{file_id}/move",
+        data={"targetCollectionName": hetero_collection},
+    )
+
+    assert response.status_code == 422
+    assert _rows(milvus_indexer, _COLLECTION, file_id)
+    assert not _rows(milvus_indexer, hetero_collection, file_id)

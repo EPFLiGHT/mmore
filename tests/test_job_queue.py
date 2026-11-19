@@ -92,3 +92,47 @@ def test_single_device_serializes():
 
     assert max(max_seen) == 1
     manager.shutdown()
+
+
+def test_reserve_blocks_submit_and_releases():
+    manager = JobQueue(devices=["cpu"])
+    with manager.reserve("f1"):
+        with pytest.raises(DuplicateJobError):
+            manager.submit("f1", "a.pdf", lambda device: {})
+        with pytest.raises(DuplicateJobError):
+            with manager.reserve("f1"):
+                pass
+
+    job_id = manager.submit("f1", "a.pdf", lambda device: {})
+    _wait_for(manager, job_id, "done")
+    manager.shutdown()
+
+
+def test_reserve_rejected_while_job_in_flight():
+    manager = JobQueue(devices=["cpu"])
+    release = threading.Event()
+
+    def block(device):
+        release.wait()
+        return {}
+
+    job_id = manager.submit("f1", "a.pdf", block)
+    _wait_for(manager, job_id, "processing")
+    with pytest.raises(DuplicateJobError):
+        with manager.reserve("f1"):
+            pass
+
+    release.set()
+    _wait_for(manager, job_id, "done")
+    manager.shutdown()
+
+
+def test_reserve_released_on_exception():
+    manager = JobQueue(devices=["cpu"])
+    with pytest.raises(RuntimeError):
+        with manager.reserve("f1"):
+            raise RuntimeError("boom")
+
+    with manager.reserve("f1"):
+        pass
+    manager.shutdown()
