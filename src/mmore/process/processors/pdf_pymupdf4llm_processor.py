@@ -90,6 +90,12 @@ class PDFPyMuPDF4LLMProcessor(pdf_processor.PDFProcessor):
             if not text.strip():
                 continue
 
+            # Blank line between pages, so a page's last block does not run into
+            # the next page's first one
+            if all_text_parts:
+                all_text_parts.append("\n\n")
+                current_position += 2
+
             para_idx = 0
             offset_in_page = 0
             for segment in text.split("\n\n"):
