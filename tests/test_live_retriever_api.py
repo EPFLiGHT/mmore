@@ -1338,6 +1338,7 @@ def test_move_missing_file_returns_404(indexer_client):
     )
     assert response.status_code == 404
 
+
 def test_move_file_while_job_in_flight_returns_409(indexer_client):
     tc, upload_dir, _ = indexer_client
     file_id = "move-busy-doc"
