@@ -151,6 +151,35 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 **Errors**: `404` file or collection not found, `409` file already being processed, `422` file without a name, `503` job queue full.
 
 
+### 🚚 Move endpoint
+
+#### ➡️ `POST /v1/files/{fileId}/move`
+
+**Move an indexed file to another collection**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file to move |
+| `targetCollectionName` | `str` (form) | Collection to move the file into |
+| `collectionName` | `str` (form, optional) | Collection the file is indexed in |
+- synchronous, copies the stored chunks and vectors as-is (no re-processing), so both collections must use the same embedding models
+- chunks are inserted into the target before being deleted from the source: the move is **not atomic**, an interruption can leave the file in both collections, never in neither
+- the stored file (`uploads/{fileId}`) is not touched, file IDs are unique across all collections
+
+**Response**:
+
+```json
+{
+  "fileId": "doc123",
+  "collectionName": "my_docs",
+  "targetCollectionName": "archive",
+  "chunks": 12
+}
+```
+
+**Errors**: `400` source and target are the same collection, `404` file or collection not found, `409` file already in the target collection or already being processed, `422` collections use different embedding models, `500` internal error while moving the file.
+
+
 ### 🗑️ Delete endpoint
 
 #### ❌ `DELETE /v1/files/{fileId}`
