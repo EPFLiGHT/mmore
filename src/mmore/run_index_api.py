@@ -7,13 +7,15 @@ import os
 import shutil
 import tempfile
 from concurrent.futures import ProcessPoolExecutor
+from itertools import chain
 from pathlib import Path as FilePath
-from typing import Callable, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import torch
 import uvicorn
 from fastapi import (
     APIRouter,
+    Body,
     FastAPI,
     File,
     Form,
@@ -52,6 +54,19 @@ logger = logging.getLogger(__name__)
 POLL_INTERVAL = 2.0
 HEARTBEAT_SECONDS = 15
 
+# Rows per Milvus iterator page when reading every chunk of a file (vectors included)
+FILE_ROWS_BATCH_SIZE = 1000
+
+# Columns of the collection schema, not metadata (see Indexer._create_collection_with_schema)
+SCHEMA_FIELDS = frozenset(
+    {"id", "document_id", "text", "dense_embedding", "sparse_embedding"}
+)
+
+# Metadata managed by the API or the processing pipeline, never patchable
+PROTECTED_METADATA = SCHEMA_FIELDS | {"file_path", "processed_at", "processor_type"}
+
+PATCHABLE_TYPES = (str, int, float, bool)
+
 
 def _process_files(pool, input_dir, collection_name, extensions, device, output_path):
     """Run processing in the device's subprocess."""
@@ -88,6 +103,73 @@ def _apply_uploaded_file_metadata(
 
         doc.metadata.extra["filename"] = filename
         doc.metadata.file_path = str(FilePath(UPLOAD_DIR) / file_id)
+
+
+def _file_level_metadata(rows: List[dict]) -> dict:
+    """Return the metadata shared by every chunk of a file.
+
+    A key is file-level only if it is present on all rows with the same value,
+    chunk-level keys (e.g. paragraph_positions) are left out.
+    """
+    if not rows:
+        return {}
+
+    # Candidates: every metadata of the first chunk
+    shared = {k: v for k, v in rows[0].items() if k not in SCHEMA_FIELDS}
+
+    # Drop the keys missing or with another value on any other chunk
+    for row in rows[1:]:
+        shared = {k: v for k, v in shared.items() if k in row and row[k] == v}
+    return shared
+
+
+def _json_type(value: Any) -> str:
+    """JSON type name of a scalar, bool checked before int since bool subclasses int."""
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    return type(value).__name__
+
+
+def _validate_metadata_patch(patch: Dict[str, Any], rows: List[dict]) -> List[str]:
+    """Check a merge patch against the file's chunks, return the list of errors.
+
+    The patch is a merge: a new key is added, an existing key is updated,
+    a key set to null is deleted (a missing one is a no-op).
+    - protected keys cannot be patched, nor deleted
+    - an existing key must be file-level (same value on all chunks)
+    - an existing key keeps its JSON type
+    """
+    shared = _file_level_metadata(rows)
+    existing = {k for row in rows for k in row} - SCHEMA_FIELDS
+    errors = []
+    for key, value in patch.items():
+        if key in PROTECTED_METADATA:
+            errors.append(f"'{key}' is protected and cannot be patched")
+        elif value is not None and not isinstance(value, PATCHABLE_TYPES):
+            errors.append(
+                f"'{key}' must be a string, number, boolean or null, "
+                f"got {_json_type(value)}"
+            )
+        elif key in existing and key not in shared:
+            errors.append(
+                f"'{key}' differs across the chunks of the file, "
+                "only file-level metadata can be patched"
+            )
+        elif (
+            value is not None
+            and key in shared
+            and shared[key] is not None
+            and _json_type(value) != _json_type(shared[key])
+        ):
+            errors.append(
+                f"'{key}' must stay a {_json_type(shared[key])}, "
+                f"got {_json_type(value)}"
+            )
+    return errors
 
 
 def make_router(config_path: str) -> APIRouter:
@@ -150,6 +232,25 @@ def make_router(config_path: str) -> APIRouter:
                 detail=f"File with ID {file_id} not found in collection {collection_name}",
             )
         return rows[0]
+
+    def _existing_file_rows(file_id: str, collection_name: str) -> List[dict]:
+        """Return every chunk of a corresponding file, raise HTTPException 404 if it has none."""
+        iterator = milvus_client.query_iterator(
+            collection_name=collection_name,
+            filter=f"document_id == {json.dumps(file_id)}",
+            output_fields=["*"],
+            batch_size=FILE_ROWS_BATCH_SIZE,
+        )
+        try:
+            rows = list(chain.from_iterable(iter(iterator.next, [])))
+        finally:
+            iterator.close()
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"File with ID {file_id} not found in collection {collection_name}",
+            )
+        return rows
 
     def _stage_upload(file: UploadFile, filename: str) -> tuple[str, str]:
         """Save the uploaded bytes now, while the request is alive.
@@ -547,11 +648,12 @@ def make_router(config_path: str) -> APIRouter:
                     status_code=404, detail=f"File with ID {fileId} not found"
                 )
 
-            # Retrieve the filename from metadata
-            # all the elements with the same id refer to the same file so they have the same path
-            row = _existing_indexed_file(fileId, collection_name, ["file_path"])
-            file_path: str = row["file_path"]
-            filename = file_path.split("/")[-1]
+            # Retrieve the filename from metadata, it is file-level so any chunk has it.
+            # Fall back to the stored path for files indexed before it was persisted
+            row = _existing_indexed_file(
+                fileId, collection_name, ["file_path", "filename"]
+            )
+            filename = row.get("filename") or row["file_path"].split("/")[-1]
 
             # Return the file
             return FileResponse(
@@ -566,6 +668,227 @@ def make_router(config_path: str) -> APIRouter:
         except Exception as e:
             logger.error(f"Error downloading file: {str(e)}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
+
+    @router.get(
+        "/v1/files/{fileId}/metadata",
+        tags=["File Operations"],
+        summary="Get the file-level metadata of a file",
+        responses={
+            200: {
+                "description": "File-level metadata (shared by every chunk)",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "fileId": "doc123",
+                            "collectionName": "my_docs",
+                            "chunks": 12,
+                            "metadata": {
+                                "filename": "report.pdf",
+                                "file_path": "./uploads/doc123",
+                            },
+                        }
+                    }
+                },
+            },
+            404: {"description": "File or collection not found"},
+        },
+    )
+    def get_file_metadata(
+        fileId: str = Path(..., description="ID of the file"),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
+        """
+        Return the metadata shared by every chunk of the file.
+
+        """
+        collection_name = _existing_collection(collectionName)
+        rows = _existing_file_rows(fileId, collection_name)
+        return {
+            "fileId": fileId,
+            "collectionName": collection_name,
+            "chunks": len(rows),
+            "metadata": _file_level_metadata(rows),
+        }
+
+    @router.patch(
+        "/v1/files/{fileId}/metadata",
+        tags=["File Operations"],
+        summary="Patch the file-level metadata of a file",
+        responses={
+            200: {
+                "description": "Metadata after the patch",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "fileId": "doc123",
+                            "collectionName": "my_docs",
+                            "chunks": 12,
+                            "metadata": {
+                                "filename": "renamed.pdf",
+                                "file_path": "./uploads/doc123",
+                            },
+                        }
+                    }
+                },
+            },
+            404: {"description": "File or collection not found"},
+            422: {
+                "description": "Invalid patch (protected key, wrong "
+                "type, non-scalar value, or chunk-level key)"
+            },
+        },
+    )
+    def patch_file_metadata(
+        fileId: str = Path(..., description="ID of the file"),
+        patch: Dict[str, Any] = Body(
+            ...,
+            description="Merged into the file's metadata: new keys are added, "
+            "existing keys are updated, null deletes a key, the others are left "
+            "untouched",
+            examples=[{"filename": "renamed.pdf"}],
+        ),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
+        """
+        Patch the file-level metadata on every chunk of the file, without re-indexing.
+
+        """
+        collection_name = _existing_collection(collectionName)
+        if not patch:
+            raise HTTPException(status_code=422, detail="Empty patch")
+
+        rows = _existing_file_rows(fileId, collection_name)
+        errors = _validate_metadata_patch(patch, rows)
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
+
+        # Merge on every chunk: null deletes the key, the others are left untouched.
+        # Json body with null value is considered as python None type
+        # (https://docs.python.org/3/library/json.html#json-to-py-table)
+        for row in rows:
+            for key, value in patch.items():
+                if value is None:
+                    row.pop(key, None)
+                else:
+                    row[key] = value
+
+        # Full-row upsert: current Milvus Lite version does not support partial updates
+        for i in range(0, len(rows), FILE_ROWS_BATCH_SIZE):
+            milvus_client.upsert(
+                collection_name=collection_name,
+                data=rows[i : i + FILE_ROWS_BATCH_SIZE],
+            )
+        milvus_client.flush(collection_name)
+
+        logger.info(f"Patched metadata of {fileId} ({len(rows)} chunks): {patch}")
+        return {
+            "fileId": fileId,
+            "collectionName": collection_name,
+            "chunks": len(rows),
+            "metadata": _file_level_metadata(rows),
+        }
+
+    @router.patch(
+        "/v1/files/{fileId}/chunks/{chunkId}/metadata",
+        tags=["File Operations"],
+        summary="Patch the metadata of a single chunk",
+        responses={
+            200: {
+                "description": "Chunk metadata after the patch",
+                "content": {
+                    "application/json": {
+                        "example": {
+                            "fileId": "doc123",
+                            "chunkId": "3",
+                            "collectionName": "my_docs",
+                            "metadata": {
+                                "filename": "report.pdf",
+                                "file_path": "./uploads/doc123",
+                                "paragraph_positions": [[120, 340]],
+                                "reviewed": True,
+                            },
+                        }
+                    }
+                },
+            },
+            404: {"description": "Chunk or collection not found"},
+            422: {
+                "description": "Invalid patch (protected key, wrong "
+                "type or non-scalar value)"
+            },
+        },
+    )
+    def patch_chunk_metadata(
+        fileId: str = Path(..., description="ID of the file"),
+        chunkId: str = Path(..., description="ID of the chunk within the file"),
+        patch: Dict[str, Any] = Body(
+            ...,
+            description="Merged into the chunk's metadata: new keys are added, "
+            "existing keys are updated, null deletes a key, the others are left "
+            "untouched",
+            examples=[{"reviewed": True}],
+        ),
+        collectionName: Optional[str] = Query(
+            None,
+            description="Collection the file is indexed in (defaults to the "
+            "configured collection)",
+        ),
+    ):
+        """
+        Patch the metadata of one chunk only, without re-indexing.
+
+        The other chunks of the file are left untouched: patching a file-level key
+        here makes it differ across the chunks, choosing the right key is the caller's
+        responsibility.
+        """
+        collection_name = _existing_collection(collectionName)
+        if not patch:
+            raise HTTPException(status_code=422, detail="Empty patch")
+
+        rows = milvus_client.query(
+            collection_name=collection_name,
+            filter=f"id == {json.dumps(f'{fileId}+{chunkId}')}",
+            output_fields=["*"],
+            limit=1,
+        )
+        if not rows:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Chunk {chunkId} of file {fileId} not found "
+                f"in collection {collection_name}",
+            )
+        row = rows[0]
+        # A single chunk: only the protected keys, value and type checks apply
+        errors = _validate_metadata_patch(patch, [row])
+        if errors:
+            raise HTTPException(status_code=422, detail=errors)
+
+        # Merge on this chunk only: null deletes the key.
+        # A JSON null in the body arrives as None: FastAPI parses it with json.loads
+        # (https://docs.python.org/3/library/json.html#json-to-py-table)
+        for key, value in patch.items():
+            if value is None:
+                row.pop(key, None)
+            else:
+                row[key] = value
+        milvus_client.upsert(collection_name=collection_name, data=[row])
+        milvus_client.flush(collection_name)
+
+        logger.info(f"Patched metadata of chunk {fileId}+{chunkId}: {patch}")
+        return {
+            "fileId": fileId,
+            "chunkId": chunkId,
+            "collectionName": collection_name,
+            "metadata": {k: v for k, v in row.items() if k not in SCHEMA_FIELDS},
+        }
 
     @router.get(
         "/v1/jobs/{jobId}",

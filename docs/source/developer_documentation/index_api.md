@@ -12,7 +12,7 @@ The **Indexer API** allows users to **upload, update, download, delete, and inde
 
 Uploads are **asynchronous**: the upload endpoints validate the request, queue a background job, and return `202 Accepted` with a `jobId` immediately. Processing and indexing then run in the background, one job per GPU. Clients track progress with the job status endpoints (snapshot or SSE stream).
 
-Every file operation endpoint takes an optional `collectionName` to run the operation on a collection other than the configured `collection_name`. If the passed collection does not exist, uploads create it, while update, delete and download return `404`.
+Every file operation endpoint takes an optional `collectionName` to run the operation on a collection other than the configured `collection_name`. If the passed collection does not exist, uploads create it, while update, delete, download and metadata operations return `404`.
 
 ## ⚙️ Backend server setup
 
@@ -187,9 +187,121 @@ local use. Keep `jobs_per_gpu: 1` with Lite.
 | `fileId` | `str` (path) | ID of the file to download |
 | `collectionName` | `str` (query, optional) | Collection the file is indexed in |
 
-Returns the file with binary content.
+Returns the file with binary content, named after the file's `filename` metadata.
 
 **Errors**: `404` file or collection not found, `500` internal error while retrieving the file.
+
+### 🏷️ Metadata endpoints
+
+Metadata is stored on every chunk of a file, there are two kinds of keys:
+
+- **file-level** metadata: keys present on all chunks of the file with the same value (e.g. `filename`). `GET` and `PATCH /v1/files/{fileId}/metadata` only deal with these, a file patch is applied to every chunk.
+- **chunk-level** metadata: keys whose value differs from one chunk to another (e.g. `paragraph_positions`). They are not returned by the file `GET` and cannot be patched file-wide, use `PATCH /v1/files/{fileId}/chunks/{chunkId}/metadata` to patch a single chunk.
+
+Both patches are a merge: a new key is added, an existing key is updated and a key set to `null` is deleted.
+
+#### 🔎 `GET /v1/files/{fileId}/metadata`
+
+**Get the file-level metadata of a file**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+
+**Response**: the file-level metadata, `chunks` is the number of chunks of the file.
+
+```json
+{
+  "fileId": "doc123",
+  "collectionName": "my_docs",
+  "chunks": 12,
+  "metadata": {
+    "filename": "report.pdf",
+    "file_path": "./uploads/doc123"
+  }
+}
+```
+
+**Errors**: `404` file or collection not found.
+
+#### 🩹 `PATCH /v1/files/{fileId}/metadata`
+
+**Patch the file-level metadata of a file, without re-indexing**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+| body | JSON object | Merged into the metadata: new keys are added, existing keys are updated, `null` deletes a key, others are left untouched |
+
+```bash
+curl -X PATCH "http://localhost:8000/v1/files/doc123/metadata?collectionName=my_docs" \
+  -H "Content-Type: application/json" \
+  -d '{"filename": "renamed.pdf"}'
+```
+
+- the patch is applied to every chunk of the file, embeddings are kept as is
+- the patch is a merge: a new key is added to every chunk, an existing key is updated, a key set to `null` is deleted from every chunk (deleting a missing key is a no-op)
+- values must be JSON scalars (string, number, boolean)
+- an existing key keeps its type (a string stays a string, a number a number)
+- `id`, `document_id`, `text`, the embeddings, `file_path`, `processed_at` and `processor_type` are protected
+- the chunks are rewritten in batches, a failure midway can leave the file partially patched: the patch is idempotent, send it again
+
+**Response**: same shape as `GET /v1/files/{fileId}/metadata`, after the patch (`chunks` is the number of rewritten chunks).
+
+```json
+{
+  "fileId": "doc123",
+  "collectionName": "my_docs",
+  "chunks": 12,
+  "metadata": {
+    "filename": "renamed.pdf",
+    "file_path": "./uploads/doc123"
+  }
+}
+```
+
+**Errors**: `404` file or collection not found, `422` invalid patch (empty, protected key, wrong type, non-scalar value, or chunk-level key, including setting it to `null`), with the list of problems in `detail`.
+
+#### 🧩 `PATCH /v1/files/{fileId}/chunks/{chunkId}/metadata`
+
+**Patch the metadata of a single chunk, without re-indexing**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `fileId` | `str` (path) | ID of the file |
+| `chunkId` | `str` (path) | ID of the chunk within the file (as returned by `/v1/retrieve`) |
+| `collectionName` | `str` (query, optional) | Collection the file is indexed in |
+| body | JSON object | Merged into the chunk's metadata: new keys are added, existing keys are updated, `null` deletes a key, others are left untouched |
+
+```bash
+curl -X PATCH "http://localhost:8000/v1/files/doc123/chunks/3/metadata" \
+  -H "Content-Type: application/json" \
+  -d '{"reviewed": true}'
+```
+
+- only this chunk is rewritten, the other chunks of the file are left untouched, embeddings are kept as is
+- same rules as the file patch: protected keys (they cannot be deleted either), JSON scalars or `null` to delete, an existing key keeps its type
+- choosing the right key is the caller's responsibility: patching a file-level key (e.g. `filename`) on one chunk makes it differ across the chunks, so it is no longer returned by `GET /v1/files/{fileId}/metadata`
+
+**Response**: every metadata of the chunk after the patch, chunk-level keys included.
+
+```json
+{
+  "fileId": "doc123",
+  "chunkId": "3",
+  "collectionName": "my_docs",
+  "metadata": {
+    "filename": "report.pdf",
+    "file_path": "./uploads/doc123",
+    "paragraph_positions": [[120, 340]],
+    "reviewed": true
+  }
+}
+```
+
+**Errors**: `404` chunk or collection not found, `422` invalid patch (empty, protected key, wrong type or non-scalar value), with the list of problems in `detail`.
 
 ### 🛰️ Job status endpoints
 
