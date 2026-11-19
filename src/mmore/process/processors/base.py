@@ -104,9 +104,14 @@ class AutoProcessor:
         """
 
         for processor in ProcessorRegistry.get_processors():
-            if processor.accepts(file) and (
-                preferred_processor is None or processor.__name__ == preferred_processor
-            ):
+            if not processor.accepts(file):
+                continue
+            if preferred_processor is None:
+                # Opt-in processors are not selected as default option
+                if getattr(processor, "OPT_IN", False):
+                    continue
+                return processor
+            if processor.__name__ == preferred_processor:
                 return processor
 
         logger.warning(f"No registered processor found for file {file}")
@@ -123,6 +128,9 @@ class Processor(ABC):
     """
 
     IMAGES_DIR: str = "images"
+    # Opt-in processors are only used when named in `processor_selection`, so the
+    # default for an extension does not depend on the registration order.
+    OPT_IN: bool = False
 
     def __init__(
         self,

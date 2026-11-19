@@ -100,6 +100,9 @@ class PDFProcessor(Processor):
     def process_batch(
         self, files_paths: List[str], fast_mode: bool = False, num_workers: int = 1
     ) -> List[MultimodalSample]:
+        if fast_mode:  # No GPU available - fallback to default
+            return super().process_batch(files_paths, fast_mode, num_workers)
+
         device = self.config.custom_config.get("device")
         if device is not None:
             self.converter = PDFProcessor.load_models(
@@ -114,8 +117,6 @@ class PDFProcessor(Processor):
                     handle_failure(file_path, e, self._fail_on_error)
             return results
 
-        if fast_mode:  # No GPU available - fallback to default
-            return super().process_batch(files_paths, fast_mode, num_workers)
         else:
             if not torch.cuda.is_available():
                 num_gpus = 1

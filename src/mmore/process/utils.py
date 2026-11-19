@@ -7,6 +7,7 @@ cleaning, splitting, and aggregation.
 import json
 import logging
 import os
+import re
 from typing import List
 
 import numpy as np
@@ -24,21 +25,27 @@ def jsonl_path(path: str, filename: str = "final.jsonl") -> str:
     return os.path.normpath(os.path.join(path, filename))
 
 
-def clean_text(text: str) -> str:
+def clean_text(text: str, keep_two_line_breaks: bool = False) -> str:
     """
     Clean a given text using `cleantext` library. https://pypi.org/project/clean-text/
 
     Args:
         text (str): Input text to be cleaned.
+        keep_two_line_breaks (bool): Preserve blank lines (``\n\n``) instead of
+            collapsing them to a single newline, and keep line indentation. Needed
+            to keep Markdown structure (paragraphs, tables, headings, nested lists,
+            code blocks) intact.
 
     Returns:
         str: Cleaned text.
     """
-    return clean(
+    cleaned = clean(
         text=text,
         fix_unicode=True,
         to_ascii=False,
         lower=False,
+        normalize_whitespace=not keep_two_line_breaks,
+        keep_two_line_breaks=keep_two_line_breaks,
         no_line_breaks=False,
         no_urls=False,
         no_emails=True,
@@ -56,6 +63,11 @@ def clean_text(text: str) -> str:
         replace_with_currency_symbol="$",
         lang="en",
     )
+    if keep_two_line_breaks:
+        # Only drop trailing spaces and extra blank lines to preserve indentation
+        cleaned = "\n".join(line.rstrip() for line in cleaned.splitlines())
+        cleaned = re.sub(r"\n{3,}", "\n\n", cleaned).strip("\n")
+    return cleaned
 
 
 def clean_image(

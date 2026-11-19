@@ -233,7 +233,10 @@ class Dispatcher:
 
         instantiated_processors: Dict[Type[Processor], Processor] = {}
 
-        global_pool = _LazyPool(os.cpu_count() or 1)
+        # A pool runs one batch at a time, so workers beyond the largest batch
+        # would sit idle (e.g. a single-file API job would start one per core)
+        largest_batch = max((len(files) for _, files in task_lists), default=1)
+        global_pool = _LazyPool(max(1, min(os.cpu_count() or 1, largest_batch)))
 
         try:
             for processor_type, files in task_lists:

@@ -267,7 +267,9 @@ def process_files_default(
     # dispatching the processing
     dispatcher_config = DispatcherConfig(
         output_path=output_path,
-        use_fast_processors=False,
+        # use pymupdf4llm by the api by default, should be configurable in the future
+        use_fast_processors=True,
+        processor_selection={".pdf": "PDFPyMuPDF4LLMProcessor"},
         extract_images=True,
         device=device,
         fail_on_error=True,
