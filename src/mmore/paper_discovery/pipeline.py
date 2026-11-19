@@ -10,7 +10,7 @@ from dacite import from_dict
 from ..ux import progress
 from .boolean import build_boolean_queries, load_synonyms
 from .config import CategoriesFile, PaperDiscoveryConfig
-from .pdf import download_pdf, expected_pdf_path, extract_text
+from .pdf import download_pdf, expected_pdf_path, extract_text, is_pdf_file
 from .schema import CategoryQuery, Paper
 from .sources import get_adapter
 
@@ -87,55 +87,66 @@ class PaperDiscoveryPipeline:
 
     def _enrich_with_pdf_text(self, papers: list[Paper]) -> None:
         cfg = self.config
-        cached = succeeded = paywalled = errored = skipped = 0
+        cached = succeeded = paywalled = errored = skipped = no_text = 0
         login_pages = 0
 
         with progress(total=len(papers), desc="PDFs", unit="paper") as bar:
             for paper in papers:
                 if not paper.url:
                     skipped += 1
-                else:
-                    cached_path = expected_pdf_path(paper.url, cfg.pdf_dir)
-                    if not cfg.force_redownload and cached_path.exists():
+                    bar.update()
+                    continue
+
+                pdf_path: str | None = None
+                from_cache = False
+                cached_path = expected_pdf_path(paper.url, cfg.pdf_dir)
+                if not cfg.force_redownload and cached_path.exists():
+                    if is_pdf_file(cached_path):
                         # Cache hit - skip the HTTP fetch entirely.
-                        paper.extracted_text = (
-                            extract_text(str(cached_path), mode=cfg.pdf_extractor)
-                            or None
-                        )
-                        cached += 1
-                        succeeded += 1
+                        pdf_path, from_cache = str(cached_path), True
                     else:
-                        result = download_pdf(
-                            paper.url,
-                            cfg.pdf_dir,
-                            user_agent=cfg.user_agent,
-                            proxy_prefix=cfg.pdf_proxy_prefix,
-                        )
-                        if result.path:
-                            paper.extracted_text = (
-                                extract_text(result.path, mode=cfg.pdf_extractor)
-                                or None
-                            )
-                            succeeded += 1
-                        elif result.paywalled:
-                            paywalled += 1
-                        elif result.errored:
-                            errored += 1
-                        else:
-                            if result.login_page:
-                                login_pages += 1
-                            skipped += 1
+                        logger.debug("Removing non-PDF cache file %s", cached_path)
+                        cached_path.unlink(missing_ok=True)
+
+                if pdf_path is None:
+                    result = download_pdf(
+                        paper.url,
+                        cfg.pdf_dir,
+                        user_agent=cfg.user_agent,
+                        proxy_prefix=cfg.pdf_proxy_prefix,
+                    )
+                    pdf_path = result.path
+                    if result.paywalled:
+                        paywalled += 1
+                    elif result.errored:
+                        errored += 1
+                    elif not pdf_path:
+                        if result.login_page:
+                            login_pages += 1
+                        skipped += 1
+
+                if pdf_path:
+                    paper.extracted_text = (
+                        extract_text(pdf_path, mode=cfg.pdf_extractor) or None
+                    )
+                    # Only a PDF that gave us text counts as a success.
+                    if paper.extracted_text:
+                        succeeded += 1
+                        if from_cache:
+                            cached += 1
+                    else:
+                        no_text += 1
 
                 bar.set_postfix_str(
                     f"ok={succeeded} cache={cached} paywall={paywalled} err={errored}"
                 )
                 bar.update()
 
-        total = succeeded + paywalled + errored + skipped
+        total = succeeded + paywalled + errored + skipped + no_text
         fresh = succeeded - cached
         logger.info(
             "PDF download: %d/%d succeeded (%d cached, %d fresh), "
-            "%d paywalled, %d errors, %d skipped",
+            "%d paywalled, %d errors, %d skipped, %d with no text",
             succeeded,
             total,
             cached,
@@ -143,7 +154,14 @@ class PaperDiscoveryPipeline:
             paywalled,
             errored,
             skipped,
+            no_text,
         )
+        if no_text:
+            logger.warning(
+                "%d PDFs gave no text. They may be scanned images. "
+                "Try `pdf_extractor: full`.",
+                no_text,
+            )
         if login_pages:
             logger.warning(
                 "%d downloads returned a sign-in page instead of a PDF. "

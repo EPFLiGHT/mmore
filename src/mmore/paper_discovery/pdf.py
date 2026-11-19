@@ -1,5 +1,6 @@
 """Download PDFs and pull text out of them. Never raises on remote errors."""
 
+import hashlib
 import logging
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,7 +87,9 @@ def download_pdf(
         logger.debug("download_pdf got a sign-in page for %s", url)
         return DownloadResult(status=r.status_code, login_page=True)
 
-    pdf_url = _find_pdf_link(r.text, base=url)
+    # Relative links are relative to the page we ended up on after redirects,
+    # e.g. the publisher's page a DOI link redirects to.
+    pdf_url = _find_pdf_link(r.text, base=r.url)
     if not pdf_url:
         return DownloadResult(status=r.status_code)
 
@@ -105,7 +108,9 @@ def download_pdf(
         return DownloadResult(paywalled=True, status=r2.status_code)
 
     if r2.status_code == 200 and _looks_like_pdf(r2):
-        return DownloadResult(path=_save_pdf(r2.content, pdf_url, save_dir))
+        # Saved under the paper's URL, not the link we followed, so the
+        # cache check finds it next time.
+        return DownloadResult(path=_save_pdf(r2.content, url, save_dir))
     if _looks_like_login_page(r2):
         return DownloadResult(status=r2.status_code, login_page=True)
     return DownloadResult(status=r2.status_code)
@@ -126,11 +131,24 @@ def _proxify(url: str, prefix: str | None) -> str:
     return f"{prefix.rstrip('/')}/login?url={quote(url, safe='')}"
 
 
+# A PDF starts with this signature, sometimes after a few junk bytes.
+# The URL and Content-Type can't be trusted: a login page served from a
+# `.pdf` URL would otherwise be saved as a PDF.
+PDF_SIGNATURE = b"%PDF-"
+SIGNATURE_WINDOW = 1024
+
+
 def _looks_like_pdf(response: requests.Response) -> bool:
-    ctype = response.headers.get("Content-Type", "").lower()
-    if "pdf" in ctype or response.url.lower().endswith(".pdf"):
-        return True
-    return response.content[:5] == b"%PDF-"
+    return PDF_SIGNATURE in response.content[:SIGNATURE_WINDOW]
+
+
+def is_pdf_file(path: str | Path) -> bool:
+    """True when the file on disk starts like a PDF."""
+    try:
+        with open(path, "rb") as f:
+            return PDF_SIGNATURE in f.read(SIGNATURE_WINDOW)
+    except OSError:
+        return False
 
 
 def _looks_like_login_page(response: requests.Response) -> bool:
@@ -149,11 +167,11 @@ def expected_pdf_path(url: str, save_dir: str) -> Path:
     """Where a PDF for `url` would be cached. No I/O.
 
     Shared by the writer and the pipeline's cache check so the two agree.
+    Named after a hash of the URL, so URLs ending in the same word
+    (`/pdf`, `/fulltext`) don't share a file.
     """
-    name = Path(url.split("?", 1)[0]).name or "paper"
-    if not name.lower().endswith(".pdf"):
-        name += ".pdf"
-    return Path(save_dir) / name
+    digest = hashlib.sha256(url.encode("utf-8")).hexdigest()[:16]
+    return Path(save_dir) / f"{digest}.pdf"
 
 
 def _save_pdf(content: bytes, url: str, save_dir: str) -> str:
@@ -164,6 +182,14 @@ def _save_pdf(content: bytes, url: str, save_dir: str) -> str:
 
 def _find_pdf_link(html: str, base: str) -> str | None:
     soup = BeautifulSoup(html, "html.parser")
+    # Most publishers name the article's own PDF in this meta tag. Prefer it
+    # over scanning links, which can hit a related article or supplement.
+    meta = soup.find("meta", attrs={"name": "citation_pdf_url"})
+    if meta:
+        content = meta.get("content")
+        if isinstance(content, str) and content.strip():
+            return urljoin(base, content.strip())
+
     for a in soup.find_all("a", href=True):
         # bs4 types an attribute as str | list[str]; join covers the rare
         # multi-valued case so the rest of the function sees one string.
