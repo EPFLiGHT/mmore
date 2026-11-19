@@ -16,7 +16,7 @@ from langchain_core.documents import Document
 from langchain_core.embeddings import Embeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_milvus.utils.sparse import BaseSparseEmbedding
-from pymilvus import AnnSearchRequest, MilvusClient, WeightedRanker
+from pymilvus import AnnSearchRequest, MilvusClient, RRFRanker, WeightedRanker
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from transformers.modeling_utils import PreTrainedModel
 from transformers.tokenization_utils_base import PreTrainedTokenizerBase
@@ -37,6 +37,13 @@ _MILVUS_QUERY_MAX_ROWS = 16384
 class RetrieverConfig:
     db: DBConfig = field(default_factory=DBConfig)
     hybrid_search_weight: float = 0.5
+    # How hybrid search fuses the dense and sparse results. "weighted" sums
+    # Milvus's normalized scores (hybrid_search_weight for dense); "rrf" sums
+    # reciprocal ranks 1 / (rrf_k + rank), so models whose scores live on
+    # different scales (e.g. SPLADE vs cosine) count equally. With "rrf",
+    # scores (and so min_score) are at most 2 / (rrf_k + 1).
+    hybrid_ranker: Literal["weighted", "rrf"] = "weighted"
+    rrf_k: int = 60
     k: int = 1
     collection_name: str = "my_docs"
     use_web: bool = False
@@ -57,10 +64,10 @@ class Retriever(BaseRetriever):
     use_web: bool
     reranker_model: Optional[PreTrainedModel]
     reranker_tokenizer: Optional[PreTrainedTokenizerBase]
+    hybrid_ranker: Literal["weighted", "rrf"] = "weighted"
+    rrf_k: int = 60
 
     _search_types = Literal["dense", "sparse", "hybrid"]
-
-    _search_weights = {"dense": 0, "sparse": 1}
 
     _retrieve_seconds: float = 0.0
     _rerank_seconds: float = 0.0
@@ -137,6 +144,8 @@ class Retriever(BaseRetriever):
             sparse_model=sparse_model,
             client=client,
             hybrid_search_weight=config.hybrid_search_weight,
+            hybrid_ranker=config.hybrid_ranker,
+            rrf_k=config.rrf_k,
             k=config.k,
             use_web=config.use_web,
             reranker_model=reranker_model,
@@ -207,7 +216,6 @@ class Retriever(BaseRetriever):
         assert search_type in get_args(self._search_types), (
             f"Invalid search_type: {search_type}. Must be 'dense', 'sparse', or 'hybrid'"
         )
-        search_weight = self._search_weights.get(search_type, self.hybrid_search_weight)
 
         # Combute both dense and sparse embeddings for the query
         dense_embedding, sparse_embedding = self.compute_query_embeddings(query)
@@ -256,22 +264,41 @@ class Retriever(BaseRetriever):
         if expr is not None:
             search_param_2["expr"] = expr
 
-        # Create AnnSearchRequest objects from the parameter dictionaries
-        request_1 = AnnSearchRequest(**search_param_1)
-        request_2 = AnnSearchRequest(**search_param_2)
+        if search_type in ("dense", "sparse"):
+            # A single search on the one field. Fusing with the other field at
+            # weight 0 would still rank its hits, and the weight is the dense one.
+            single = search_param_1 if search_type == "dense" else search_param_2
+            res = self.client.search(
+                collection_name=collection_name,
+                data=single["data"],
+                anns_field=single["anns_field"],
+                search_params=single["param"],
+                filter=expr or "",
+                limit=k,
+                output_fields=output_fields,
+                partition_names=partition_names,
+            )
+        else:
+            # Create AnnSearchRequest objects from the parameter dictionaries
+            request_1 = AnnSearchRequest(**search_param_1)
+            request_2 = AnnSearchRequest(**search_param_2)
 
-        # Call the Milvus hybrid_search to perform both searches and then rerank results.
-        # The WeightedRanker combined the scores from the dense and sparse searches
-        res = self.client.hybrid_search(
-            reqs=[request_1, request_2],  # List of AnnSearchRequests
-            ranker=WeightedRanker(
-                search_weight, 1 - search_weight
-            ),  # Reranking strategy
-            limit=k,
-            output_fields=output_fields,
-            collection_name=collection_name,
-            partition_names=partition_names,
-        )
+            # Call the Milvus hybrid_search to perform both searches and fuse
+            # the results (see RetrieverConfig.hybrid_ranker)
+            if self.hybrid_ranker == "rrf":
+                ranker = RRFRanker(self.rrf_k)
+            else:
+                ranker = WeightedRanker(
+                    self.hybrid_search_weight, 1 - self.hybrid_search_weight
+                )
+            res = self.client.hybrid_search(
+                reqs=[request_1, request_2],  # List of AnnSearchRequests
+                ranker=ranker,
+                limit=k,
+                output_fields=output_fields,
+                collection_name=collection_name,
+                partition_names=partition_names,
+            )
 
         # Apply the threshold of min_score
         return list(
