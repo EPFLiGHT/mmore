@@ -56,6 +56,7 @@ process = [
     "PyMuPDF",
     "marker-pdf>=1.10.2,<2",
     "surya-ocr>=0.8.3",
+    "openai>=1.30",  # enables NemotronVLMProcessor via integrate.api.nvidia.com
     "moviepy>=2.0",
     "mammoth>=1.8",
     "markdownify>=0.12",

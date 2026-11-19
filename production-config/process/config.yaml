@@ -5,6 +5,8 @@ dispatcher_config:
   distributed: false
   extract_images: true
   scheduler_file: $ROOT_OUT_DIR/scheduler-file.json #put absolute path!
+  processor_selection:
+    ".pdf": PDFProcessor # PFDProccesor set by default. Change to NemotronVLMProcessor to use NVIDIA Nemotron.
   process_batch_sizes:
     - URLProcessor: 40
     - DOCXProcessor: 100
@@ -23,6 +25,12 @@ dispatcher_config:
       - type: "automatic-speech-recognition"
       - sample_rate: 10
       - batch_size: 4
+
+    NemotronVLMProcessor:
+      - nemotron_model: "nvidia/nemotron-nano-12b-v2-vl"
+      - nemotron_dpi: 200
+      - nemotron_max_tokens: 4096
+      - nemotron_temperature: 0.0
 
     PDFProcessor:
       - PDFTEXT_CPU_WORKERS: 0
