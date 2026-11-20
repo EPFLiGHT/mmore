@@ -24,7 +24,7 @@ class WebsearchConfig:
       n_loops:            (int) Number of loops to run the process.
       max_searches:       (int) Max results to fetch per sub-query.
       max_retries:        (int) Max retries for search on rate limit (default: 3).
-      search_provider:    (str) Search provider: 'duckduckgo' (default, free) or 'tavily' (requires TAVILY_API_KEY, pip install "mmore[rag,websearch]").
+      search_provider:    (str) Search provider: 'duckduckgo' (default, free), 'tavily' (requires TAVILY_API_KEY, pip install "mmore[rag,websearch]"), or 'keenable' (no key required; optional KEENABLE_API_KEY).
       max_context_tokens: (int) Maximum number of context tokens for constructing prompts (default: 2048).
       fast_tokenizer:     (bool) If True, use a fast heuristic (~4 chars/token) instead of the LLM tokenizer (default: False).
       llm_config:         (dict) Passed to rag.llm.LLMConfig (keys: llm_name, max_new_tokens, temperature, etc.)
@@ -42,7 +42,7 @@ class WebsearchConfig:
 
     max_searches: int = 10
     max_retries: int = 3
-    search_provider: Literal["duckduckgo", "tavily"] = "duckduckgo"
+    search_provider: Literal["duckduckgo", "tavily", "keenable"] = "duckduckgo"
     max_context_tokens: int = 2048
     fast_tokenizer: bool = False
 
