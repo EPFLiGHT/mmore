@@ -1,10 +1,11 @@
 # 🌐 WebSearch Integration
 
 ## Overview
-The WebSearch integration uses the `ddgs` (DuckDuckGo Search) library with optional Tavily support. The implementation combines:
+The WebSearch integration uses the `ddgs` (DuckDuckGo Search) library, with optional Tavily and Keenable providers. The implementation combines:
 
 - **DuckDuckGo Search:** default provider — free, no API key needed. Install with `pip install "mmore[rag,websearch]"`.
-- **Tavily Search:** ptional higher-quality provider. Requires `TAVILY_API_KEY` environment variable. Install with `pip install "mmore[rag,websearch]"`.
+- **Tavily Search:** optional provider. Requires `TAVILY_API_KEY`. Install with `pip install "mmore[rag,websearch]"`.
+- **Keenable Search:** optional provider. Works without a key via the public endpoint; set `KEENABLE_API_KEY` for higher limits.
 - **LLM Integration:** to summarize and integrate retrieved web snippets with RAG results to provide a final answer
 
 This page describes the standalone `websearch` module.  
@@ -20,17 +21,24 @@ pip install "mmore[rag,websearch]"
 | Provider | Default | API Key Required | Notes |
 |---|---|---|---|
 | DuckDuckGo | ✅ Yes | ❌ No | Free, no setup needed |
-| Tavily | ❌ No | ✅ Yes (`TAVILY_API_KEY`) | Higher quality results |
+| Tavily | ❌ No | ✅ Yes (`TAVILY_API_KEY`) | Optional hosted provider |
+| Keenable | ❌ No | ❌ No (`KEENABLE_API_KEY` optional) | Keyless hosted provider |
 
 To use Tavily, set the environment variable:
 ```bash
 export TAVILY_API_KEY=your_key_here
 ```
 
+To use Keenable, set `search_provider: keenable`. A key is not required:
+```bash
+# optional, for higher limits
+export KEENABLE_API_KEY=your_key_here
+```
+
 Configure the provider in your config file:
 ```yaml
 websearch:
-    search_provider: "tavily"   # or "duckduckgo" (default)
+    search_provider: "keenable"   # or "duckduckgo" (default) or "tavily"
     max_retries: 3              # retries on rate limit
 ```
 

@@ -79,7 +79,7 @@ Dependencies are split by pipeline stage. Install only what you need:
 | `rag` | mmore's RAG pipeline (includes `index`) |
 | `api` | FastAPI servers |
 | `all` | Everything above |
-| `websearch` | Web search pipeline (DuckDuckGo + optional Tavily) |
+| `websearch` | Web search pipeline (DuckDuckGo + optional Tavily or Keenable) |
 | `cpu` | PyTorch (CPU) + torchvision, for a CPU-only setup |
 | `cu126` | PyTorch (CUDA 12.6) + torchvision, for a GPU setup |
 
@@ -179,7 +179,7 @@ To launch the mmore pipeline, follow the specialised instructions in the docs.
 
 5. [**:globe_with_meridians: Web Search**](https://EPFLiGHT.github.io/mmore/core_features/websearch.html)
    Augments RAG answers with live web search results using an iterative sub-query loop.
-   DuckDuckGo is the default provider (free, no API key needed). Tavily is available as an optional higher-quality provider.
+   DuckDuckGo is the default provider (free, no API key needed). Tavily and Keenable are available as optional providers; Keenable works without a key.
     ```bash
       # Install web search dependencies
       uv pip install "mmore[rag,websearch]"

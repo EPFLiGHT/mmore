@@ -379,7 +379,7 @@ def build_websearch_config() -> str:
     max_searches = prompt_int("Max searches per query", 5)
     provider = select(
         "Search provider",
-        choices=["duckduckgo"],
+        choices=["duckduckgo", "tavily", "keenable"],
         default="duckduckgo",
     )
 

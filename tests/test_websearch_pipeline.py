@@ -17,7 +17,7 @@ def make_pipeline(
     n_loops=1,
     use_summary=False,
     use_rag=False,
-    search_provider: Literal["duckduckgo", "tavily"] = "tavily",
+    search_provider: Literal["duckduckgo", "tavily", "keenable"] = "tavily",
     subqueries=("sub1",),
     **config_overrides,
 ) -> Any:
